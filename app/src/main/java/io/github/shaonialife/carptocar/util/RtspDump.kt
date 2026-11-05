@@ -2,6 +2,7 @@ package io.github.shaonialife.carptocar.util
 
 import android.util.Log
 import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -29,8 +30,22 @@ object RtspDump {
     var enabled: Boolean = true
 
     private val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
-    private val day = SimpleDateFormat("yyyyMMdd", Locale.US)
     private val lock = Any()
+    private const val HEX = "0123456789abcdef"
+    private val writer =
+        AsyncLogWriter("rtsp-log-writer") { batch, dropped ->
+            val base = dir ?: return@AsyncLogWriter
+            val file = File(base, "rtsp-${SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())}.log")
+            if (file.length() > MAX_FILE_BYTES) {
+                val backup = File(base, file.nameWithoutExtension + ".1.log")
+                backup.delete()
+                file.renameTo(backup)
+            }
+            FileOutputStream(file, true).writer(Charsets.UTF_8).buffered(64 * 1024).use { out ->
+                if (dropped > 0) out.append("LOG: 队列过载，省略 $dropped 条 RTSP 记录\n")
+                batch.forEach { out.append(it) }
+            }
+        }
 
     fun init(filesDir: File) {
         dir = filesDir
@@ -55,16 +70,9 @@ object RtspDump {
         body: ByteArray,
     ) {
         if (!enabled) return
-        val base = dir ?: return
+        if (dir == null) return
         runCatching {
             synchronized(lock) {
-                val name = "rtsp-${day.format(Date())}"
-                val file = File(base, "$name.log")
-                if (file.exists() && file.length() > MAX_FILE_BYTES) {
-                    val backup = File(base, "$name.1.log")
-                    backup.delete()
-                    file.renameTo(backup)
-                }
                 val text =
                     buildString {
                         append('[').append(stamp.format(Date())).append("] ").append(tag).append(' ').append(label).append('\n')
@@ -72,13 +80,16 @@ object RtspDump {
                         if (body.isNotEmpty()) {
                             val n = minOf(body.size, MAX_BODY_BYTES)
                             append("body=").append(body.size).append("B hex=")
-                            for (i in 0 until n) append("%02x".format(body[i]))
+                            for (i in 0 until n) {
+                                val value = body[i].toInt() and 0xff
+                                append(HEX[value ushr 4]).append(HEX[value and 15])
+                            }
                             if (body.size > n) append("…(truncated)")
                             append('\n')
                         }
                         append('\n')
                     }
-                file.appendText(text)
+                writer.append(text)
             }
         }.onFailure { Log.w("RtspDump", "write failed: ${it.message}") }
     }

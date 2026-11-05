@@ -235,12 +235,11 @@ object CarLifeHijack {
     private var requestedH = 0
 
     /**
-     * 首轮 `98311` 要报的编码分辨率 = **上次连过的车机画布**（[CarCanvasMemory]）。
+     * 首轮 `98311` 直接使用 Q4 固定画布（[CarCanvasMemory.DEFAULT]）。
      *
      * 引擎只在创建编码器之前认 98311 的宽高，而 CarLife+ 端口一开我们就得握手
      * （此时还没连车机、拿不到 `/info` 画布），首轮必然早于画布到达。所以只能用
-     * 「上次的画布」抢在引擎建编码器之前把值报对：同一台车第二次起就按画布编码。
-     * 无缓存时保持引擎默认 1280×720。
+     * Q4 已知的画布抢在引擎建编码器之前把值报对，首次安装和升级后的行为一致。
      */
     @Volatile
     private var initialCanvasW = CarCanvasMemory.DEFAULT.first
@@ -459,20 +458,11 @@ object CarLifeHijack {
         running.set(true)
         logSink = log
         appContext = context.applicationContext
-        // 上次连过的车机画布：首轮 98311 就按它申请，引擎才有可能在建编码器时就用对尺寸
-        // （详见 CarCanvasMemory 的说明）。没有缓存 = 首次连这台车，只能先用默认 1280×720。
-        val cachedCanvas = CarCanvasMemory.last(context)
-        initialCanvasW = cachedCanvas?.first ?: CarCanvasMemory.DEFAULT.first
-        initialCanvasH = cachedCanvas?.second ?: CarCanvasMemory.DEFAULT.second
+        // Q4 固定预置优先于旧缓存，避免升级后沿用此前的 720p 或其他车辆尺寸。
+        initialCanvasW = CarCanvasMemory.DEFAULT.first
+        initialCanvasH = CarCanvasMemory.DEFAULT.second
         log(
-            if (cachedCanvas != null) {
-                "CARLIFE: 上次车机画布 ${cachedCanvas.first}×${cachedCanvas.second}（缓存）" +
-                    "——首轮 98311 就按它申请，引擎建编码器即对齐"
-            } else {
-                "CARLIFE: 无车机画布缓存，首轮 98311 用默认 " +
-                    "${CarCanvasMemory.DEFAULT.first}×${CarCanvasMemory.DEFAULT.second}" +
-                    "（首次连某台车只能如此，第二次起自动对齐）"
-            },
+            "CARLIFE: Q4 首轮画布 $initialCanvasW×$initialCanvasH（固定预置，不依赖缓存或 CarPlay 时序）",
         )
         touchPressed = false
         touchCount = 0
@@ -701,7 +691,7 @@ object CarLifeHijack {
                         ?.putString(KEY_CONNECT_TYPE_PROBE_RESULT, line)
                         ?.apply()
                 },
-                // 首轮申请值 = **上次车机画布**（无缓存则引擎默认 1280×720）。
+                // 首轮申请值 = Q4 固定画布 1412×654。
                 // 引擎只在建编码器之前认这个值，早报才能让它按车机画布编码；等 AirPlay
                 // `/info` 到了再改（setRequestedResolution）已经晚了，引擎只回一个确认值、
                 // 码流尺寸不动（2026-11-04 奥迪 3810：申请 1412×654 实编 1280×720 → 整屏黑）。
@@ -1031,9 +1021,7 @@ object CarLifeHijack {
         requestedH = height
         if (CarCanvasMemory.remember(appContext, width, height)) {
             logSink?.invoke(
-                "CARLIFE: 已记住车机画布 ${width}×${height}（下次开机首轮 98311 就按它申请）" +
-                    "——引擎只在建编码器前认这个值：想让当前这轮也生效，" +
-                    "请强制停止 CarLife+ 后重开、再连一次",
+                "CARLIFE: 已记录车机画布 ${width}×$height（Q4 首轮预置 1412×654）",
             )
         }
         client?.setRequestedResolution(width, height)

@@ -120,13 +120,11 @@ class CarLifeHuClient(
      * 之前才认**：编码器起来后再改申请值，引擎只回一个确认值、实际编码尺寸不动
      * （2026-11-04 奥迪 3810：申请 1412×654@60，回 1280×720@20，重发多少次都是 720p）。
      *
-     * 默认 1280×720 是引擎白名单内的通用档（非标尺寸会 `reset2Default` 降回 720p，
-     * 逆向 `VideoResolution.getResolution` 实证）。真实车机画布由
-     * [io.github.shaonialife.carptocar.carlife.CarLifeHijack] 从「上次连过的车机」缓存里
-     * 取来传进来——因为 CarLife 端口先开、AirPlay `/info` 后到，等知道了画布再申请已经晚了。
+     * Q4 默认 1412×654，在 CarPlay /info 到达之前即提供正确画布。
+     * 后续相同尺寸的通告由 setRequestedResolution 的幂等检查跳过，不重复初始化。
      */
-    private val initialWidth: Int = 1280,
-    private val initialHeight: Int = 720,
+    private val initialWidth: Int = CarCanvasMemory.DEFAULT.first,
+    private val initialHeight: Int = CarCanvasMemory.DEFAULT.second,
     /**
      * 98311 的 `needAdapterScreen`（字段 9）：请引擎在「车机画面比例 ≠ 编码比例」时做
      * 等比适配而不是拉伸。默认 true——车机屏几乎都不是 16:9（奥迪 MIB3 是 21:9）。

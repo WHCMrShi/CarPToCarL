@@ -2209,10 +2209,7 @@ class AirPlayClient(
             return baseline
         }
 
-        // ---- 1) AAC-LC 通路：MainHighAudio(102) 优先，其次 type=100 ----
-        // 车机若在 102/media 上声明 AAC-LC，说明它有一条独立的高质量媒体音频通路
-        // （真 iPhone 媒体音频走这条）。往 100 推 PCM 的表现为：SETUP 回 200、给 dataPort、
-        // 但 controlPort=0、/feedback 里 sampleTime 恒 0，约 6.5s 后整条会话被拆。
+        // AAC-LC 保留为回退候选。Q4 优先走已声明的 PCM，避免 48k 音源重采样和编码。
         val aac = mutableListOf<AudioProfile>()
         val aacOptions =
             listOf(
@@ -2277,8 +2274,8 @@ class AirPlayClient(
         // 「兼容档」= 强制走 PCM 旧通路（跳过 AAC）：AAC-LC 在某些车机上会被 SETUP 直接
         // 拒掉，留一个人工入口，免得自动候选每次都先撞一次墙。
         val ordered =
-            (if (preferCompat) emptyList() else aac.distinctBy { it.key }) +
-                pcm.sortedBy { priority(it.audioType) }
+            pcm.sortedBy { priority(it.audioType) } +
+                (if (preferCompat) emptyList() else aac.distinctBy { it.key })
         if (ordered.isEmpty()) {
             log(
                 "AIRPLAY: 车机未声明可用的 AAC-LC / PCM 立体声格式" +

@@ -2,7 +2,7 @@ package io.github.shaonialife.carptocar.util
 
 import android.content.Context
 import java.io.File
-import java.io.FileWriter
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -11,11 +11,25 @@ import java.util.Locale
  * 全局调试文件日志（files/main_debug.log）。
  *
  * 荣耀机型 logcat 被 HKS 加密，本文件是 adb 侧唯一调试通道（run-as 读取）。
- * MainActivity 与 CarPlayService（投影生命周期诊断）共用同一把锁，避免同文件并发写交叉。
+ * MainActivity 与 CarPlayService 只入队，由单工作线程批量落盘；导出前等待此前记录写完。
  */
 object DebugFileLog {
-    private val lock = Any()
     private val timestamp = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+
+    @Volatile
+    private var directory: File? = null
+    private val writer =
+        AsyncLogWriter("debug-log-writer") { batch, dropped ->
+            val base = directory ?: return@AsyncLogWriter
+            val file = File(base, "main_debug.log")
+            if (file.length() > 2_000_000) {
+                file.writeText("$SESSION_MARKER\n", Charsets.UTF_8)
+            }
+            FileOutputStream(file, true).writer(Charsets.UTF_8).buffered(64 * 1024).use { out ->
+                if (dropped > 0) out.append("LOG: 队列过载，省略 $dropped 条旧记录\n")
+                batch.forEach { out.append(it) }
+            }
+        }
 
     /**
      * 「本次进程启动」标记行。日志文件跨进程保留（最多 2MB），用户反馈问题时
@@ -48,6 +62,7 @@ object DebugFileLog {
         currentSessionOnly: Boolean,
     ): String? =
         runCatching {
+            writer.flush()
             val text = File(context.filesDir, "main_debug.log").readText(Charsets.UTF_8)
             if (currentSessionOnly) currentSessionSlice(text) else text
         }.getOrNull()
@@ -71,35 +86,9 @@ object DebugFileLog {
         context: Context,
         message: String,
     ) {
-        try {
-            synchronized(lock) {
-                val file = File(context.filesDir, "main_debug.log")
-                // 超限直接删会连「本次启动」标记一起丢（导出就退化为全量历史）。
-                // 删后立即重写一条标记，保证截断后的新文件仍能按会话切分。
-                if (file.length() > 2_000_000) {
-                    file.delete()
-                    FileWriter(
-                        file,
-                        true,
-                    ).use {
-                        it
-                            .append('[')
-                            .append(timestamp.format(Date()))
-                            .append("] ")
-                            .append(SESSION_MARKER)
-                            .append('\n')
-                    }
-                }
-                FileWriter(file, true).use { writer ->
-                    writer
-                        .append('[')
-                        .append(timestamp.format(Date()))
-                        .append("] ")
-                        .append(message)
-                        .append('\n')
-                }
-            }
-        } catch (_: Throwable) {
+        directory = context.filesDir
+        synchronized(timestamp) {
+            writer.append("[${timestamp.format(Date())}] ${message.take(16_000)}\n")
         }
     }
 }

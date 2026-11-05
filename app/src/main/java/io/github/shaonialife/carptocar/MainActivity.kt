@@ -173,12 +173,28 @@ class MainActivity : AppCompatActivity() {
     /** MIB3 控制链路的首页监听（onDestroy 摘掉，避免单例持有 Activity）。 */
     private var mib3LinkListener: (() -> Unit)? = null
 
+    private val consoleLock = Any()
+    private val pendingConsole = StringBuilder()
+    private var consoleScheduled = false
+    private val flushConsole =
+        Runnable {
+            val text =
+                synchronized(consoleLock) {
+                    val batch = pendingConsole.toString()
+                    pendingConsole.setLength(0)
+                    consoleScheduled = false
+                    batch
+                }
+            if (!isFinishing && !isDestroyed) appendConsole(text)
+        }
     private val logListener: (String) -> Unit = { line ->
-        runOnUiThread {
-            // 与上面 uiHintSink 保持一致：`||` 等于「只要没同时满足两个条件就继续用视图」，
-            // finish() 之后到 onDestroy 之间（isFinishing=true、isDestroyed=false）仍会
-            // 往正在拆除的控件里追加文本。
-            if (!isFinishing && !isDestroyed) appendConsole(line)
+        synchronized(consoleLock) {
+            pendingConsole.append(line)
+            if (pendingConsole.length > 40_000) pendingConsole.delete(0, pendingConsole.length - 20_000)
+            if (!consoleScheduled) {
+                consoleScheduled = true
+                mainHandler.postDelayed(flushConsole, 100)
+            }
         }
     }
 
@@ -2798,6 +2814,11 @@ class MainActivity : AppCompatActivity() {
         // 只解绑"挂屏"，不动会话——连接由前台服务保活、对象归 SessionController 持有；
         // 显式断开请用「断开连接」按钮（任意实例都能断到真管线）。
         if (SessionController.logListener === logListener) SessionController.logListener = null
+        mainHandler.removeCallbacks(flushConsole)
+        synchronized(consoleLock) {
+            pendingConsole.setLength(0)
+            consoleScheduled = false
+        }
         if (SessionController.uiHintSink === uiHintSinkRef) SessionController.uiHintSink = null
         SessionController.dialogSink = null
         if (SessionController.ssidSink === ssidSink) SessionController.ssidSink = null

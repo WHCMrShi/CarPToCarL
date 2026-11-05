@@ -2334,16 +2334,17 @@ object SessionController {
             val identity = client.receiverIdentity()
             // 音频封装参数已定案（见 AudioTuning），不再提供切换
             val tuning = AudioTuning.RAW_SPF
-            val entry = AudioProfileMemory.load(context.applicationContext, identity)
+            var entry = AudioProfileMemory.load(context.applicationContext, identity)
             if (entry.disabled) {
                 // 以前「全部档位都导致拆链」会自动退成只推视频，并要用户去弹窗里手点
-                // 「清除记忆」。现在音频通路已换成 AAC-LC 且实测能稳定跑满 147s，
+                // 「清除记忆」。Q4 现在优先尝试原生 48k PCM，历史拒绝结论需要重新验证，
                 // 旧结论不再可信：用户既然主动选了「开启声音」，就直接清记忆重试。
                 AudioProfileMemory.clearAll(context.applicationContext)
+                entry = AudioProfileMemory.load(context.applicationContext, identity)
                 appendLog("AUDIO: 本车机（$identity）有「全部档位拆链」的旧记忆，已自动清除并重试")
             }
             val candidates = client.audioCandidates(preferCompat = audioPreferCompat)
-            val ordered = AudioProfileMemory.order(candidates, entry)
+            val ordered = AudioProfileMemory.order(candidates, entry, preferNativePcm = !audioPreferCompat)
             if (ordered.isEmpty()) {
                 appendLog("AUDIO: 没有可用音频档位（候选=${candidates.map { it.label }}）——仅推视频")
                 return false

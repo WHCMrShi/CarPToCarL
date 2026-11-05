@@ -13,6 +13,25 @@ import org.junit.Test
  * 音频不兼容，只能按「起流后的存活时间」反推，并把结论按车机持久化，下次连接换档。
  */
 class AudioProfileMemoryTest {
+    @Test
+    fun q4NativePcmWinsOverRememberedAacButRejectedPcmCanFallBack() {
+        val pcm = AudioProfile("media", 1L shl 15, 48_000, 250)
+        val aac = AudioProfile("media", 1L shl 22, 44_100, 250, 102L, AudioCodec.AAC_LC)
+        val candidates = listOf(pcm, aac)
+        assertEquals(
+            pcm,
+            AudioProfileMemory.order(candidates, AudioProfileMemory.Entry(working = aac.key)).first(),
+        )
+        assertEquals(
+            aac,
+            AudioProfileMemory
+                .order(
+                    candidates,
+                    AudioProfileMemory.Entry(working = aac.key, rejected = setOf(pcm.key)),
+                ).first(),
+        )
+    }
+
     // 这台车机的真实声明：media 档只有 44.1k，compatibility 档 48k/44.1k 都有
     private val hondaCandidates =
         listOf(

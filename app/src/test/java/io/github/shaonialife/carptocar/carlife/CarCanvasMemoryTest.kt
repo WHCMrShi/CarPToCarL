@@ -13,6 +13,11 @@ import org.junit.Test
  */
 class CarCanvasMemoryTest {
     @Test
+    fun q4CanvasIsAvailableBeforeAirPlayConnects() {
+        assertEquals(1412 to 654, CarCanvasMemory.DEFAULT)
+    }
+
+    @Test
     fun `常见车机画布全部保留`() {
         assertEquals(1412 to 654, CarCanvasMemory.sanitize(1412, 654)) // 奥迪 MIB3 G35
         assertEquals(1280 to 720, CarCanvasMemory.sanitize(1280, 720)) // 引擎默认档

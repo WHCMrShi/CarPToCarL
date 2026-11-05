@@ -16,8 +16,8 @@ import android.content.Context
  * 那时**还没连车机**，AirPlay `/info` 里才有车机画布（往往晚 10~20 秒）。
  * 结果首轮 98311 永远报默认 1280×720，等知道了画布已经晚了。
  *
- * 解法只有「记住上次的」：同一台车下次开机，先按上次画布申请，引擎就会按画布建编码器。
- * 首次连一台新车仍会走默认值——这是信息论决定的，只能靠第二次。
+ * Q4 专用分支已知目标画布为 1412×654，首轮直接按固定预置申请，不再依赖上次缓存。
+ * 缓存仍记录实际通告值，供诊断使用。
  *
  * ## 只记「车机真正通告过的画布」
  *
@@ -30,8 +30,8 @@ object CarCanvasMemory {
     private const val KEY_WIDTH = "last_display_width"
     private const val KEY_HEIGHT = "last_display_height"
 
-    /** 无缓存时的引擎默认档（引擎白名单内、所有车机都吃得下）。 */
-    val DEFAULT: Pair<Int, Int> = 1280 to 720
+    /** Q4 专用分支：在 CarPlay /info 到达之前就使用目标车辆的画布。 */
+    val DEFAULT: Pair<Int, Int> = 1412 to 654
 
     /** 合理画布范围，与 SPS 合理性判据（[H264Sps] 调用方的校验）保持一致。 */
     private val WIDTH_RANGE = 320..4096
