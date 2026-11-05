@@ -45,9 +45,6 @@ SessionController 同时协调连接、网络、音视频和恢复，是后续�
 
 ## 构建与验证现状
 
-以下为建立基线时的记录。2026-11-05 已在新工作目录补齐本地工具链，wrapper 已使用官方源；
-最新验证结果见 `docs/local-build-windows.md`。
-
 - Android/Kotlin 工程：minSdk 31、compileSdk/targetSdk 34、JVM 17；AGP 8.7.3、Kotlin 2.0.21。
 - Gradle wrapper 指向原作者本机的
   `C:/Users/jjuugk/Desktop/cardeck/.tools/gradle-8.10.2-bin.zip`，新机器无法直接复用。
