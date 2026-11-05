@@ -1,5 +1,7 @@
 param(
-    [string[]]$Tasks = @('spotlessCheck', ':app:testDebugUnitTest', ':app:lintDebug', ':app:assembleDebug')
+    [string[]]$Tasks = @('spotlessCheck', ':app:testDebugUnitTest', ':app:lintDebug', ':app:assembleDebug'),
+    [string[]]$GradleArguments = @(),
+    [switch]$NoDaemon
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,15 +19,19 @@ if (-not (Test-Path (Join-Path $sdk 'platforms/android-34/android.jar'))) {
 $previousJava = $env:JAVA_HOME
 $previousSdk = $env:ANDROID_HOME
 $previousGradle = $env:GRADLE_USER_HOME
+$previousAndroidUser = $env:ANDROID_USER_HOME
 try {
     $env:JAVA_HOME = $jdk.FullName
     $env:ANDROID_HOME = $sdk
     $env:GRADLE_USER_HOME = Join-Path $toolsDir 'gradle-user-home'
+    $env:ANDROID_USER_HOME = Join-Path $toolsDir 'android-user-home'
+    New-Item -ItemType Directory -Force -Path $env:ANDROID_USER_HOME | Out-Null
     Push-Location $projectRoot
     try {
         $gradle = Join-Path $toolsDir 'gradle-8.10.2/bin/gradle.bat'
         if (-not (Test-Path $gradle)) { $gradle = Join-Path $projectRoot 'gradlew.bat' }
-        & $gradle @Tasks --console=plain
+        if ($NoDaemon) { $GradleArguments += '--no-daemon' }
+        & $gradle @Tasks @GradleArguments --console=plain
         if ($LASTEXITCODE -ne 0) { throw "Gradle failed with exit code $LASTEXITCODE" }
     } finally {
         Pop-Location
@@ -34,4 +40,5 @@ try {
     $env:JAVA_HOME = $previousJava
     $env:ANDROID_HOME = $previousSdk
     $env:GRADLE_USER_HOME = $previousGradle
+    $env:ANDROID_USER_HOME = $previousAndroidUser
 }
