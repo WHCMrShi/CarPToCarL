@@ -36,7 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * 采集：`AudioPlaybackCapture`（Android 10+）捕获手机端其他应用播放的媒体/导航音频
  * （需要 MediaProjection——与镜像模式的同一授权）。每包 [SAMPLES_PER_PACKET] 样本帧
- * （48000Hz 立体声 16bit = 2048B 负载，总包 ~2084B，不超接收端 4096B 收包缓冲）。
+ * （立体声 16bit = 1408B 负载，UDP 载荷 1444B，保持已有包长）。
  */
 class AudioSender(
     private val host: String,
@@ -421,7 +421,13 @@ class AudioSender(
     }
 
     /** 直通模式下的帧对齐累积缓冲（把任意大小的注入 PCM 切成固定帧长）。 */
-    private val passthroughBuffer = java.io.ByteArrayOutputStream()
+    private val passthroughBuffer = java.io.ByteArrayOutputStream() // AAC 回退路径
+    private val pcmFrames = PcmFrameBuffer(PACKET_BYTES)
+    private val pcmPackets by lazy { PcmPacketSealer(streamKey, streamType) }
+    private val pcmDatagram = DatagramPacket(ByteArray(0), 0)
+    private val forwardPcmFrame = PcmFrameConsumer { source, offset ->
+        running.get() && dispatchPcm(source, offset, PACKET_BYTES)
+    }
 
     /** 最近一次收到**真实** PCM 的时刻（uptimeMillis）；静音保活据此判断要不要补帧。 */
     @Volatile
@@ -519,7 +525,7 @@ class AudioSender(
      * 外部注入 PCM（CarLife 直通）。
      *
      * **必须同步**：媒体（9240）与 TTS（9241）是两条独立读线程，2026-10-27 接入导航播报
-     * 后两路会同时进来；[passthroughBuffer] 是非线程安全的 ByteArrayOutputStream，
+     * 后两路会同时进来；组帧缓冲与发送工作区由同一把锁保护，
      * 不加锁会出现半帧交错（爆音/破音）甚至丢数据。
      */
     @Synchronized
@@ -530,11 +536,21 @@ class AudioSender(
         srcChannels: Int = 2,
     ) {
         if (!running.get() || record != null) return // 采集模式在跑时不接受注入
-        if (size <= 0) return
+        if (size <= 0 || size > srcPcm.size) return
         // 真实 PCM 到场：静音保活立刻让位（这一行必须在 alignPcm 之前，
         // 否则重采样失败时空转判定会误以为「一直没声音」）
         lastRealFeedAt = android.os.SystemClock.uptimeMillis()
-        val resampled = alignPcm(srcPcm, size, srcRate, srcChannels) ?: return
+        if (codec == AudioCodec.PCM) {
+            // CarLife 合并音频已在源端混音；原生同格式直接组帧，不重采样、不复制整块输入。
+            if ((srcRate <= 0 || srcRate == sampleRate) && srcChannels != 1) {
+                pcmFrames.feed(srcPcm, size, forwardPcmFrame)
+            } else {
+                val aligned = alignPcm(srcPcm, size, srcRate, srcChannels)
+                pcmFrames.feed(aligned, aligned.size, forwardPcmFrame)
+            }
+            return
+        }
+        val resampled = alignPcm(srcPcm, size, srcRate, srcChannels)
         // 累积到固定帧长，凑满一帧才发（PCM 通路逐包、AAC 通路逐帧）
         val frameBytes = framePcmBytes
         passthroughBuffer.write(resampled, 0, resampled.size)
@@ -608,27 +624,21 @@ class AudioSender(
     }
 
     /** 走与采集循环一致的封包/编码/发送路径（[feedPcm] 与采集循环共用）。 */
-    private fun dispatchPcm(pcm: ByteArray) {
-        try {
-            val payloads: List<ByteArray> =
-                if (codec == AudioCodec.AAC_LC) {
-                    val encoder = aacEncoder ?: return
-                    encoder.encode(pcm, pcm.size)
-                } else {
-                    listOf(pcm)
-                }
-            if (payloads.isEmpty()) return
-            var sendFailed = false
-            for (payload in payloads) {
-                if (!sendPayload(payload)) {
-                    sendFailed = true
-                    break
-                }
+    private fun dispatchPcm(pcm: ByteArray, offset: Int = 0, size: Int = pcm.size): Boolean {
+        return try {
+            if (codec == AudioCodec.PCM) {
+                sendPayload(pcm, offset, size).also { if (!it) stop() }
+            } else {
+                val encoder = aacEncoder ?: return false
+                val payloads = encoder.encode(pcm, size)
+                val success = payloads.all { sendPayload(it) }
+                if (!success) stop()
+                success
             }
-            if (sendFailed) stop()
         } catch (error: Throwable) {
             log("AUDIO: 直通注入异常 - ${error.message}")
             stop()
+            false
         }
     }
 
@@ -655,7 +665,10 @@ class AudioSender(
         keepAliveThread?.interrupt()
         keepAliveThread = null
         thread = null
-        passthroughBuffer.reset()
+        synchronized(this) {
+            pcmFrames.clear()
+            passthroughBuffer.reset()
+        }
         restorePhoneMedia()
         if (syncSent > 0 && syncIcmpDeferrals > 0) {
             log(
@@ -905,15 +918,26 @@ class AudioSender(
 
     /** 封包 + 发送一包（同步更新 seq/ts/nonce 游标）。返回 false 表示链路已断。 */
     @Synchronized
-    private fun sendPayload(payload: ByteArray): Boolean {
-        val wire = sealPacket(payload, sequence, timestamp, nonceCounter, markerPending)
+    private fun sendPayload(payload: ByteArray, offset: Int = 0, size: Int = payload.size): Boolean {
+        if (!running.get()) return false
+        val client = socket ?: return false
+        val wire = if (codec == AudioCodec.PCM) {
+            require(size == PACKET_BYTES)
+            pcmPackets.seal(payload, offset, sequence, timestamp, nonceCounter, markerPending)
+        } else {
+            sealPacket(payload, sequence, timestamp, nonceCounter, markerPending)
+        }
         markerPending = false
         sequence = (sequence + 1) and 0xFFFF
         timestamp += samplesPerPacket
         nonceCounter++
-        val client = socket ?: return false
         return try {
-            client.send(DatagramPacket(wire, wire.size))
+            if (codec == AudioCodec.PCM) {
+                pcmDatagram.setData(wire, 0, wire.size)
+                client.send(pcmDatagram)
+            } else {
+                client.send(DatagramPacket(wire, wire.size))
+            }
             packetsSent++
             bytesSent += wire.size
             true
