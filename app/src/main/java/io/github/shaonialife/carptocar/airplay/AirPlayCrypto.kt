@@ -119,8 +119,13 @@ object AirPlayCrypto {
 
         /** 原地异或密钥流（加密与解密同一操作）。 */
         fun applyKeystream(data: ByteArray) {
-            if (data.isEmpty()) return
-            cipher.processBytes(data, 0, data.size, data, 0)
+            applyKeystream(data, 0, data.size)
+        }
+
+        fun applyKeystream(data: ByteArray, offset: Int, size: Int) {
+            require(offset >= 0 && size >= 0 && offset <= data.size - size)
+            if (size == 0) return
+            cipher.processBytes(data, offset, size, data, offset)
         }
     }
 

@@ -151,7 +151,7 @@ class VideoSender(
 
     /** 直通模式：最近一个 IDR 的 NAL（空闲时重发，防止车机超时拆链）。 */
     @Volatile
-    private var lastIdrNals: List<ByteArray>? = null
+    private var lastIdrNals: List<NalSlice>? = null
 
     /**
      * 最近一次成功发出的 csd（SPS/PPS NAL，含 NAL 头、不含起始码）。
@@ -161,7 +161,7 @@ class VideoSender(
      * 缓存它就能在源重启后立刻用旧参数重发 config 兜底（新 SPS 到达时再覆盖）。
      */
     @Volatile
-    private var cachedCsd: List<ByteArray>? = null
+    private var cachedCsd: List<NalSlice>? = null
 
     /** 已发出的 SPS 字节（用于识别「源换了分辨率/档位」→ 必须重发 VideoConfig）。 */
     @Volatile
@@ -222,6 +222,8 @@ class VideoSender(
     /** AES-CTR 密钥流实例：状态必须跨帧连续（每帧新建会导致对端解出乱码）。 */
     private val aesStream: AirPlayCrypto.Aes128CtrStream? =
         (frameCipher as? StreamFrameCipher.AesCtr)?.let { AirPlayCrypto.Aes128CtrStream(it.key, it.iv) }
+
+    private val frameWorkspace = VideoFrameWorkspace(frameCipher, aesStream)
 
     /** 上一次屏幕流 keepAlive 的时刻（uptimeMillis；0 = 尚未发过）。 */
     private var lastKeepAliveAt = 0L
@@ -628,7 +630,7 @@ class VideoSender(
         val nals = splitAnnexB(annexB)
         val sps = nals.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 7 } ?: return
         val pps = nals.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 8 } ?: return
-        cachedCsd = listOf(sps, pps)
+        cachedCsd = listOf(sps.ownedCopy(), pps.ownedCopy())
         log("VIDEO: 已用缓存 SPS/PPS 预置 csd（${sps.size}B/${pps.size}B）")
     }
 
@@ -731,7 +733,7 @@ class VideoSender(
             deliveryGate.summaryIfDue(writtenAtMs)?.let { log(it.describe()) }
             lastFrameAtMs = writtenAtMs
             if (keyFrame || nalUnits.any { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 5 }) {
-                lastIdrNals = nalUnits
+                lastIdrNals = nalUnits.map { it.ownedCopy() }
             }
             true
         } catch (error: Exception) {
@@ -896,25 +898,25 @@ class VideoSender(
     }
 
     /** 本帧携带的 SPS 是否与已发出的那份一致（true = 无需重发 config）。 */
-    private fun spsMatchesSent(nalUnits: List<ByteArray>): Boolean {
+    private fun spsMatchesSent(nalUnits: List<NalSlice>): Boolean {
         val sps = nalUnits.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 7 } ?: return true
         val sent = sentSps ?: return false
-        return sent.contentEquals(sps)
+        return sps.matches(sent)
     }
 
     /** 从一组 NAL 里取 SPS/PPS 组装 avcC 并发出 VideoConfig。 */
     private fun sendConfigFromNals(
-        nalUnits: List<ByteArray>,
+        nalUnits: List<NalSlice>,
         output: java.io.OutputStream,
     ) {
-        val sps = nalUnits.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 7 }
-        val pps = nalUnits.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 8 }
+        val sps = nalUnits.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 7 }?.copyBytes()
+        val pps = nalUnits.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 8 }?.copyBytes()
         if (sps == null || pps == null) {
             log("VIDEO: csd 缺少 SPS/PPS（${nalUnits.size} 个 NAL），跳过 config")
             return
         }
         // 记住这份 csd：源重启后新 IDR 若不带 SPS/PPS，靠它兜底重发 config。
-        cachedCsd = listOf(sps, pps)
+        cachedCsd = listOf(NalSlice(sps, 0, sps.size), NalSlice(pps, 0, pps.size))
         sentSps = sps.copyOf()
         // 换参数后旧 IDR 与新车机 avcC 不再匹配，不能再用它做空闲重发。
         lastIdrNals = null
@@ -1139,7 +1141,7 @@ class VideoSender(
 
     /** 把一组 NAL 打包成 4B 长度前缀流，加密后作为视频帧发出。 */
     private fun sendFrameFromNals(
-        nalUnits: List<ByteArray>,
+        nalUnits: List<NalSlice>,
         keyFrame: Boolean,
         output: java.io.OutputStream,
     ) {
@@ -1148,17 +1150,7 @@ class VideoSender(
             return
         }
         if (nalUnits.isEmpty()) return
-        val size = nalUnits.sumOf { it.size + 4 }
-
-        val packed = ByteArrayOutputStream(size)
-        for (nal in nalUnits) {
-            packed.write((nal.size ushr 24) and 0xFF)
-            packed.write((nal.size ushr 16) and 0xFF)
-            packed.write((nal.size ushr 8) and 0xFF)
-            packed.write(nal.size and 0xFF)
-            packed.write(nal)
-        }
-        val plain = packed.toByteArray()
+        val size = AnnexBNals.avccSize(nalUnits)
 
         // 加密方式按会话的 et 选择（catplay ScreenFrameCodec）：
         //  - ChaCha：header 作 AAD，body 长度含 16B tag；
@@ -1170,28 +1162,18 @@ class VideoSender(
             val header =
                 buildHeader(
                     OP_FRAME,
-                    if (frameCipher is StreamFrameCipher.ChaCha) plain.size + TAG_SIZE else plain.size,
+                    if (frameCipher is StreamFrameCipher.ChaCha) size + TAG_SIZE else size,
                 )
-            val sealed =
-                when (val cipher = frameCipher) {
-                    is StreamFrameCipher.ChaCha ->
-                        AirPlayCrypto.chachaSeal(cipher.key, AirPlayCrypto.nonce64(frameCounter), plain, header)
-                    is StreamFrameCipher.AesCtr -> {
-                        val encrypted = plain.copyOf()
-                        aesStream?.applyKeystream(encrypted)
-                        encrypted
-                    }
-                }
+            val wire = frameWorkspace.seal(nalUnits, header, frameCounter)
             frameCounter++
-            output.write(header)
-            output.write(sealed)
+            output.write(wire, 0, frameWorkspace.size)
             output.flush()
         }
         framesSent++
         framesSinceKeepAlive++
-        bytesSinceKeepAlive += plain.size.toLong()
+        bytesSinceKeepAlive += size.toLong()
         if (!suppressFrameLog && (keyFrame || framesSent <= 3 || framesSent % 150 == 0L)) {
-            log("VIDEO: 帧 #$framesSent ${plain.size}B${if (keyFrame) " (key)" else ""} 已发送")
+            log("VIDEO: 帧 #$framesSent ${size}B${if (keyFrame) " (key)" else ""} 已发送")
         }
     }
 
@@ -1230,38 +1212,7 @@ class VideoSender(
     }
 
     /** 按 00 00 00 01 / 00 00 01 起始码切分 AnnexB 码流为 NAL 列表。 */
-    private fun splitAnnexB(bytes: ByteArray): List<ByteArray> {
-        val units = ArrayList<ByteArray>()
-        val starts = ArrayList<Int>()
-        var index = 0
-        while (index + 3 < bytes.size) {
-            if (bytes[index] == 0.toByte() && bytes[index + 1] == 0.toByte()) {
-                if (bytes[index + 2] == 1.toByte()) {
-                    starts += index
-                    index += 3
-                    continue
-                }
-                if (index + 3 < bytes.size && bytes[index + 2] == 0.toByte() && bytes[index + 3] == 1.toByte()) {
-                    starts += index
-                    index += 4
-                    continue
-                }
-            }
-            index++
-        }
-        if (starts.isEmpty()) {
-            if (bytes.isNotEmpty()) units += bytes
-            return units
-        }
-        for (unit in 0 until starts.size) {
-            val start = starts[unit]
-            val prefix = if (bytes[start + 2] == 1.toByte()) 3 else 4
-            val bodyStart = start + prefix
-            val bodyEnd = if (unit + 1 < starts.size) starts[unit + 1] else bytes.size
-            if (bodyEnd > bodyStart) units += bytes.copyOfRange(bodyStart, bodyEnd)
-        }
-        return units
-    }
+    private fun splitAnnexB(bytes: ByteArray): List<NalSlice> = AnnexBNals.split(bytes)
 
     companion object {
         private const val HEADER_LEN = 128
