@@ -45,4 +45,38 @@ class AsyncLogWriterTest {
         assertTrue(writer.flush())
         assertEquals(listOf("abcdefghij", "A", "B"), lines)
     }
+    @Test
+    fun sinkFailureMakesFlushReportIncompleteEvenAfterRecovery() {
+        var fail = true
+        val writer = AsyncLogWriter("test-failure") { _, _ ->
+            if (fail) throw java.io.IOException("disk full")
+        }
+        writer.append("lost")
+        assertTrue(!writer.flush())
+        fail = false
+        writer.append("recovered")
+        assertTrue(!writer.flush()) // 已丢失的批次不能因后续成功而宣称完整。
+    }
+
+    @Test
+    fun flushTimeoutAndInterruptionAreReported() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val writer = AsyncLogWriter("test-timeout") { _, _ ->
+            entered.countDown()
+            check(release.await(5, TimeUnit.SECONDS))
+        }
+        writer.append("pending")
+        assertTrue(entered.await(2, TimeUnit.SECONDS))
+        try {
+            assertTrue(!writer.flush(10))
+            Thread.currentThread().interrupt()
+            assertTrue(!writer.flush())
+            assertTrue(Thread.currentThread().isInterrupted)
+        } finally {
+            Thread.interrupted()
+            release.countDown()
+        }
+        assertTrue(writer.flush())
+    }
 }

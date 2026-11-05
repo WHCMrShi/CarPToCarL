@@ -168,7 +168,7 @@ object AudioProfileMemory {
         val safe = if (allRejected) rest else rest.filter { it.key !in rejected }
         val risky = if (allRejected) emptyList() else rest.filter { it.key in rejected }
         val ordered = (listOfNotNull(working) + safe + risky).distinctBy { it.key }
-        // Q4 已验证的原生媒体通路优先于历史 AAC 成功记录；明确失败的 PCM 仍保留降级顺序。
+        // Q4 已验证支持此档：每轮重新尝试原生 PCM，旧拒绝或临时 SETUP 失败不能永久锁定 AAC。
         val native =
             ordered.firstOrNull {
                 preferNativePcm &&
@@ -177,8 +177,7 @@ object AudioProfileMemory {
                     it.codec == AudioCodec.PCM &&
                     it.sampleRate == 48_000 &&
                     it.formatBit == (1L shl 15) &&
-                    !it.isInput &&
-                    it.key !in rejected
+                    !it.isInput
             }
         return if (native == null) ordered else listOf(native) + ordered.filter { it.key != native.key }
     }

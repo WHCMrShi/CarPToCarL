@@ -15,6 +15,7 @@ internal class AsyncLogWriter(
     private var chars = 0
     private var dropped = 0
     private var scheduled = false
+    private var writeFailed = false // 仅工作线程访问；记录本进程曾丢失的写入。
     private val worker =
         Executors.newSingleThreadScheduledExecutor { task ->
             Thread(task, name).apply { isDaemon = true }
@@ -56,14 +57,25 @@ internal class AsyncLogWriter(
                 dropped = 0
             }
             // IO 失败也不让后台线程退出或让调用方承担异常；后续批次仍可重试。
-            runCatching { sink(batch, lost) }
+            runCatching { sink(batch, lost) }.onFailure { writeFailed = true }
         }
     }
 
     /** 导出在后台调用，等此前入队记录落盘；失败返回 false，避免无限等待。 */
-    fun flush(): Boolean =
-        runCatching {
-            worker.submit { drain() }.get(5, TimeUnit.SECONDS)
-            true
-        }.getOrDefault(false)
+    fun flush(timeoutMillis: Long = 5_000): Boolean {
+        val pending = worker.submit<Boolean> {
+            drain()
+            !writeFailed
+        }
+        return try {
+            pending.get(timeoutMillis, TimeUnit.MILLISECONDS)
+        } catch (_: InterruptedException) {
+            pending.cancel(false)
+            Thread.currentThread().interrupt()
+            false
+        } catch (_: Exception) {
+            pending.cancel(false)
+            false
+        }
+    }
 }

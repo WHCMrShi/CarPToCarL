@@ -14,7 +14,7 @@ import org.junit.Test
  */
 class AudioProfileMemoryTest {
     @Test
-    fun q4NativePcmWinsOverRememberedAacButRejectedPcmCanFallBack() {
+    fun q4NativePcmIsRetriedDespiteLegacyRejection() {
         val pcm = AudioProfile("media", 1L shl 15, 48_000, 250)
         val aac = AudioProfile("media", 1L shl 22, 44_100, 250, 102L, AudioCodec.AAC_LC)
         val candidates = listOf(pcm, aac)
@@ -23,7 +23,7 @@ class AudioProfileMemoryTest {
             AudioProfileMemory.order(candidates, AudioProfileMemory.Entry(working = aac.key)).first(),
         )
         assertEquals(
-            aac,
+            pcm,
             AudioProfileMemory
                 .order(
                     candidates,

@@ -84,7 +84,11 @@ object SessionController {
 
     /** 当前挂屏 Activity 的渲染回调（收到**本条新增日志行**，含时间戳前缀）；Activity onDestroy 时清空。 */
     @Volatile
-    var logListener: ((String) -> Unit)? = null
+    var logListener: ((String, Long) -> Unit)? = null
+
+    @Volatile
+    var logGeneration: Long = 0
+        private set
 
     /** 「监听日志」开关（由 Activity 从偏好读取后同步；关闭时不采集不渲染）。 */
     @Volatile
@@ -415,11 +419,11 @@ object SessionController {
                 val stamped = '[' + timestamp.format(Date()) + "] " + clean + '\n'
                 logBuilder.append(stamped)
                 if (logBuilder.length > 40_000) logBuilder.delete(0, logBuilder.length - 20_000)
-                stamped
+                stamped to logGeneration
             }
         // 增量行直送 UI：此前每行 toString 整个缓冲再 setText 全文，
         // 高频日志（触摸/帧）下是 UI 线程与 GC 的双重放大器
-        logListener?.invoke(line)
+        logListener?.invoke(line.first, line.second)
     }
 
     fun logText(): String = synchronized(logLock) { logBuilder.toString() }
@@ -554,7 +558,10 @@ object SessionController {
      * 没反应」根因，2026-10-16）。不要恢复该调用：空串与真实日志行无法区分。
      */
     fun clearLog() {
-        synchronized(logLock) { logBuilder.setLength(0) }
+        synchronized(logLock) {
+            logBuilder.setLength(0)
+            logGeneration++
+        }
     }
 
     // ---- 会话对象（进程级所有权；Activity 重建不影响）----

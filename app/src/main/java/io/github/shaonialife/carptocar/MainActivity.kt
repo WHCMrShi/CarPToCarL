@@ -174,24 +174,22 @@ class MainActivity : AppCompatActivity() {
     private var mib3LinkListener: (() -> Unit)? = null
 
     private val consoleLock = Any()
-    private val pendingConsole = StringBuilder()
+    private val pendingConsole = io.github.shaonialife.carptocar.util.ConsoleLogBuffer()
     private var consoleScheduled = false
     private val flushConsole =
         Runnable {
             val text =
                 synchronized(consoleLock) {
-                    val batch = pendingConsole.toString()
-                    pendingConsole.setLength(0)
+                    val batch = pendingConsole.drain()
                     consoleScheduled = false
                     batch
                 }
             if (!isFinishing && !isDestroyed) appendConsole(text)
         }
-    private val logListener: (String) -> Unit = { line ->
+    private val logListener: (String, Long) -> Unit = { line, epoch ->
         synchronized(consoleLock) {
-            pendingConsole.append(line)
-            if (pendingConsole.length > 40_000) pendingConsole.delete(0, pendingConsole.length - 20_000)
-            if (!consoleScheduled) {
+            val accepted = pendingConsole.append(line, epoch)
+            if (accepted && !consoleScheduled) {
                 consoleScheduled = true
                 mainHandler.postDelayed(flushConsole, 100)
             }
@@ -1060,7 +1058,12 @@ class MainActivity : AppCompatActivity() {
         findViewById<ImageView>(R.id.btnClearLog).setOnClickListener {
             // 清除缓冲后必须显式重渲染：日志回调是增量追加语义，clearLog 的通知
             // 无法清 UI（见 SessionController.clearLog 注释，「点了没反应」根因）
-            SessionController.clearLog()
+            synchronized(consoleLock) {
+                mainHandler.removeCallbacks(flushConsole)
+                SessionController.clearLog()
+                pendingConsole.clear(SessionController.logGeneration)
+                consoleScheduled = false
+            }
             renderConsole(SessionController.logText())
         }
         findViewById<ImageView>(R.id.btnCopyLog).setOnClickListener {
@@ -2816,7 +2819,7 @@ class MainActivity : AppCompatActivity() {
         if (SessionController.logListener === logListener) SessionController.logListener = null
         mainHandler.removeCallbacks(flushConsole)
         synchronized(consoleLock) {
-            pendingConsole.setLength(0)
+            pendingConsole.clear(SessionController.logGeneration)
             consoleScheduled = false
         }
         if (SessionController.uiHintSink === uiHintSinkRef) SessionController.uiHintSink = null

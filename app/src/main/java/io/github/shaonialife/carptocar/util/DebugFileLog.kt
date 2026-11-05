@@ -2,7 +2,6 @@ package io.github.shaonialife.carptocar.util
 
 import android.content.Context
 import java.io.File
-import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -18,18 +17,12 @@ object DebugFileLog {
 
     @Volatile
     private var directory: File? = null
-    private val writer =
-        AsyncLogWriter("debug-log-writer") { batch, dropped ->
-            val base = directory ?: return@AsyncLogWriter
-            val file = File(base, "main_debug.log")
-            if (file.length() > 2_000_000) {
-                file.writeText("$SESSION_MARKER\n", Charsets.UTF_8)
-            }
-            FileOutputStream(file, true).writer(Charsets.UTF_8).buffered(64 * 1024).use { out ->
-                if (dropped > 0) out.append("LOG: 队列过载，省略 $dropped 条旧记录\n")
-                batch.forEach { out.append(it) }
-            }
-        }
+    private var logFile: SessionLogFile? = null // 仅写线程访问
+    private val writer = AsyncLogWriter("debug-log-writer") { batch, dropped ->
+        val base = directory ?: return@AsyncLogWriter
+        val target = logFile ?: SessionLogFile(File(base, "main_debug.log"), SESSION_MARKER).also { logFile = it }
+        target.write(batch, dropped)
+    }
 
     /**
      * 「本次进程启动」标记行。日志文件跨进程保留（最多 2MB），用户反馈问题时
@@ -62,7 +55,7 @@ object DebugFileLog {
         currentSessionOnly: Boolean,
     ): String? =
         runCatching {
-            writer.flush()
+            if (!writer.flush()) return@runCatching null
             val text = File(context.filesDir, "main_debug.log").readText(Charsets.UTF_8)
             if (currentSessionOnly) currentSessionSlice(text) else text
         }.getOrNull()
