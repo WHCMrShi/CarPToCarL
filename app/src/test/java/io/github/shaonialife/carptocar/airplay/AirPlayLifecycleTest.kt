@@ -52,6 +52,70 @@ class AirPlayLifecycleTest {
         }
     }
 
+    private fun timingServer(client: AirPlayClient): TimingServer {
+        val field = AirPlayClient::class.java.getDeclaredField("timingServer")
+        field.isAccessible = true
+        return field.get(client) as TimingServer
+    }
+
+    @Test fun disposeClosesTimingSocketAndReaderButOrdinaryClosePreservesThem() {
+        val client = client(1)
+        val timing = timingServer(client)
+        val previousThreads = Thread.getAllStackTraces().keys
+        try {
+            // 未连接控制端口时 SETUP 返回 null，但仍经过真实的计时服务启动入口。
+            assertTrue(client.runSetup() == null)
+            val field = TimingServer::class.java.getDeclaredField("socket").apply { isAccessible = true }
+            val socket = field.get(timing) as java.net.DatagramSocket
+            val reader = Thread.getAllStackTraces().keys.single {
+                it.name == "airplay-timing" && it !in previousThreads
+            }
+            val port = timing.port
+            assertTrue(port > 0)
+            client.close()
+            assertEquals(port, timing.port)
+            assertFalse(socket.isClosed)
+            client.dispose()
+            client.dispose()
+            reader.join(3000)
+            assertTrue(socket.isClosed)
+            assertFalse(reader.isAlive)
+            assertEquals(0, timing.port)
+            assertTrue(client.runSetup() == null)
+            assertEquals(0, timing.port)
+        } finally {
+            client.dispose()
+        }
+    }
+
+    @Test fun setupRacingDisposeCannotLeaveTimingServiceRunning() {
+        repeat(30) {
+            val client = client(1)
+            val gate = CountDownLatch(1)
+            val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
+            val setup = Thread {
+                try {
+                    gate.await()
+                    client.runSetup()
+                } catch (error: Throwable) {
+                    failure.set(error)
+                }
+            }
+            try {
+                setup.start()
+                gate.countDown()
+                client.dispose()
+                setup.join(3000)
+                assertFalse(setup.isAlive)
+                failure.get()?.let { throw AssertionError("SETUP/退役竞争异常", it) }
+                assertEquals(0, timingServer(client).port)
+            } finally {
+                client.dispose()
+                setup.join(3000)
+            }
+        }
+    }
+
     @Test fun ordinaryCloseAllowsRetryButDisposePermanentlyStopsExecutorAndReconnect() {
         ServerSocket(0, 2, InetAddress.getLoopbackAddress()).use { server ->
             val client = client(server.localPort)

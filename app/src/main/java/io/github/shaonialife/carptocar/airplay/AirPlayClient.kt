@@ -605,8 +605,12 @@ class AirPlayClient(
 
     /** 永久退役实例；普通 close 仍允许同实例配对重试。 */
     fun dispose() {
-        disposed = true
-        cancelled = true
+        synchronized(connectionLock) {
+            disposed = true
+            cancelled = true
+            // 与 SETUP 的启动互斥：永久退役后不得再创建计时端口。
+            timingServer.stop()
+        }
         close()
         controlIapTx.shutdownNow()
     }
@@ -797,13 +801,17 @@ class AirPlayClient(
     fun runSetup(): SetupInfo? {
         // 计时端口：catplay 真车实现始终绑定真实 UDP timing server 通告给车机
         // （媒体时钟同步源）；timingPort=0 曾是我们的屏幕流 400 头号嫌疑。
-        if (!timingServer.start()) {
+        val timingPort = synchronized(connectionLock) {
+            if (cancelled || disposed || Thread.currentThread().isInterrupted) return null
+            if (timingServer.start()) timingServer.port else 0
+        }
+        if (timingPort == 0) {
             log("AIRPLAY: 计时服务未启动（继续，但媒体时钟无法同步）")
         }
         val deviceId = setupDeviceId()
-        val body = buildSessionSetupBody(deviceId, timingServer.port, encrypted = cipher != null)
+        val body = buildSessionSetupBody(deviceId, timingPort, encrypted = cipher != null)
         log(
-            "AIRPLAY: 初始 SETUP body=${body.size}B timingPort=${timingServer.port} " +
+            "AIRPLAY: 初始 SETUP body=${body.size}B timingPort=$timingPort " +
                 "deviceID=$deviceId 加密=${if (cipher != null) "是" else "否（et=NONE）"}",
         )
         val (statusLine, responseBody) =
