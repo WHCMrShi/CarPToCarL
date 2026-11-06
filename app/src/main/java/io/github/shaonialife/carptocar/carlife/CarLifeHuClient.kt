@@ -7,6 +7,7 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import io.github.shaonialife.carptocar.util.PipelineWindow
 import io.github.shaonialife.carptocar.util.LogThrottle
 
 /**
@@ -540,6 +541,7 @@ class CarLifeHuClient(
         touchForwarder = TouchForwarder(
             output,
             onWrite = { sentTouchCount++ },
+            onStats = log,
             onFailure = { error ->
                 val wasRunning = running.get()
                 // 部分帧可能已经送出，不能在原流上重试。先停止整个故障客户端，
@@ -915,6 +917,7 @@ class CarLifeHuClient(
         // 实测帧率窗口：每 5 秒统计一次，回答「98311 声明 60 到底有没有让引擎真的吐 60 帧」。
         var windowStart = android.os.SystemClock.uptimeMillis()
         var windowFrames = 0L
+        val metrics = PipelineWindow("CarLife-video-callback")
         try {
             while (running.get()) {
                 val header = ByteArray(12)
@@ -961,7 +964,10 @@ class CarLifeHuClient(
                     windowStart = now
                     windowFrames = 0
                 }
+                val workStarted = System.nanoTime()
                 onVideoFrame(payload, isKeyFrame(payload), sourceTimestampMs)
+                val done = System.nanoTime()
+                metrics.record(length, length + 12, done - workStarted, now = done)?.let(log)
             }
         } catch (error: Exception) {
             if (running.get()) log("CARLIFE: 视频通道断开 - ${error.message}")
@@ -1342,6 +1348,7 @@ class CarLifeHuClient(
         // 格式宣告状态挂在 channel 上（不是局部变量）：重连后必须沿用已宣告过的值，
         // 否则新读线程会以为引擎没宣告过，给上层报 48kHz 兜底值把真实的 44.1kHz 覆盖掉。
         var ttsPackets = 0L
+        val metrics = PipelineWindow("CarLife-$label-callback")
         try {
             while (running.get()) {
                 val head = ByteArray(CarLifeProtocol.AUDIO_HEAD_LEN)
@@ -1354,88 +1361,94 @@ class CarLifeHuClient(
                 }
                 val payload = ByteArray(length)
                 if (length > 0) data.readFully(payload)
-                if (isTts) {
-                    // TTS 通道（9241）：包类型是 0x4xxxx，但编号与媒体的 INIT/START/STOP
-                    // **不对应**（媒体数据在 0x30006，TTS 数据却在 0x40003）。只认两条铁律：
-                    // 有负载 = 裸 PCM（导航播报），长度 0 = 开停信号（仅记录）。
-                    if (type == CarLifeProtocol.TTS_PKG_INIT) {
-                        val format = parseAudioInit(payload)
-                        if (format != null) {
-                            val (rate, channelConfig, _) = format
-                            channel.rate = rate
-                            channel.channels = channelsOf(channelConfig)
-                            log("CARLIFE: TTS 音频格式宣告 ${channel.rate}Hz ${channel.channels}ch（导航播报通道）")
-                            onTtsFormat(channel.rate, channel.channels)
-                        }
-                    } else if (length > 0) {
-                        if (channel.rate <= 0) {
-                            channel.rate = CarLifeProtocol.TTS_DEFAULT_RATE
-                            channel.channels = 1
-                            log("CARLIFE: TTS 未宣告格式——按 ${channel.rate}Hz 单声道处理（发送端会重采样）")
-                            onTtsFormat(channel.rate, channel.channels)
-                        }
-                        ttsPackets++
-                        if (ttsPackets == 1L) {
-                            log(
-                                "CARLIFE: ✓ 收到导航播报音频（TTS 首包 ${length}B，" +
-                                    "${channel.rate}Hz ${channel.channels}ch）",
-                            )
-                        }
-                        noteAudioPcm(channel)
-                        onTtsPcm(payload, length)
-                    } else if (channel.controlLogged.add(type)) {
-                        log("CARLIFE: TTS 开停信号 0x${type.toString(16)}（长度 0，仅记录）")
-                    }
-                    continue
-                }
-                when (type) {
-                    CarLifeProtocol.MUSIC_PKG_INIT -> {
-                        val format = parseAudioInit(payload)
-                        if (format != null) {
-                            val (rate, channelConfig, sampleFormat) = format
-                            val channels = channelsOf(channelConfig)
-                            log(
-                                "CARLIFE: $label 音频格式宣告 ${rate}Hz " +
-                                    "${channels}ch ${sampleFormat}bit（channelConfig=$channelConfig）",
-                            )
-                            onAudioFormat(rate, channels)
-                            channel.announced = true
-                        }
-                    }
-
-                    CarLifeProtocol.MUSIC_PKG_NORMAL -> {
-                        audioPacketCount++
-                        if (!channel.announced) {
-                            // 手机没宣告格式就直接推 PCM：按 48k 立体声先顶着
-                            channel.announced = true
-                            log("CARLIFE: $label 未收到格式宣告，按 48kHz 立体声处理")
-                            onAudioFormat(DEFAULT_AUDIO_RATE, 2)
-                        }
-                        if (length > 0) {
+                val workStarted = System.nanoTime()
+                try {
+                    if (isTts) {
+                        // TTS 通道（9241）：包类型是 0x4xxxx，但编号与媒体的 INIT/START/STOP
+                        // **不对应**（媒体数据在 0x30006，TTS 数据却在 0x40003）。只认两条铁律：
+                        // 有负载 = 裸 PCM（导航播报），长度 0 = 开停信号（仅记录）。
+                        if (type == CarLifeProtocol.TTS_PKG_INIT) {
+                            val format = parseAudioInit(payload)
+                            if (format != null) {
+                                val (rate, channelConfig, _) = format
+                                channel.rate = rate
+                                channel.channels = channelsOf(channelConfig)
+                                log("CARLIFE: TTS 音频格式宣告 ${channel.rate}Hz ${channel.channels}ch（导航播报通道）")
+                                onTtsFormat(channel.rate, channel.channels)
+                            }
+                        } else if (length > 0) {
+                            if (channel.rate <= 0) {
+                                channel.rate = CarLifeProtocol.TTS_DEFAULT_RATE
+                                channel.channels = 1
+                                log("CARLIFE: TTS 未宣告格式——按 ${channel.rate}Hz 单声道处理（发送端会重采样）")
+                                onTtsFormat(channel.rate, channel.channels)
+                            }
+                            ttsPackets++
+                            if (ttsPackets == 1L) {
+                                log(
+                                    "CARLIFE: ✓ 收到导航播报音频（TTS 首包 ${length}B，" +
+                                        "${channel.rate}Hz ${channel.channels}ch）",
+                                )
+                            }
                             noteAudioPcm(channel)
-                            onAudioPcm(payload, length)
+                            onTtsPcm(payload, length)
+                        } else if (channel.controlLogged.add(type)) {
+                            log("CARLIFE: TTS 开停信号 0x${type.toString(16)}（长度 0，仅记录）")
+                        }
+                        continue
+                    }
+                    when (type) {
+                        CarLifeProtocol.MUSIC_PKG_INIT -> {
+                            val format = parseAudioInit(payload)
+                            if (format != null) {
+                                val (rate, channelConfig, sampleFormat) = format
+                                val channels = channelsOf(channelConfig)
+                                log(
+                                    "CARLIFE: $label 音频格式宣告 ${rate}Hz " +
+                                        "${channels}ch ${sampleFormat}bit（channelConfig=$channelConfig）",
+                                )
+                                onAudioFormat(rate, channels)
+                                channel.announced = true
+                            }
+                        }
+
+                        CarLifeProtocol.MUSIC_PKG_NORMAL -> {
+                            audioPacketCount++
+                            if (!channel.announced) {
+                                // 手机没宣告格式就直接推 PCM：按 48k 立体声先顶着
+                                channel.announced = true
+                                log("CARLIFE: $label 未收到格式宣告，按 48kHz 立体声处理")
+                                onAudioFormat(DEFAULT_AUDIO_RATE, 2)
+                            }
+                            if (length > 0) {
+                                noteAudioPcm(channel)
+                                onAudioPcm(payload, length)
+                            }
+                        }
+
+                        // 引擎音频开停信号（长度 0）：来电/路由切换时引擎会先发 STOP，
+                        // 挂断恢复播放再发 START。只上报，不拦截音频。
+                        CarLifeProtocol.MUSIC_PKG_START -> {
+                            log("CARLIFE: $label 引擎音频开始（0x30002）")
+                            engineAudioActive = true
+                            onAudioGate(true)
+                        }
+
+                        CarLifeProtocol.MUSIC_PKG_STOP -> {
+                            log("CARLIFE: $label 引擎音频停止（0x30003）——来电或音频路由被切走")
+                            engineAudioActive = false
+                            onAudioGate(false)
+                        }
+
+                        else -> {
+                            if (audioUnknownTypes.add(type)) {
+                                log("CARLIFE: ${carLifeAudioTypeName(type)} 音频包（长度 $length，暂不处理）")
+                            }
                         }
                     }
-
-                    // 引擎音频开停信号（长度 0）：来电/路由切换时引擎会先发 STOP，
-                    // 挂断恢复播放再发 START。只上报，不拦截音频。
-                    CarLifeProtocol.MUSIC_PKG_START -> {
-                        log("CARLIFE: $label 引擎音频开始（0x30002）")
-                        engineAudioActive = true
-                        onAudioGate(true)
-                    }
-
-                    CarLifeProtocol.MUSIC_PKG_STOP -> {
-                        log("CARLIFE: $label 引擎音频停止（0x30003）——来电或音频路由被切走")
-                        engineAudioActive = false
-                        onAudioGate(false)
-                    }
-
-                    else -> {
-                        if (audioUnknownTypes.add(type)) {
-                            log("CARLIFE: ${carLifeAudioTypeName(type)} 音频包（长度 $length，暂不处理）")
-                        }
-                    }
+                } finally {
+                    val done = System.nanoTime()
+                    metrics.record(length, length + CarLifeProtocol.AUDIO_HEAD_LEN, done - workStarted, now = done)?.let(log)
                 }
             }
         } catch (error: Exception) {

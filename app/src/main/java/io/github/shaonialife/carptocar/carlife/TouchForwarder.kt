@@ -1,5 +1,6 @@
 package io.github.shaonialife.carptocar.carlife
 
+import io.github.shaonialife.carptocar.util.PipelineWindow
 import java.io.OutputStream
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -10,10 +11,12 @@ internal class TouchForwarder(
     private val onWrite: () -> Unit = {},
     private val onFailure: (Exception) -> Unit = {},
     private val onOverflow: () -> Unit = {},
+    private val onStats: (String) -> Unit = {},
 ) {
     private val lock = ReentrantLock()
     private val ready = lock.newCondition()
     private val entries = IntArray(CAPACITY * 4)
+    private val queuedAt = LongArray(CAPACITY)
     private var head = 0
     private var size = 0
     private var stopped = false
@@ -75,6 +78,7 @@ internal class TouchForwarder(
                 if (entries[last] == service && entries[last + 3] == action) {
                     entries[last + 1] = px
                     entries[last + 2] = py
+                    queuedAt[last / 4] = System.nanoTime()
                     return
                 }
             }
@@ -92,6 +96,7 @@ internal class TouchForwarder(
                         val from = index(i + 1)
                         val to = index(i)
                         for (j in 0..3) entries[to + j] = entries[from + j]
+                        queuedAt[to / 4] = queuedAt[from / 4]
                     }
                     size--
                 } else {
@@ -110,6 +115,7 @@ internal class TouchForwarder(
                 entries[at + 1] = px
                 entries[at + 2] = py
                 entries[at + 3] = action
+                queuedAt[at / 4] = System.nanoTime()
                 ready.signal()
             }
         }
@@ -121,6 +127,8 @@ internal class TouchForwarder(
     private fun run() {
         val event = IntArray(4)
         val encoder = TouchFrameEncoder()
+        val metrics = PipelineWindow("CarLife-touch-write")
+        var eventQueuedAt = 0L
         var pressed = false
         var second = false
         var compound = false
@@ -134,11 +142,15 @@ internal class TouchForwarder(
             px: Int,
             py: Int,
             action: Int = -1,
+            queueNs: Long = 0L,
         ) {
+            val started = System.nanoTime()
             val length = encoder.encode(service, px, py, action)
             output.write(encoder.bytes, 0, length)
             output.flush()
             onWrite()
+            val done = System.nanoTime()
+            metrics.record(length, 0, done - started, queueNs, done)?.let(onStats)
         }
         try {
             while (true) {
@@ -152,6 +164,7 @@ internal class TouchForwarder(
                         } else {
                             val at = index(0)
                             for (i in 0..3) event[i] = entries[at + i]
+                            eventQueuedAt = queuedAt[at / 4]
                             head = (head + 1) % CAPACITY
                             size--
                             false
@@ -181,7 +194,7 @@ internal class TouchForwarder(
                 }
                 val service = event[0]
                 val action = event[3]
-                write(service, event[1], event[2], action)
+                write(service, event[1], event[2], action, System.nanoTime() - eventQueuedAt)
                 if (service == CarLifeProtocol.TOUCH_ACTION) {
                     compound = true
                     when (action and 255) {
