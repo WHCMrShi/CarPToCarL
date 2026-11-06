@@ -48,7 +48,14 @@ class ArtworkRepositoryTest {
             val entered = CountDownLatch(1)
             val release = CountDownLatch(1)
             val obsoleteLoads = AtomicInteger()
-            val old = repo.source("old", 1) { entered.countDown(); release.await(3, TimeUnit.SECONDS); jpeg }
+            val old = repo.source("old", 1) {
+                entered.countDown()
+                // Hold the worker to exercise queue eviction even though track changes now interrupt it.
+                while (true) {
+                    try { check(release.await(3, TimeUnit.SECONDS)); break } catch (_: InterruptedException) { }
+                }
+                jpeg
+            }
             try {
                 old.request()
                 assertTrue(entered.await(3, TimeUnit.SECONDS))
@@ -108,4 +115,81 @@ class ArtworkRepositoryTest {
             assertFalse(logs.joinToString().contains("secret-url"))
         }
     }
+    @Test fun trackChangeClosesBlockedReadOffCallerThreadAndUnblocksLatestImage() {
+        ArtworkRepository().use { repo ->
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val closed = CountDownLatch(1)
+            val closer = java.util.concurrent.atomic.AtomicReference<Thread>()
+            val old = repo.cancellableSource("old", 1) { control ->
+                control.onCancel { closer.set(Thread.currentThread()); closed.countDown(); release.countDown() }
+                entered.countDown()
+                // Simulate a provider that ignores thread interruption and needs its resource closed.
+                while (true) {
+                    try { release.await(); break } catch (_: InterruptedException) { }
+                }
+                control.check()
+                jpeg
+            }
+            try {
+                old.request()
+                assertTrue(entered.await(3, TimeUnit.SECONDS))
+                val caller = Thread.currentThread()
+                val latest = repo.source("latest", 1) { jpeg }
+                assertTrue(closed.await(3, TimeUnit.SECONDS))
+                assertNotSame(caller, closer.get())
+                assertNotNull(awaitComplete(latest).image)
+                assertNull(old.request().image)
+            } finally { release.countDown() }
+        }
+    }
+
+    @Test fun changedUriCancelsOldReadEvenWhenTrackIsUnchanged() {
+        ArtworkRepository().use { repo ->
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val cancelled = CountDownLatch(1)
+            val old = repo.cancellableSource("track", 1, resourceKey = "old-uri") { control ->
+                control.onCancel { cancelled.countDown(); release.countDown() }
+                entered.countDown()
+                while (true) {
+                    try { release.await(); break } catch (_: InterruptedException) { }
+                }
+                control.check(); jpeg
+            }
+            try {
+                old.request()
+                assertTrue(entered.await(3, TimeUnit.SECONDS))
+                val latest = repo.cancellableSource("track", 2, resourceKey = "new-uri") { jpeg }
+                assertTrue(cancelled.await(3, TimeUnit.SECONDS))
+                assertNotNull(awaitComplete(latest).image)
+                assertNull(old.request().image)
+            } finally { release.countDown() }
+        }
+    }
+
+    @Test fun totalWatchdogClosesBlockedReadAndAllowsNextTrack() {
+        ArtworkRepository(readTimeoutMs = 200).use { repo ->
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val closed = CountDownLatch(1)
+            val slow = repo.cancellableSource("slow", 1) { control ->
+                control.onCancel { closed.countDown(); release.countDown() }
+                entered.countDown()
+                while (true) {
+                    try { release.await(); break } catch (_: InterruptedException) { }
+                }
+                control.check()
+                jpeg
+            }
+            try {
+                slow.request()
+                assertTrue(entered.await(3, TimeUnit.SECONDS))
+                assertTrue(closed.await(3, TimeUnit.SECONDS))
+                assertNull(awaitComplete(slow).image)
+                assertNotNull(awaitComplete(repo.source("next", 1) { jpeg }).image)
+            } finally { release.countDown() }
+        }
+    }
+
 }

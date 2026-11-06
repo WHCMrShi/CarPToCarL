@@ -111,4 +111,28 @@ class NowPlayingDispatcherTest {
             assertEquals(listOf(9000), sent.toList())
         } finally { release.countDown(); dispatcher.close() }
     }
+    @Test fun unsubscribeRunsCancellationWithoutSamplingOrSendingNewMetadata() {
+        val delivered = CountDownLatch(1)
+        val cleaned = CountDownLatch(1)
+        val firstUpdate = CountDownLatch(1)
+        val samples = AtomicInteger()
+        val sends = AtomicInteger()
+        val pending = java.util.concurrent.atomic.AtomicBoolean(false)
+        val dispatcher = NowPlayingDispatcher({ true }, {
+            samples.incrementAndGet(); song
+        }, { sends.incrementAndGet(); delivered.countDown(); true },
+            afterUpdate = { if (pending.getAndSet(false)) cleaned.countDown(); firstUpdate.countDown(); null },
+            cleanupPending = { pending.get() })
+        try {
+            dispatcher.subscribe()
+            assertTrue(delivered.await(3, TimeUnit.SECONDS))
+            assertTrue(firstUpdate.await(3, TimeUnit.SECONDS))
+            pending.set(true)
+            dispatcher.unsubscribe()
+            assertTrue(cleaned.await(3, TimeUnit.SECONDS))
+            assertEquals(1, samples.get())
+            assertEquals(1, sends.get())
+        } finally { dispatcher.close() }
+    }
+
 }

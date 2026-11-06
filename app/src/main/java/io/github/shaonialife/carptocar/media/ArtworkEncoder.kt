@@ -11,31 +11,48 @@ import java.net.HttpURLConnection
 
 /** 只在封面工作线程调用。保持支持的原始 JPEG/PNG；否则最多缩到 1024 并一次无损 PNG 编码。 */
 internal object ArtworkEncoder {
-    fun load(metadata: MediaMetadata?, resolver: ContentResolver): ByteArray? {
-        if (Thread.currentThread().isInterrupted || metadata == null) return null
+    fun load(metadata: MediaMetadata?, resolver: ContentResolver, control: ArtworkReadControl,
+        cache: ArtworkEncodingCache): ByteArray? {
+        control.check()
+        if (metadata == null) return null
         val direct = metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_ART)
-        if (direct != null) return encode(direct)
+        if (direct != null) {
+            if (direct.isRecycled) return null
+            return cache.bitmap(direct, direct.generationId, sameContent = { previous, generation ->
+                val old = previous as? Bitmap
+                old != null && !old.isRecycled && old.generationId == generation && direct.sameAs(old)
+            }) { control.check(); encode(direct) }
+        }
         val uri = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI)
             ?: metadata.getString(MediaMetadata.METADATA_KEY_ART_URI) ?: return null
         val connection = if (uri.startsWith("https://") || uri.startsWith("http://"))
             (java.net.URL(uri).openConnection() as HttpURLConnection).apply { connectTimeout = 3000; readTimeout = 3000 }
             else null
-        val bytes = try {
-            (connection?.inputStream ?: resolver.openInputStream(Uri.parse(uri)))?.use { input ->
-                val output = ByteArrayOutputStream()
-                val buffer = ByteArray(8192)
-                while (true) {
-                    if (Thread.currentThread().isInterrupted) return null
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    if (output.size() + count > EncodedArtwork.MAX_BYTES) return null
-                    output.write(buffer, 0, count)
+        val bytes = if (connection != null) {
+            control.onCancel { connection.disconnect() }
+            try {
+                control.check()
+                connection.inputStream.use { input ->
+                    control.onCancel { connection.disconnect(); input.close() }
+                    control.read(input)
                 }
-                output.toByteArray()
-            }
-        } finally { connection?.disconnect() }
-        return bytes?.let(::loadBytes)
+            } finally { connection.disconnect() }
+        } else {
+            val signal = android.os.CancellationSignal()
+            control.onCancel { signal.cancel() }
+            try {
+                control.check()
+                resolver.openAssetFileDescriptor(Uri.parse(uri), "r", signal)?.use { asset ->
+                    asset.createInputStream().use { input ->
+                        control.onCancel { signal.cancel(); input.close() }
+                        control.read(input)
+                    }
+                }
+            } finally { signal.cancel() }
+        }
+        control.check()
+        return bytes?.let { cache.bytes(it) { loadBytes(it) } }
     }
 
     fun loadBytes(bytes: ByteArray): ByteArray? {

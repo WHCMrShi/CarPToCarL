@@ -115,6 +115,7 @@ class Iap2LinkEngine(
         var retransmissions: Int = 0,
         var deadlineMillis: Long = 0,
         val awaitAck: Boolean = true,
+        val sessionId: Int? = null,
     )
 
     var state: State = State.IDLE
@@ -372,7 +373,7 @@ class Iap2LinkEngine(
         return true
     }
 
-    /** 文件数据只使用对端明确协商的会话；可选封面不进入控制重传/死亡策略。 */
+    /** 文件数据使用协商会话及共享可靠链路；文件层 START/SUCCESS 超时由上层独立处理。 */
     val fileTransferSessionId: Int? get() {
         val sessions = peerSynchronization?.sessions ?: return null
         return sessions.singleOrNull { it.kind == 1 && it.version == 2 }?.id
@@ -393,7 +394,12 @@ class Iap2LinkEngine(
         if (lastFileSequence != null || outstanding >= (declaredMaxOutgoing - 1).coerceAtLeast(1)) return false
         sentSequence = nextSequence(sentSequence)
         writePacket(bytes, sentSequence, CONTROL_ACKNOWLEDGEMENT, sessionId)
-        if (peer.maxRetransmissions > 0) lastFileSequence = sentSequence else lastSentAcknowledged = sentSequence
+        if (peer.maxRetransmissions > 0) {
+            lastFileSequence = sentSequence
+            unacknowledged += Packet(sentSequence, bytes.copyOf(),
+                deadlineMillis = nowMillis + retransmissionDelayMillis(), sessionId = sessionId)
+            retransmitDeadline = unacknowledged.minOfOrNull { it.deadlineMillis }
+        } else lastSentAcknowledged = sentSequence
         return true
     }
     private var lastFileSequence: Int? = null
@@ -642,7 +648,7 @@ class Iap2LinkEngine(
             return
         }
         target.deadlineMillis = nowMillis + retransmissionDelayMillis()
-        writePacket(target.payload, target.sequence, CONTROL_ACKNOWLEDGEMENT, controlSessionId())
+        writePacket(target.payload, target.sequence, CONTROL_ACKNOWLEDGEMENT, target.sessionId ?: controlSessionId())
         retransmitDeadline = unacknowledged.minOfOrNull { it.deadlineMillis }
     }
 
@@ -720,7 +726,7 @@ class Iap2LinkEngine(
             die("packet ${next.sequence} not acknowledged")
             return
         }
-        writePacket(next.payload, next.sequence, CONTROL_ACKNOWLEDGEMENT, controlSessionId())
+        writePacket(next.payload, next.sequence, CONTROL_ACKNOWLEDGEMENT, next.sessionId ?: controlSessionId())
         retransmitDeadline = unacknowledged.minOfOrNull { it.deadlineMillis }
     }
 

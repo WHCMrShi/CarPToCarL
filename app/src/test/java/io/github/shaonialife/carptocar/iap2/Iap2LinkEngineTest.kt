@@ -161,18 +161,57 @@ class Iap2LinkEngineTest {
         assertTrue(!phone.isDead)
     }
 
-    @Test fun unacknowledgedOptionalFileNeverTriggersControlDeathWatchdog() {
+    @Test fun lostFileIsRetransmittedOnEakBeforeStrictPeerAcceptsLaterControl() {
         val phone = Iap2LinkEngine()
         val car = Iap2LinkEngine()
         phone.start(0); car.start(0); exchangeUntilNormal(phone, car)
+        phone.takeOutput(); car.takeOutput()
+        val file = byteArrayOf(129.toByte(), 4, 0, 0)
+        assertTrue(phone.sendFileTransfer(file, 10))
+        val lost = phone.takeOutput()
+        val fileSequence = lost[5].toInt() and 255
+        assertTrue(phone.sendControl(Iap2Csm.encode(0x5001), 11))
+        val laterControl = phone.takeOutput()
+        assertEquals((fileSequence + 1) and 255, laterControl[5].toInt() and 255)
+        // Strict receiver discards the later control frame until the missing file sequence is restored.
+        phone.feed(extendedAckFrame(ack = (fileSequence - 1) and 255), 20)
+        val replay = phone.takeOutput()
+        assertEquals(fileSequence, replay[5].toInt() and 255)
+        assertEquals(phone.fileTransferSessionId, replay[7].toInt() and 255)
+        assertArrayEquals(file, replay.copyOfRange(9, replay.size - 1))
+        car.feed(replay, 21)
+        phone.feed(car.takeOutput(), 22)
+        phone.advanceTime(5000)
+        val controlReplay = phone.takeOutput()
+        assertEquals(laterControl[5], controlReplay[5])
+        assertEquals(Iap2LinkEngine.SESSION_CONTROL, controlReplay[7].toInt() and 255)
+        car.feed(controlReplay, 5001)
+        phone.feed(car.takeOutput(), 5002)
+        val events = generateSequence { car.pollEvent() }.toList()
+        assertEquals(1, events.filterIsInstance<Iap2LinkEngine.Event.FileTransfer>().size)
+        assertEquals(1, events.filterIsInstance<Iap2LinkEngine.Event.Control>().size)
+        phone.advanceTime(100000)
+        assertTrue(!phone.isDead)
+    }
+
+    @Test fun fileRtoPreservesSessionAndLinkAckDoesNotRequireFileLayerStart() {
+        val phone = Iap2LinkEngine()
+        val car = Iap2LinkEngine()
+        phone.start(0); car.start(0); exchangeUntilNormal(phone, car)
+        phone.takeOutput(); car.takeOutput()
         assertTrue(phone.sendFileTransfer(byteArrayOf(128.toByte(), 4), 10))
-        phone.takeOutput() // simulate peer ignoring artwork
+        val lost = phone.takeOutput()
+        phone.advanceTime(5000)
+        val replay = phone.takeOutput()
+        assertArrayEquals(lost, replay)
+        car.feed(replay, 5001)
+        phone.feed(car.takeOutput(), 5002) // link ACK only; no file START/SUCCESS
         repeat(20) { phone.advanceTime(100000L + it * 100000L) }
         assertTrue(!phone.isDead)
         assertTrue(phone.sendControl(Iap2Csm.encode(0x5001), 3000000))
         exchange(phone, car)
-        assertTrue(!phone.isDead)
-        assertEquals(1, pollControls(car).size)
+        val events = generateSequence { car.pollEvent() }.toList()
+        assertEquals(1, events.filterIsInstance<Iap2LinkEngine.Event.Control>().size)
     }
 
     @Test fun oversizedFileIsRejectedWithoutKillingControlLink() {

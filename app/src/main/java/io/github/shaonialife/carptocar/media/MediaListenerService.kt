@@ -105,6 +105,7 @@ class MediaListenerService : NotificationListenerService() {
     /** 封面位图缓存（键不变时复用同一实例，保证 NowPlaying 的 equals 判稳）。 */
     private var cachedArt: android.graphics.Bitmap? = null
     private val artworkRepository = ArtworkRepository { line -> VirtualLauncher.logSink?.invoke(line) }
+    private val artworkEncodingCache = ArtworkEncodingCache()
     private var artworkRevision = 0L
     private var artworkTrack = ""
     private var artworkUri: String? = null
@@ -131,7 +132,7 @@ class MediaListenerService : NotificationListenerService() {
                         }
 
                         override fun onMetadataChanged(metadata: MediaMetadata?) {
-                            artworkRevision++
+                            if (MediaSessionsState.activeController?.sessionToken == token) artworkRevision++
                             refresh()
                         }
                     }
@@ -196,7 +197,9 @@ class MediaListenerService : NotificationListenerService() {
                 val trackId = "$artworkIncarnation:$stableTrack"
                 // 元数据快照/应用 Context 可安全供后台读取，不捕获 Service 供任务长期持有。
                 val resolver = applicationContext.contentResolver
-                val artworkSource = artworkRepository.source(trackId, artworkRevision) { ArtworkEncoder.load(meta, resolver) }
+                val artworkSource = artworkRepository.cancellableSource(trackId, artworkRevision, resourceKey = uri) { control ->
+                    ArtworkEncoder.load(meta, resolver, control, artworkEncodingCache)
+                }
                 MediaSessionsState.NowPlaying(
                     title = title,
                     artworkSource = artworkSource,

@@ -1122,12 +1122,13 @@ class Iap2SenderSession(
             }.onFailure { log("iap2 0x5001 发送失败 - ${it.message}") }.isSuccess
         },
         afterUpdate = {
-            if (artworkField == null || !channel.supportsFileTransfer()) null else {
+            if (!channel.supportsFileTransfer()) null else {
                 val plan = artworkSender.poll(channel.fileTransferPayloadLimit())
                 if (plan != null) artworkSender.submitted(plan, channel.sendFileTransfer(plan.bytes))
                 if (artworkSender.pending()) artworkSender.nextDelayMillis() else null
             }
         },
+        cleanupPending = { artworkSender.hasCancellation() },
     ).also { channel.own(it) }
 
     init {

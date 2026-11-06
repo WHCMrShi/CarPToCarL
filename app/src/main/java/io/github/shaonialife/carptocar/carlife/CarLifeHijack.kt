@@ -462,7 +462,8 @@ object CarLifeHijack {
         running.set(true)
         val scope = ConnectionResources()
         warmScope = scope
-        artworkRepository = io.github.shaonialife.carptocar.media.ArtworkRepository(log).also { scope.own(it) }
+        artworkRepository = io.github.shaonialife.carptocar.media.ArtworkRepository(log = log).also { scope.own(it) }
+        mediaArtworkEncodingCache = io.github.shaonialife.carptocar.media.ArtworkEncodingCache()
         logSink = log
         appContext = context.applicationContext
         // Q4 固定预置优先于旧缓存，避免升级后沿用此前的 720p 或其他车辆尺寸。
@@ -607,6 +608,7 @@ object CarLifeHijack {
         running.set(false)
         warmScope.close()
         artworkRepository = null
+        mediaArtworkEncodingCache = null
         mediaArtwork = null
         MediaSessionsState.removeListener(mediaPlaybackListener)
         sender = null
@@ -1084,6 +1086,7 @@ object CarLifeHijack {
 
     /** 收到 CarLife 媒体信息（歌名/歌手/封面）：记录并广播，供 iAP2 0x5001 转发。 */
     @Volatile private var artworkRepository: io.github.shaonialife.carptocar.media.ArtworkRepository? = null
+    @Volatile private var mediaArtworkEncodingCache: io.github.shaonialife.carptocar.media.ArtworkEncodingCache? = null
     @Volatile private var mediaArtwork: Pair<CarLifeMediaInfo, io.github.shaonialife.carptocar.media.ArtworkSource?>? = null
     private var mediaArtworkRevision = 0L
 
@@ -1092,8 +1095,12 @@ object CarLifeHijack {
 
     private fun onMediaInfo(info: CarLifeMediaInfo) {
         val key = listOf(info.source, info.songId, info.song, info.artist, info.album, info.duration.toString()).joinToString("\u0001")
+        val encodingCache = mediaArtworkEncodingCache
         val source = artworkRepository?.source(key, ++mediaArtworkRevision) {
-            info.albumArt?.let(io.github.shaonialife.carptocar.media.ArtworkEncoder::loadBytes)
+            info.albumArt?.let { bytes ->
+                if (encodingCache == null) io.github.shaonialife.carptocar.media.ArtworkEncoder.loadBytes(bytes)
+                else encodingCache.bytes(bytes) { io.github.shaonialife.carptocar.media.ArtworkEncoder.loadBytes(bytes) }
+            }
         }
         mediaArtwork = info to source
         latestMediaInfo = info

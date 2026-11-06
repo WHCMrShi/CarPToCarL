@@ -304,6 +304,19 @@ class Iap2SenderSessionTest {
                 }
                 assertTrue(progressArrived)
                 assertEquals(1, transfers.get())
+                val waiting = CountDownLatch(1)
+                val cancelled = CountDownLatch(1)
+                val transferId = java.util.concurrent.atomic.AtomicInteger(-1)
+                car.onFileTransfer = { bytes ->
+                    when (bytes[1].toInt() and 255) {
+                        4 -> { transferId.set(bytes[0].toInt() and 255); waiting.countDown() }
+                        2 -> if ((bytes[0].toInt() and 255) == transferId.get()) cancelled.countDown()
+                    }
+                }
+                car.sendControl(Iap2Csm.encode(0x5000, Iap2Csm.group(0, Iap2Csm.param(26, ByteArray(0)))))
+                assertTrue(waiting.await(3, TimeUnit.SECONDS)) // transfer remains active: no START reply
+                car.sendControl(Iap2Csm.encode(0x5002))
+                assertTrue("STOP must send file CANCEL even after dispatcher unsubscribe", cancelled.await(3, TimeUnit.SECONDS))
             } finally {
                 phone.close(); car.close(); mock.join(3000); pump?.join(3000)
             }

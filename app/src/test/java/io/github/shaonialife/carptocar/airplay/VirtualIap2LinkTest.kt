@@ -191,6 +191,23 @@ class VirtualIap2LinkTest {
         }
     }
 
+    @Test fun stopWhileWaitingForStartSendsCancelOverWifiFileSession() {
+        val h = Harness()
+        try {
+            h.link.armMib3(); h.car.start(0); h.exchangeUntilNormal()
+            h.carSends(0x1D01, Iap2Csm.string(0, "Audi"))
+            h.nowPlaying = CarPlayNowPlaying("song", "artist", "album", 180000, 2, 1000, appName = "player")
+            h.carSends(0x5000, Iap2Csm.group(0, Iap2Csm.param(26, ByteArray(0))))
+            val setup = generateSequence { h.car.pollEvent() }.filterIsInstance<Iap2LinkEngine.Event.FileTransfer>().single().bytes
+            assertEquals(4, setup[1].toInt())
+            h.carSends(0x5002)
+            val cancel = generateSequence { h.car.pollEvent() }.filterIsInstance<Iap2LinkEngine.Event.FileTransfer>().single().bytes
+            org.junit.Assert.assertArrayEquals(byteArrayOf(setup[0], 2), cancel)
+            h.exchange()
+            assertTrue(generateSequence { h.car.pollEvent() }.none { it is Iap2LinkEngine.Event.FileTransfer })
+        } finally { h.link.close() }
+    }
+
     @Test
     fun mediaCallbackDoesNotWaitForVirtualLinkLock() {
         val h = Harness()

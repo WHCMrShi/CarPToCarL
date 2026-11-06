@@ -449,7 +449,7 @@ class VirtualIap2Link(
         flushOutputLocked()
         maybeStartControlCsmLocked()
         checkMfiTimeoutLocked()
-        if (artworkField != null && engine.supportsArtworkTransfer && !closed) {
+        if ((artworkField != null || artworkSender.hasCancellation()) && engine.supportsArtworkTransfer && !closed) {
             val limit = (engine.peerSynchronization?.maxLength ?: 0) - Iap2LinkEngine.HEADER_BYTES - 1
             val plan = artworkSender.poll(limit)
             if (plan != null) artworkSender.submitted(plan, engine.sendFileTransfer(plan.bytes, nowMillis()))

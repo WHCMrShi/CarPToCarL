@@ -28,7 +28,7 @@ internal class Iap2ArtworkSender(
         internal val previousDeadline: Long, internal val cancelId: Int?)
 
     @Synchronized fun reset() {
-        if (phase !in listOf(Phase.NONE, Phase.DONE)) cancel = transferId
+        if (phase in listOf(Phase.START, Phase.DATA, Phase.SUCCESS)) cancel = transferId
         generation++; phase = Phase.NONE; content = null; image = null; transferId = null
         announced = false; activePlan = null; awaitingImage = false
     }
@@ -46,7 +46,7 @@ internal class Iap2ArtworkSender(
         if (!pendingSameTrack) {
             val key = nextImage?.digest ?: "empty"
             if (key != content) {
-                if (phase !in listOf(Phase.NONE, Phase.DONE)) cancel = transferId
+                if (phase in listOf(Phase.START, Phase.DATA, Phase.SUCCESS)) cancel = transferId
                 generation++; activePlan = null; image = nextImage; content = key
                 // 0x80 始终代表空图；其余 ID 在本连接不复用，防接收端缓存旧图。
                 transferId = if (nextImage == null || allocated >= 127) 128 else {
@@ -81,6 +81,10 @@ internal class Iap2ArtworkSender(
     @Synchronized fun poll(maxPayload: Int): Plan? {
         if (activePlan != null) return null
         if (maxPayload < 12) { phase = Phase.DONE; image = null; cancel = null; awaitingImage = false; return null }
+        if (phase in listOf(Phase.START, Phase.DATA, Phase.SUCCESS) && clock() >= deadline) {
+            log("ARTWORK: 封面传输超时，取消文件传输")
+            cancel = transferId; phase = Phase.DONE; image = null
+        }
         val oldPhase = phase; val oldOffset = offset; val oldDeadline = deadline
         val id = transferId
         val oldCancel = cancel
@@ -88,9 +92,6 @@ internal class Iap2ArtworkSender(
             cancel = null; byteArrayOf(oldCancel.toByte(), 2)
         } else {
             if (!announced || id == null) return null
-            if (phase in listOf(Phase.START, Phase.DATA, Phase.SUCCESS) && clock() >= deadline) {
-                log("ARTWORK: 封面传输超时，保留控制会话"); phase = Phase.DONE; image = null; return null
-            }
             when (phase) {
                 Phase.SETUP -> ByteArray(12).also {
                     it[0] = id.toByte(); it[1] = 4
@@ -126,6 +127,8 @@ internal class Iap2ArtworkSender(
         }
     }
     @Synchronized fun pending(): Boolean = awaitingImage || cancel != null || phase !in listOf(Phase.NONE, Phase.DONE)
+
+    @Synchronized fun hasCancellation(): Boolean = cancel != null || activePlan?.cancelId != null
 
     @Synchronized fun needsRefresh(): Boolean = awaitingImage
 

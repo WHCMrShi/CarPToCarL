@@ -146,7 +146,7 @@ class Iap2ArtworkSenderTest {
             val id = sender.decorate(value, 26, true).artworkTransferId!!
             sender.metadataSent(id); send(sender)
             now = 10001
-            assertNull(sender.poll(100))
+            assertArrayEquals(byteArrayOf(id.toByte(), 2), send(sender, 100))
             assertFalse(sender.pending())
             sender.decorate(value.copy(elapsedMs = 3000), 26, true)
             assertNull(sender.poll(100))
@@ -213,6 +213,23 @@ class Iap2ArtworkSenderTest {
                 sender.response(byteArrayOf(id.toByte(), 5))
             }
             assertEquals(128, sender.decorate(loaded(repo, "overflow", 200), 26, true).artworkTransferId)
+        }
+    }
+
+    @Test fun resetAfterSetupProducesOnlyCancellationAndRetriesBlockedCancel() {
+        ArtworkRepository().use { repo ->
+            val sender = Iap2ArtworkSender()
+            val id = start(sender, loaded(repo))
+            send(sender, 100)
+            sender.reset()
+            assertTrue(sender.hasCancellation())
+            val cancel = sender.poll(100)!!
+            assertArrayEquals(byteArrayOf(id.toByte(), 2), cancel.bytes)
+            sender.submitted(cancel, false)
+            assertTrue(sender.hasCancellation())
+            assertArrayEquals(cancel.bytes, send(sender, 100))
+            assertFalse(sender.pending())
+            assertNull(sender.poll(100))
         }
     }
 

@@ -4,6 +4,9 @@ import java.security.MessageDigest
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.Future
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.ScheduledThreadPoolExecutor
 
 /** 只读编码图片；不把 Bitmap 放入协议队列，也不逐秒比较图片字节。 */
 class EncodedArtwork private constructor(private val bytes: ByteArray, val digest: String) {
@@ -27,8 +30,9 @@ class EncodedArtwork private constructor(private val bytes: ByteArray, val diges
 class ArtworkSource internal constructor(
     val trackId: String,
     val revision: Long,
-    internal val load: () -> ByteArray?,
+    internal val load: (ArtworkReadControl) -> ByteArray?,
     private val owner: ArtworkRepository,
+    internal val resourceKey: String? = null,
 ) {
     internal var attempts = 0
     internal var requested = false
@@ -39,48 +43,112 @@ class ArtworkSource internal constructor(
 
 internal data class ArtworkResult(val complete: Boolean, val image: EncodedArtwork?)
 
-/** 只有协商成功且请求封面的链路才调用 request；一个运行任务、一个最新待处理任务。 */
-internal class ArtworkRepository(private val log: (String) -> Unit = {}) : AutoCloseable {
+/** 一个运行任务、一个最新待处理任务；切歌和总时限取消旧任务并异步关闭资源。 */
+internal class ArtworkRepository(
+    private val readTimeoutMs: Long = 10_000,
+    private val log: (String) -> Unit = {},
+) : AutoCloseable {
     private val lock = Any()
     private val executor = ThreadPoolExecutor(1, 1, 30, TimeUnit.SECONDS,
         ArrayBlockingQueue<Runnable>(1), { task -> Thread(task, "media-artwork-encode").apply { isDaemon = true } },
-        ThreadPoolExecutor.DiscardOldestPolicy()).apply { allowCoreThreadTimeOut(true) }
+        ThreadPoolExecutor.AbortPolicy()).apply { allowCoreThreadTimeOut(true) }
+    private val cleanup = ScheduledThreadPoolExecutor(1) { task ->
+        Thread(task, "media-artwork-cleanup").apply { isDaemon = true }
+    }.apply { removeOnCancelPolicy = true }
+    private class Job(val control: ArtworkReadControl) {
+        var future: Future<*>? = null
+        var timeout: ScheduledFuture<*>? = null
+    }
+    private val jobs = mutableMapOf<ArtworkSource, Job>()
     private var closed = false
     private var current: ArtworkSource? = null
     private var image: EncodedArtwork? = null
 
-    fun source(trackId: String, revision: Long, load: () -> ByteArray?): ArtworkSource = synchronized(lock) {
-        current?.takeIf { it.trackId == trackId && it.revision == revision }?.let { return it }
+    fun source(trackId: String, revision: Long, load: () -> ByteArray?): ArtworkSource =
+        cancellableSource(trackId, revision) { load() }
+
+    fun cancellableSource(trackId: String, revision: Long, resourceKey: String? = null, load: (ArtworkReadControl) -> ByteArray?): ArtworkSource = synchronized(lock) {
+        current?.takeIf { it.trackId == trackId && it.revision == revision && it.resourceKey == resourceKey }?.let { return it }
+        if (current?.trackId != trackId || current?.resourceKey != resourceKey) cancelJobsLocked()
         if (current?.trackId != trackId) image = null
-        ArtworkSource(trackId, revision, load, this).also { current = it }
+        ArtworkSource(trackId, revision, load, this, resourceKey).also { current = it }
+    }
+
+    private fun cancelJob(job: Job) {
+        job.control.cancel()
+        job.future?.cancel(true)
+        job.timeout?.cancel(false)
+    }
+
+    private fun cancelJobsLocked() {
+        jobs.values.forEach(::cancelJob)
+        jobs.clear()
+        executor.queue.clear()
     }
 
     fun request(source: ArtworkSource): ArtworkResult = synchronized(lock) {
         if (closed || current !== source) return ArtworkResult(true, null)
         val now = System.nanoTime() / 1_000_000
         if (!source.requested && source.attempts < 3 && (!source.completed || (image == null && now - source.failedAt >= 5000))) {
+            // 丢弃排队的旧版本；已经运行的同曲读取可以完成，避免频繁元数据回调造成饥饿。
+            executor.queue.poll()?.let { obsolete ->
+                val entry = jobs.entries.firstOrNull { it.value.future === obsolete }
+                if (entry != null) { cancelJob(entry.value); jobs.remove(entry.key) }
+            }
             source.requested = true
             source.attempts++
-            executor.execute {
-                val useful = synchronized(lock) { !closed && current?.trackId == source.trackId }
-                val result = try { if (useful) source.load()?.let(EncodedArtwork::create) else null }
-                    catch (error: Exception) { log("ARTWORK: 图片准备失败 - ${error.javaClass.simpleName}"); null }
+            val control = ArtworkReadControl(readTimeoutMs, dispatchClose = { close ->
+                try { cleanup.execute(close) }
+                catch (_: java.util.concurrent.RejectedExecutionException) { close() }
+            })
+            val job = Job(control)
+            jobs[source] = job
+            job.future = executor.submit {
+                val result = try {
+                    control.check()
+                    source.load(control)?.let { control.check(); EncodedArtwork.create(it) }
+                } catch (error: Exception) {
+                    if (!control.cancelled && error !is InterruptedException) log("ARTWORK: 图片准备失败 - ${error.javaClass.simpleName}")
+                    null
+                }
                 synchronized(lock) {
                     source.requested = false
                     source.completed = true
                     source.failedAt = System.nanoTime() / 1_000_000
-                    // 同曲后来的任务串行覆盖；切歌后绝不发布旧图。
-                    if (!closed && current?.trackId == source.trackId) image = result
+                    if (!closed && !control.cancelled && current?.trackId == source.trackId) image = result
+                    job.timeout?.cancel(false)
+                    control.finish()
+                    if (jobs[source] === job) jobs.remove(source)
                 }
             }
+            job.timeout = cleanup.schedule({
+                synchronized(lock) {
+                    if (jobs[source] === job) {
+                        cancelJob(job)
+                        jobs.remove(source)
+                        source.requested = false; source.completed = true
+                        source.failedAt = System.nanoTime() / 1_000_000
+                    }
+                }
+            }, readTimeoutMs, TimeUnit.MILLISECONDS)
         }
         ArtworkResult(source.completed, image)
     }
 
-    fun clear() = synchronized(lock) { current = null; image = null }
+    fun clear() = synchronized(lock) {
+        current = null; image = null
+        cancelJobsLocked()
+    }
 
     override fun close() {
-        synchronized(lock) { closed = true; current = null; image = null }
+        synchronized(lock) {
+            if (closed) return
+            closed = true
+            current = null; image = null
+            cancelJobsLocked()
+        }
         executor.shutdownNow()
+        // 已排入的资源关闭动作仍要执行。
+        cleanup.shutdown()
     }
 }
