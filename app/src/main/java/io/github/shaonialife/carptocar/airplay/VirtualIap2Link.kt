@@ -9,6 +9,7 @@ import io.github.shaonialife.carptocar.iap2.Iap2MessageIds
 import io.github.shaonialife.carptocar.iap2.Iap2NowPlaying
 import io.github.shaonialife.carptocar.iap2.MfiLengthMemory
 import io.github.shaonialife.carptocar.iap2.NmeaLocation
+import io.github.shaonialife.carptocar.iap2.NowPlayingUpdates
 import io.github.shaonialife.carptocar.input.ConsumerKeys
 import io.github.shaonialife.carptocar.util.SessionTrace
 import java.security.SecureRandom
@@ -75,6 +76,7 @@ class VirtualIap2Link(
     private var frameCount = 0
     private var eaCount = 0
     private var started = false
+    private val nowPlayingUpdates = NowPlayingUpdates()
 
     // ---- DiPlay 隧道路径状态 ----
     private var tunnelCsmStarted = false
@@ -234,13 +236,10 @@ class VirtualIap2Link(
      */
     fun pushNowPlaying() {
         synchronized(lock) {
-            if (!mib3Identified && !tunnelIdentified) return
-            val nowPlaying = nowPlayingProvider?.invoke() ?: return
-            sendRawCsmLocked(buildNowPlayingUpdate(nowPlaying))
-            log(
-                "IAPLINK: 主动补推 0x5001（歌名=${nowPlaying.title ?: "?"}" +
-                    " 歌手=${nowPlaying.artist ?: "?"}）",
-            )
+            if (closed || (!mib3Identified && !tunnelIdentified)) return
+            nowPlayingUpdates.push(nowPlayingProvider?.invoke()) { value ->
+                sendRawCsmLocked(buildNowPlayingUpdate(value))
+            }
         }
     }
 
@@ -537,7 +536,7 @@ class VirtualIap2Link(
     }
 
     /** 直接投递完整 CSM 帧（Frida 抓的逐字节常量，勿重新编码）。 */
-    private fun sendRawCsmLocked(frame: ByteArray) {
+    private fun sendRawCsmLocked(frame: ByteArray): Boolean {
         val ok = engine.sendControl(frame, System.nanoTime() / 1_000_000L)
         // 帧头：0..1 起始字、2..3 总长度、4..5 messageId、6.. body。
         // 旧实现从 2..3 取 ID（那是长度），日志里的「隧道 tx 0x0100」全是假 ID。
@@ -560,6 +559,7 @@ class VirtualIap2Link(
                 if (ok) "raw" else "raw,send-failed",
             )
         }
+        return ok
     }
 
     /**
@@ -580,7 +580,13 @@ class VirtualIap2Link(
             ids.IDENTIFICATION_INFORMATION -> {
                 val identified = if (onTunnel) tunnelIdentified else mib3Identified
                 if (identified) return
-                if (onTunnel) tunnelIdentified = true else mib3Identified = true
+                if (onTunnel) {
+                    tunnelIdentified = true
+                    // 旧 type-130 隧道未走 MIB3 订阅应答，保留识别后主动补推的兼容行为。
+                    nowPlayingUpdates.subscribe()
+                } else {
+                    mib3Identified = true
+                }
                 val params =
                     Iap2Csm
                         .parseParams(frame.body)
@@ -697,17 +703,22 @@ class VirtualIap2Link(
 
             Iap2MessageIds.START_NOW_PLAYING_UPDATES -> {
                 if (!mib3) return
+                nowPlayingUpdates.subscribe()
                 val nowPlaying = nowPlayingProvider?.invoke()
                 if (nowPlaying != null) {
-                    sendRawCsmLocked(buildNowPlayingUpdate(nowPlaying))
-                    log(
-                        "IAPLINK: MIB3 0x5000 → 0x5001（歌名=${nowPlaying.title ?: "?"}" +
-                            " 歌手=${nowPlaying.artist ?: "?"} 状态=${nowPlaying.status})",
-                    )
+                    nowPlayingUpdates.push(nowPlaying) { value ->
+                        sendRawCsmLocked(buildNowPlayingUpdate(value))
+                    }
                 } else {
                     sendRawCsmLocked(MIB3_NOW_PLAYING_UPDATE_IDLE)
                     log("IAPLINK: MIB3 0x5000 → 0x5001（空态，无正在播放）")
                 }
+            }
+
+            Iap2MessageIds.STOP_NOW_PLAYING_UPDATES -> {
+                // 与 START 的 MIB3 门禁一致；旧 type-130 继续沿用识别后补推。
+                if (!mib3) return
+                nowPlayingUpdates.unsubscribe()
             }
 
             ids.START_HID -> {

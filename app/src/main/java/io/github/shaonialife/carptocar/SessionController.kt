@@ -321,45 +321,14 @@ object SessionController {
         }
         // 数据源 B：系统媒体会话（第三方播放器 QQ音乐/网易云等）——主源。
         // 第三方播放器不触发 CarLife 的 0x10035，歌名只能从 MediaSession 拿。
-        MediaSessionsState.addListener {
-            val np = MediaSessionsState.nowPlaying ?: return@addListener
-            appendLog(
-                "EVENT: MediaSession 歌名「${np.title ?: "?"}」→ 补推 iAP2 0x5001 NowPlayingUpdate",
-            )
-            pushNowPlayingAll()
-        }
+        MediaSessionsState.addPlaybackListener { pushNowPlayingAll() }
     }
 
-    /**
-     * 歌名变化：同时补推 WiFi 隧道（currentClient）与蓝牙链路（server/client）。
-     *
-     * 去重保护：部分播放器（荣耀音乐等）会把「逐行歌词」写进 MediaSession title，
-     * 导致每秒多次内容变化、且同一行会因多触发源（1s 轮询 + 会话回调 + metadata 回调）
-     * 重复 publish。这里按 title+artist 去重，只在真正切歌/切歌词行时推一次。
-     */
+    /** 各链路仅在订阅后推送，并按完整载荷独立去重。 */
     private fun pushNowPlayingAll() {
-        val np = buildNowPlaying() ?: return
-        val key = "${np.title}|${np.artist}"
-        if (key == lastPushedNowPlayingKey) return
-        lastPushedNowPlayingKey = key
         currentClient?.pushNowPlaying()
         bluetoothServer?.pushNowPlaying()
         bluetoothClient?.pushNowPlaying()
-    }
-
-    /** 上次推送的 0x5001 内容键（title|artist），用于去重。 */
-    private var lastPushedNowPlayingKey: String? = null
-
-    /**
-     * 新一轮连接开始：清掉 0x5001 去重键。
-     *
-     * 去重键是「上次推过什么」，跨会话保留就是 bug：同一首歌在重连后需要重推一次
-     * （接收端重连后是全新会话，之前收到的歌名不算数）。旧实现里 18:26 推过
-     * 「真爱假说」后，18:35 重连的整轮会话即使媒体事件触发也会被这行去重静默吞掉
-     * ——车机端持续空白，日志里连一行「补推」都没有（2026-10-25 实测）。
-     */
-    fun resetNowPlayingDedupe() {
-        lastPushedNowPlayingKey = null
     }
 
     /**
@@ -1368,8 +1337,6 @@ object SessionController {
         pendingWaitBudgetStartedAt = 0L
         pendingWaitGaveUp = false
         phaseHint = "蓝牙就绪，等待车机回连…"
-        // 新会话 = 新的 NowPlaying 上下文：清去重键，否则同一首歌重连后不会被重推
-        resetNowPlayingDedupe()
         CarPlayService
             .start(context)
         // 能力发布先于连接（catplay 的做法：CarPlayCtrlServer 在会话一开始就常驻广播

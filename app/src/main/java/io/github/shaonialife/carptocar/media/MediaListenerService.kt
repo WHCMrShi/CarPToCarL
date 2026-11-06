@@ -185,7 +185,8 @@ class MediaListenerService : NotificationListenerService() {
                     positionMs = state?.position ?: 0L,
                     playbackSpeed = if (playing) (state?.playbackSpeed ?: 1f) else 0f,
                     durationMs = meta?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L,
-                    anchoredAtMs = android.os.SystemClock.elapsedRealtime(),
+                    // position 对应播放器上次更新时刻，轮询不能重新锚定旧位置。
+                    anchoredAtMs = state?.lastPositionUpdateTime ?: 0L,
                 )
             }
         MediaSessionsState.publish(now)
@@ -273,14 +274,14 @@ object MediaSessionsState {
     ) {
         /** 渲染时刻的推算播放位置（播放中按速度外推，钳制在时长内）。 */
         fun displayPositionAt(elapsedRealtimeMs: Long): Long {
-            if (durationMs <= 0) return 0
-            val base =
-                if (playing && anchoredAtMs > 0) {
-                    positionMs + ((elapsedRealtimeMs - anchoredAtMs) * playbackSpeed).toLong()
+            if (durationMs <= 0 || positionMs < 0) return 0
+            val delta =
+                if (playing && anchoredAtMs > 0 && playbackSpeed.isFinite()) {
+                    (elapsedRealtimeMs - anchoredAtMs).coerceAtLeast(0).toDouble() * playbackSpeed
                 } else {
-                    positionMs
+                    0.0
                 }
-            return base.coerceIn(0, durationMs)
+            return (positionMs.toDouble() + delta).coerceIn(0.0, durationMs.toDouble()).toLong()
         }
     }
 
@@ -362,6 +363,16 @@ object MediaSessionsState {
     var accessGranted: Boolean = false
 
     private val listeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
+    private val playbackListeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
+
+    /** 协议桥接复用现有 1Hz 轮询；位置更新不触发 UI 的全量刷新。 */
+    internal fun addPlaybackListener(listener: () -> Unit) {
+        playbackListeners.add(listener)
+    }
+
+    internal fun removePlaybackListener(listener: () -> Unit) {
+        playbackListeners.remove(listener)
+    }
 
     fun addListener(listener: () -> Unit) {
         listeners.add(listener)
@@ -389,10 +400,9 @@ object MediaSessionsState {
                 ),
             )
         }
-        // 内容未变（仅位置锚点随轮询更新）不通知：进度走秒由 UI 侧 mediaTick 每秒自刷新
-        // ——此前 anchoredAtMs 恒变导致每秒全量通知监听者，与 mediaTick 形成双路重复渲染
-        if (!contentChanged) return
-        listeners.forEach { runCatching { it() } }
+        // UI 仍仅监听内容变化；协议桥接需要每次采样（含暂停 seek、仅位置变化）。
+        if (contentChanged) listeners.forEach { runCatching { it() } }
+        playbackListeners.forEach { runCatching { it() } }
     }
 
     /** 重同步钩子（服务连接时安装）：UI 乐观更新后调用以拉取真实状态。 */

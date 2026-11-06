@@ -1651,7 +1651,8 @@ class AirPlayClient(
 
     /** 歌名变化时主动补推一次 0x5001（见 [VirtualIap2Link.pushNowPlaying]）。 */
     fun pushNowPlaying() {
-        obtainIapLink().pushNowPlaying()
+        // 媒体轮询不得在断开后创建新的虚拟链路/节拍线程。
+        iapLink?.pushNowPlaying()
     }
 
     /**

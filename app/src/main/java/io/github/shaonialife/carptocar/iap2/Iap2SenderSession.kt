@@ -750,7 +750,12 @@ class Iap2SenderSession(
             // 真车（MIB3）的 NowPlaying 订阅走 WiFi 隧道（VirtualIap2Link），此处
             // provider 为 null 时静默忽略，不影响链路。
             if (frame.messageId == Iap2MessageIds.START_NOW_PLAYING_UPDATES) {
+                nowPlayingUpdates.subscribe()
                 answerNowPlaying("订阅", retriesLeft = nowPlayingRetryDelaysMs.size)
+            }
+            if (frame.messageId == Iap2MessageIds.STOP_NOW_PLAYING_UPDATES) {
+                nowPlayingUpdates.unsubscribe()
+                npGeneration.incrementAndGet()
             }
             if (frame.messageId == lastLoggedId) {
                 repeatCount++
@@ -1090,6 +1095,7 @@ class Iap2SenderSession(
      * 线程安全（[sendFireAndForget] 内部经 [Iap2LinkChannel] 同步发送）。
      */
     fun pushNowPlaying() {
+        if (!channel.isAlive) return
         val np = nowPlayingProvider?.invoke() ?: return
         sendNowPlaying(np, "补推")
     }
@@ -1119,7 +1125,7 @@ class Iap2SenderSession(
                 if (!channel.isAlive || npGeneration.get() != generation) return@execute
                 val np = provider()
                 if (np != null) {
-                    sendNowPlaying(np, tag)
+                    sendNowPlaying(np, tag, generation)
                     return@execute
                 }
                 if (remaining == 0) {
@@ -1143,17 +1149,20 @@ class Iap2SenderSession(
     private fun sendNowPlaying(
         np: CarPlayNowPlaying,
         tag: String,
+        generation: Int? = null,
     ) {
-        runCatching {
-            sendFireAndForget(
-                Iap2MessageIds.NOW_PLAYING_UPDATE,
-                // 必须是纯参数体：sendFireAndForget 会自己补帧头，
-                // 传 Iap2NowPlaying.encode() 会双重封包（见该函数注释）。
-                Iap2NowPlaying.body(np),
-            )
-            log("iap2 $tag 0x5001（歌名=${np.title ?: "?"} 歌手=${np.artist ?: "?"}）")
-        }.onFailure {
-            log("iap2 0x5001 发送失败（$tag）- ${it.message}")
+        nowPlayingUpdates.push(np) { value ->
+            if (!channel.isAlive || (generation != null && npGeneration.get() != generation)) return@push false
+            runCatching {
+                sendFireAndForget(
+                    Iap2MessageIds.NOW_PLAYING_UPDATE,
+                    // 必须是纯参数体：sendFireAndForget 会自己补帧头。
+                    Iap2NowPlaying.body(value),
+                )
+                log("iap2 $tag 0x5001（歌名=${value.title ?: "?"} 歌手=${value.artist ?: "?"}）")
+            }.onFailure {
+                log("iap2 0x5001 发送失败（$tag）- ${it.message}")
+            }.isSuccess
         }
     }
 
@@ -1162,6 +1171,7 @@ class Iap2SenderSession(
 
     /** 单调递增的订阅代次：新订阅作废旧的重试任务。 */
     private val npGeneration = java.util.concurrent.atomic.AtomicInteger()
+    private val nowPlayingUpdates = NowPlayingUpdates()
 
     /** 0x5001 重试专用单线程（daemon）：不占用 iAP2 收包线程，会话结束自动退出进程。 */
     private val nowPlayingRetry =

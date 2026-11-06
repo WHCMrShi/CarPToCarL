@@ -1,5 +1,6 @@
 package io.github.shaonialife.carptocar.airplay
 
+import io.github.shaonialife.carptocar.iap2.CarPlayNowPlaying
 import io.github.shaonialife.carptocar.iap2.Iap2Csm
 import io.github.shaonialife.carptocar.iap2.Iap2LinkEngine
 import io.github.shaonialife.carptocar.iap2.MfiLengthMemory
@@ -45,6 +46,7 @@ class VirtualIap2LinkTest {
         val allControl = ArrayList<ByteArray>()
         val eventSent = ArrayList<ByteArray>()
         val car = Iap2LinkEngine()
+        var nowPlaying: CarPlayNowPlaying? = null
         val link =
             VirtualIap2Link(
                 log = { },
@@ -60,6 +62,7 @@ class VirtualIap2LinkTest {
                 // 关闭节拍线程：测试内确定性驱动（无重传干扰）
                 alive = { false },
                 nowMillis = { clock },
+                nowPlayingProvider = { nowPlaying },
             )
         var clock = 0L
         var now = 1L
@@ -137,6 +140,57 @@ class VirtualIap2LinkTest {
                         .first()
                         .value.size
                 }
+    }
+
+    @Test
+    fun progressPauseSeekStopAndResubscribeUseRealCsmPayloads() {
+        val h = Harness()
+        try {
+            h.link.armMib3()
+            h.car.start(0)
+            h.exchangeUntilNormal()
+            h.carSends(0x1D01, Iap2Csm.string(0, "Audi"))
+            h.nowPlaying = CarPlayNowPlaying("song", "artist", null, 180_000, 1, 10_000, appName = "player")
+            fun count() = h.controlFrames().count { it.second == 0x5001 }
+            fun push() {
+                h.link.pushNowPlaying()
+                h.link.onCarBytes(ByteArray(0)) // 同步驱动 drain，测试不运行 pacer。
+                h.exchange()
+            }
+            push()
+            assertEquals(0, count())
+            assertEquals(listOf(0x5001), h.carSends(0x5000))
+            var expected = 1
+            fun assertPlayback(position: Int, status: Int) {
+                val frame = Iap2Csm.Parser().offer(h.lastRawFrameOf(0x5001)!!).single()
+                val playback = Iap2Csm.parseParams(frame.body).single { it.id == 1 }
+                val params = Iap2Csm.parseParams(playback.value)
+                assertEquals(position, java.nio.ByteBuffer.wrap(params.single { it.id == 1 }.value).int)
+                assertEquals(status, params.single { it.id == 0 }.value.single().toInt())
+            }
+            assertPlayback(10_000, 1)
+            for ((position, status) in listOf(11_000 to 1, 11_000 to 2, 5_000 to 2, 5_000 to 1)) {
+                h.nowPlaying = h.nowPlaying!!.copy(elapsedMs = position, status = status)
+                push()
+                assertEquals(++expected, count())
+                assertPlayback(position, status)
+                push()
+                assertEquals(expected, count())
+            }
+            h.carSends(0x5002)
+            h.nowPlaying = h.nowPlaying!!.copy(elapsedMs = 6_000)
+            push()
+            assertEquals(expected, count())
+            h.carSends(0x5000)
+            assertEquals(++expected, count())
+            assertPlayback(6_000, 1)
+            h.link.close()
+            h.nowPlaying = h.nowPlaying!!.copy(elapsedMs = 7_000)
+            push()
+            assertEquals(expected, count())
+        } finally {
+            h.link.close()
+        }
     }
 
     @Test
