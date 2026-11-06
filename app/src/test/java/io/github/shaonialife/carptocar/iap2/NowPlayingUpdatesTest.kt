@@ -64,6 +64,24 @@ class NowPlayingUpdatesTest {
         assertTrue(first.push(paused) { true })
     }
 
+    @Test fun lateCompletionCannotRestoreOldSubscriptionCacheOrBlockUnsubscribe() {
+        val updates = NowPlayingUpdates()
+        updates.subscribe()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val sender = Thread { updates.push(song) { entered.countDown(); release.await(); true } }.apply { start() }
+        try {
+            assertTrue(entered.await(3, java.util.concurrent.TimeUnit.SECONDS))
+            val done = CountDownLatch(1)
+            val canceller = Thread { updates.unsubscribe(); updates.subscribe(); done.countDown() }.apply { start() }
+            assertTrue(done.await(1, java.util.concurrent.TimeUnit.SECONDS))
+            canceller.join(1000)
+            release.countDown()
+            sender.join(3000)
+            assertTrue(updates.push(song) { true })
+        } finally { release.countDown(); sender.join(3000) }
+    }
+
     @Test fun failedSendIsNotCachedAndConcurrentDuplicateCallbacksSendOnce() {
         val updates = NowPlayingUpdates()
         updates.subscribe()

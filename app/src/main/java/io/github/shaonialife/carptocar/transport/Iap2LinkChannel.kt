@@ -1,6 +1,7 @@
 package io.github.shaonialife.carptocar.transport
 
 import io.github.shaonialife.carptocar.iap2.Iap2LinkEngine
+import io.github.shaonialife.carptocar.util.ConnectionResources
 import java.io.Closeable
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
@@ -17,6 +18,10 @@ class Iap2LinkChannel(
     private val log: (String) -> Unit = {},
 ) : Closeable {
     private val engine = Iap2LinkEngine()
+    private val resources = ConnectionResources()
+    private val ioClosed = java.util.concurrent.atomic.AtomicBoolean()
+
+    internal fun own(resource: AutoCloseable): Boolean = resources.own(resource)
     private val lock = Object()
     private val controls = LinkedBlockingQueue<ByteArray?>()
     private val readyLatch = CountDownLatch(1)
@@ -140,7 +145,14 @@ class Iap2LinkChannel(
     }
 
     override fun close() {
+        // 写线程可能持有 lock 阻塞在 IO；必须先关流解除阻塞，再等待状态锁。
+        resources.close()
+        closeIo()
         finish(null)
+    }
+
+    private fun closeIo() {
+        if (ioClosed.compareAndSet(false, true)) runCatching { stream.close() }
     }
 
     // ---- 内部 ----
@@ -266,10 +278,11 @@ class Iap2LinkChannel(
     private fun finishLocked(failure: IOException?) {
         if (terminated) return
         terminated = true
+        resources.close()
         controls.offer(POISON) // 哨兵：唤醒阻塞的接收方（LBQ 不接受 null）
         readyLatch.countDown()
         lock.notifyAll()
-        runCatching { stream.close() }
+        closeIo()
         if (failure != null) {
             log("LINK closed: ${failure.message}")
         } else {

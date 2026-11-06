@@ -143,6 +143,20 @@ class VirtualIap2LinkTest {
     }
 
     @Test
+    fun mediaCallbackDoesNotWaitForVirtualLinkLock() {
+        val h = Harness()
+        val field = VirtualIap2Link::class.java.getDeclaredField("lock").apply { isAccessible = true }
+        val done = java.util.concurrent.CountDownLatch(1)
+        var caller: Thread? = null
+        try {
+            synchronized(checkNotNull(field.get(h.link))) {
+                caller = Thread { repeat(1000) { h.link.pushNowPlaying() }; done.countDown() }.apply { start() }
+                assertTrue(done.await(1, java.util.concurrent.TimeUnit.SECONDS))
+            }
+        } finally { h.link.close(); caller?.join(3000) }
+    }
+
+    @Test
     fun progressPauseSeekStopAndResubscribeUseRealCsmPayloads() {
         val h = Harness()
         try {

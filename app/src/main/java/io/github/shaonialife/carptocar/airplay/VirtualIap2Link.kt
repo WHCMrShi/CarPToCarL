@@ -77,6 +77,7 @@ class VirtualIap2Link(
     private var eaCount = 0
     private var started = false
     private val nowPlayingUpdates = NowPlayingUpdates()
+    private val nowPlayingPending = java.util.concurrent.atomic.AtomicBoolean()
 
     // ---- DiPlay 隧道路径状态 ----
     private var tunnelCsmStarted = false
@@ -235,11 +236,13 @@ class VirtualIap2Link(
      * 由外部主动补推一次。链路尚未建立（MIB3 未识别）时静默忽略。
      */
     fun pushNowPlaying() {
-        synchronized(lock) {
-            if (closed || (!mib3Identified && !tunnelIdentified)) return
-            nowPlayingUpdates.push(nowPlayingProvider?.invoke()) { value ->
-                sendRawCsmLocked(buildNowPlayingUpdate(value))
-            }
+        if (!closed) nowPlayingPending.set(true)
+    }
+
+    private fun flushNowPlayingLocked() {
+        if (!nowPlayingPending.getAndSet(false) || closed || (!mib3Identified && !tunnelIdentified)) return
+        nowPlayingUpdates.push(nowPlayingProvider?.invoke()) { value ->
+            sendRawCsmLocked(buildNowPlayingUpdate(value))
         }
     }
 
@@ -419,6 +422,7 @@ class VirtualIap2Link(
     }
 
     private fun drainLocked() {
+        flushNowPlayingLocked()
         while (true) {
             when (val event = engine.pollEvent()) {
                 null -> break

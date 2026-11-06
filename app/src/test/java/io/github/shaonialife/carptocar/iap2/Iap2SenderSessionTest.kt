@@ -191,6 +191,59 @@ class Iap2SenderSessionTest {
         accessoryChannel.close()
     }
 
+    @Test
+    fun uniqueSubscriptionDuringMfiOrHidSurvivesHandshakeAndEarlyStopWins() {
+        for (duringMfi in listOf(false, true)) {
+            for (earlyStop in listOf(false, true)) {
+                val pair = InMemoryStreamPair()
+                val phone = Iap2LinkChannel(pair.sideA, name = "early-phone")
+                val car = Iap2LinkChannel(pair.sideB, name = "early-car")
+                val source = AtomicReference(CarPlayNowPlaying("song", "artist", null, 180_000, 2, 14_000, appName = "player"))
+                val session = Iap2SenderSession(phone, {}, nowPlayingProvider = { source.get() })
+                val failure = AtomicReference<Throwable>()
+                val accessory = MockAccessory(car, onlyEarlyNowPlaying = true,
+                    nowPlayingDuringMfi = duringMfi, stopEarlyNowPlaying = earlyStop)
+                val mock = Thread {
+                    try { accessory.run() } catch (error: Throwable) { failure.set(error) }
+                }.apply { isDaemon = true; start() }
+                var pump: Thread? = null
+                val parser = Iap2Csm.Parser()
+                fun receive(timeoutMs: Long): Iap2Csm.Frame? {
+                    val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
+                    while (System.nanoTime() < deadline) {
+                        val bytes = car.recvControl(20) ?: continue
+                        parser.offer(bytes).firstOrNull { it.messageId == 0x5001 }?.let { return it }
+                    }
+                    return null
+                }
+                try {
+                    session.run(10_000)
+                    mock.join(3000)
+                    assertTrue(!mock.isAlive)
+                    failure.get()?.let { throw AssertionError("mock 握手失败", it) }
+                    // 提前记账，但不得在握手中抢发 0x5001。
+                    assertTrue(receive(50) == null)
+                    pump = Thread { session.pumpIncomingForever() }.apply { isDaemon = true; start() }
+                    if (earlyStop) {
+                        assertTrue(receive(100) == null)
+                        car.sendControl(Iap2Csm.encode(0x5000))
+                    }
+                    val first = receive(3000)
+                    assertNotNull("唯一提前订阅不得丢失 stageMfi=$duringMfi earlyStop=$earlyStop", first)
+                    val group = Iap2Csm.parseParams(first!!.body).single { it.id == 1 }
+                    val params = Iap2Csm.parseParams(group.value)
+                    assertEquals(14_000, java.nio.ByteBuffer.wrap(params.single { it.id == 1 }.value).int)
+                    source.set(source.get().copy(elapsedMs = 15_000))
+                    session.pushNowPlaying()
+                    assertNotNull(receive(3000))
+                } finally {
+                    phone.close(); car.close()
+                    mock.join(3000); pump?.join(3000)
+                }
+            }
+        }
+    }
+
     /** 按 DiPlay Iap2WirelessControlClient 的时序脚本化应答。 */
     private class MockAccessory(
         private val channel: Iap2LinkChannel,
@@ -208,6 +261,9 @@ class Iap2SenderSessionTest {
          * 且应等到 Phase 1 结束（保活期）才补发 0x4301。
          */
         private val newProtocol: Boolean = false,
+        private val onlyEarlyNowPlaying: Boolean = false,
+        private val nowPlayingDuringMfi: Boolean = false,
+        private val stopEarlyNowPlaying: Boolean = false,
     ) {
         private val parser = Iap2Csm.Parser()
         private val pending = ArrayDeque<Iap2Csm.Frame>()
@@ -246,6 +302,10 @@ class Iap2SenderSessionTest {
             expect(Iap2MessageIds.MFI_REQUEST_CERTIFICATE)
             send(Iap2MessageIds.MFI_CERTIFICATE, Iap2Csm.param(0, ByteArray(64) { it.toByte() }))
             expect(Iap2MessageIds.MFI_REQUEST_CHALLENGE)
+            if (onlyEarlyNowPlaying && nowPlayingDuringMfi) {
+                send(Iap2MessageIds.START_NOW_PLAYING_UPDATES)
+                if (stopEarlyNowPlaying) send(Iap2MessageIds.STOP_NOW_PLAYING_UPDATES)
+            }
             send(Iap2MessageIds.MFI_RESPONSE, Iap2Csm.param(0, ByteArray(70) { (it * 7).toByte() }))
             expect(Iap2MessageIds.MFI_AUTHENTICATION_SUCCEEDED)
 
@@ -261,7 +321,10 @@ class Iap2SenderSessionTest {
 
             // 订阅 + StartHID（奥迪形态不发，发送端应直接跳过等待）
             if (!audiDeclarations) {
-                send(Iap2MessageIds.START_NOW_PLAYING_UPDATES)
+                if (!onlyEarlyNowPlaying || !nowPlayingDuringMfi) {
+                    send(Iap2MessageIds.START_NOW_PLAYING_UPDATES)
+                    if (stopEarlyNowPlaying) send(Iap2MessageIds.STOP_NOW_PLAYING_UPDATES)
+                }
                 send(Iap2MessageIds.START_POWER_UPDATES)
                 send(
                     Iap2MessageIds.START_HID,
@@ -280,7 +343,7 @@ class Iap2SenderSessionTest {
             // 迟到一条订阅请求（真实车机 bring-up 常见：0x5000 与 0x5703 相邻到达）。
             // 它必须被暂存而不是在 expectOrNull 里被反复重读——旧实现把非预期帧塞回
             // 「自己下一轮优先读取」的队列，同一帧无限循环（2026-10-18 日志刷屏根因）。
-            send(Iap2MessageIds.START_NOW_PLAYING_UPDATES)
+            if (!onlyEarlyNowPlaying) send(Iap2MessageIds.START_NOW_PLAYING_UPDATES)
             // GM/Cinemo 形态：没有凭据可发（0x4301 才是唯一来源）
             if (!newProtocol) {
                 send(

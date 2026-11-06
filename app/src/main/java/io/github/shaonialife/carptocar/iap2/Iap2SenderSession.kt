@@ -712,6 +712,16 @@ class Iap2SenderSession(
      * 真实无线 CarPlay 中这条控制通道与 AirPlay 会话并存于整个连接生命周期。
      */
     fun pumpIncomingForever() {
+        try {
+            pumpIncomingLoop()
+        } finally {
+            nowPlayingDispatcher.close()
+        }
+    }
+
+    private fun pumpIncomingLoop() {
+        nowPlayingPumpStarted = true
+        if (nowPlayingSubscribed) nowPlayingDispatcher.subscribe()
         log(
             "SESSION 保活中（链路保持打开，持续记录配件消息）" +
                 if (awaitingStartSession) "——车机尚未下发 0x4301，将每 ${NUDGE_INTERVAL_MILLIS / 1000}s 催问一次" else "",
@@ -745,17 +755,6 @@ class Iap2SenderSession(
                 handleEaData(frame)
                 // 数据帧内容由上层记日志（可能是二进制），这里不再打 keep-alive 行。
                 continue
-            }
-            // 0x5000 NowPlaying 订阅：蓝牙链路（测试台）在这里订阅，回一次 0x5001。
-            // 真车（MIB3）的 NowPlaying 订阅走 WiFi 隧道（VirtualIap2Link），此处
-            // provider 为 null 时静默忽略，不影响链路。
-            if (frame.messageId == Iap2MessageIds.START_NOW_PLAYING_UPDATES) {
-                nowPlayingUpdates.subscribe()
-                answerNowPlaying("订阅", retriesLeft = nowPlayingRetryDelaysMs.size)
-            }
-            if (frame.messageId == Iap2MessageIds.STOP_NOW_PLAYING_UPDATES) {
-                nowPlayingUpdates.unsubscribe()
-                npGeneration.incrementAndGet()
             }
             if (frame.messageId == lastLoggedId) {
                 repeatCount++
@@ -1095,89 +1094,35 @@ class Iap2SenderSession(
      * 线程安全（[sendFireAndForget] 内部经 [Iap2LinkChannel] 同步发送）。
      */
     fun pushNowPlaying() {
-        if (!channel.isAlive) return
-        val np = nowPlayingProvider?.invoke() ?: return
-        sendNowPlaying(np, "补推")
+        nowPlayingDispatcher.request()
     }
 
-    /**
-     * 应答 0x5000 订阅（含重试）。
-     *
-     * **为什么必须重试**：接收端（WinPlay/DiPlay 测试台）只在 bring-up 后订阅一次
-     * 0x5000，之后切歌不会再订阅；而手机侧媒体信息总有空窗——重装 APK/冷启动后
-     * 通知监听器要先被系统重新绑定、MediaSession 先报播放状态再补 metadata，
-     * 这一小段里 [nowPlayingProvider] 返回 null。旧实现 null 就静默放弃，于是整程
-     * 没有歌名（2026-10-25 实测：18:35 那轮 0x5000 到达 2 次，0x5001 一条都没发，
-     * 日志里连失败行都没有——因为压根没进发送分支）。
-     *
-     * 现在按 [nowPlayingRetryDelaysMs] 退避重试；新订阅会作废上一轮的待重试任务
-     * （[npGeneration]），避免多条线程同时推送。
-     */
-    private fun answerNowPlaying(
-        tag: String,
-        retriesLeft: Int,
-    ) {
-        val provider = nowPlayingProvider ?: return
-        val generation = npGeneration.incrementAndGet()
-        nowPlayingRetry.execute {
-            var remaining = retriesLeft
-            while (remaining >= 0) {
-                if (!channel.isAlive || npGeneration.get() != generation) return@execute
-                val np = provider()
-                if (np != null) {
-                    sendNowPlaying(np, tag, generation)
-                    return@execute
-                }
-                if (remaining == 0) {
-                    log("iap2 0x5000（$tag）重试用尽仍读不到媒体信息——本轮放弃（切歌时会再补推）")
-                    return@execute
-                }
-                val index = nowPlayingRetryDelaysMs.size - remaining
-                val delay = nowPlayingRetryDelaysMs[index.coerceIn(0, nowPlayingRetryDelaysMs.size - 1)]
-                log("iap2 0x5000（$tag）暂无媒体信息——${delay}ms 后重试（剩 $remaining 次）")
-                try {
-                    Thread.sleep(delay)
-                } catch (_: InterruptedException) {
-                    return@execute
-                }
-                remaining--
+    private var nowPlayingSubscribed = false
+    private var nowPlayingPumpStarted = false
+    private val nowPlayingDispatcher = NowPlayingDispatcher(
+        alive = { channel.isAlive },
+        provider = { nowPlayingProvider?.invoke() },
+        send = { value ->
+            runCatching {
+                sendFireAndForget(Iap2MessageIds.NOW_PLAYING_UPDATE, Iap2NowPlaying.body(value))
+            }.onFailure { log("iap2 0x5001 发送失败 - ${it.message}") }.isSuccess
+        },
+    ).also { channel.own(it) }
+
+    /** 解码时统一记账，MFi/HID 等待即使消费了该帧，也不会漏订阅或重复派发。 */
+    private fun recordNowPlayingSubscription(messageId: Int) {
+        when (messageId) {
+            Iap2MessageIds.START_NOW_PLAYING_UPDATES -> {
+                nowPlayingSubscribed = true
+                // 不在握手中抢发媒体信息；保活起步会重推最终订阅状态。
+                if (nowPlayingPumpStarted) nowPlayingDispatcher.subscribe()
+            }
+            Iap2MessageIds.STOP_NOW_PLAYING_UPDATES -> {
+                nowPlayingSubscribed = false
+                nowPlayingDispatcher.unsubscribe()
             }
         }
     }
-
-    /** 真正下发一条 0x5001（参数体，帧头由 [sendFireAndForget] 补）。 */
-    private fun sendNowPlaying(
-        np: CarPlayNowPlaying,
-        tag: String,
-        generation: Int? = null,
-    ) {
-        nowPlayingUpdates.push(np) { value ->
-            if (!channel.isAlive || (generation != null && npGeneration.get() != generation)) return@push false
-            runCatching {
-                sendFireAndForget(
-                    Iap2MessageIds.NOW_PLAYING_UPDATE,
-                    // 必须是纯参数体：sendFireAndForget 会自己补帧头。
-                    Iap2NowPlaying.body(value),
-                )
-                log("iap2 $tag 0x5001（歌名=${value.title ?: "?"} 歌手=${value.artist ?: "?"}）")
-            }.onFailure {
-                log("iap2 0x5001 发送失败（$tag）- ${it.message}")
-            }.isSuccess
-        }
-    }
-
-    /** 0x5000 应答重试退避（毫秒）：覆盖「通知监听器重绑 + metadata 补齐」的常见空窗。 */
-    private val nowPlayingRetryDelaysMs = longArrayOf(1_500, 4_000, 8_000, 15_000, 25_000)
-
-    /** 单调递增的订阅代次：新订阅作废旧的重试任务。 */
-    private val npGeneration = java.util.concurrent.atomic.AtomicInteger()
-    private val nowPlayingUpdates = NowPlayingUpdates()
-
-    /** 0x5001 重试专用单线程（daemon）：不占用 iAP2 收包线程，会话结束自动退出进程。 */
-    private val nowPlayingRetry =
-        java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
-            Thread(runnable, "iap2-nowplaying").apply { isDaemon = true }
-        }
 
     /**
      * 保活期间收到 0x4301：解析成端点交给主控（配对窗口内热更新，或上一轮失败后重走）。
@@ -1502,6 +1447,7 @@ class Iap2SenderSession(
         // 这里只记账不打印：日志与上层回调仍由派发路径上的 handleEaStatus 统一负责，
         // 避免同一帧打两行。
         frames.forEach { frame ->
+            recordNowPlayingSubscription(frame.messageId)
             if (frame.messageId == Iap2MessageIds.EA_SESSION_STATUS) eaStatusRaw = frame.body
         }
         frames.forEachIndexed { index, frame -> if (index > 0) receivedFrames += frame }

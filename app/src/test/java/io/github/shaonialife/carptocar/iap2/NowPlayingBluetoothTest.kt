@@ -63,8 +63,6 @@ class NowPlayingBluetoothTest {
             phone.close()
             car.close()
             pump.join(3000)
-            val field = Iap2SenderSession::class.java.getDeclaredField("nowPlayingRetry").apply { isAccessible = true }
-            (field.get(session) as java.util.concurrent.ExecutorService).shutdownNow()
         }
     }
 }
