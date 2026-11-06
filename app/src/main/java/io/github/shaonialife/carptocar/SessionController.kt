@@ -352,6 +352,7 @@ object SessionController {
             status = Iap2NowPlaying.STATUS_PLAYING, // CarLife 推歌名即视为播放中
             elapsedMs = 0,
             appName = info.source.takeIf { it.isNotBlank() },
+            artworkSource = CarLifeHijack.artworkFor(info),
         )
     }
 

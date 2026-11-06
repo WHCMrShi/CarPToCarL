@@ -2,6 +2,7 @@ package io.github.shaonialife.carptocar.airplay
 
 import android.content.Context
 import io.github.shaonialife.carptocar.iap2.CarPlayNowPlaying
+import io.github.shaonialife.carptocar.iap2.Iap2ArtworkSender
 import io.github.shaonialife.carptocar.iap2.Iap2CapabilityReport
 import io.github.shaonialife.carptocar.iap2.Iap2Csm
 import io.github.shaonialife.carptocar.iap2.Iap2LinkEngine
@@ -77,6 +78,8 @@ class VirtualIap2Link(
     private var eaCount = 0
     private var started = false
     private val nowPlayingUpdates = NowPlayingUpdates()
+    private val artworkSender = Iap2ArtworkSender(clock = nowMillis, log = log)
+    private var artworkField: Int? = null
     private val nowPlayingPending = java.util.concurrent.atomic.AtomicBoolean()
 
     // ---- DiPlay 隧道路径状态 ----
@@ -241,8 +244,11 @@ class VirtualIap2Link(
 
     private fun flushNowPlayingLocked() {
         if (!nowPlayingPending.getAndSet(false) || closed || (!mib3Identified && !tunnelIdentified)) return
-        nowPlayingUpdates.push(nowPlayingProvider?.invoke()) { value ->
-            sendRawCsmLocked(buildNowPlayingUpdate(value))
+        val value = nowPlayingProvider?.invoke()?.let { artworkSender.decorate(it, artworkField, engine.supportsArtworkTransfer) }
+        nowPlayingUpdates.push(value) { current ->
+            sendRawCsmLocked(buildNowPlayingUpdate(current)).also { accepted ->
+                if (accepted) artworkSender.metadataSent(current.artworkTransferId)
+            }
         }
     }
 
@@ -422,12 +428,15 @@ class VirtualIap2Link(
     }
 
     private fun drainLocked() {
+        if (artworkSender.needsRefresh()) nowPlayingPending.set(true)
         flushNowPlayingLocked()
         while (true) {
             when (val event = engine.pollEvent()) {
                 null -> break
                 is Iap2LinkEngine.Event.Control ->
                     handleFrameLocked(event.bytes)
+
+                is Iap2LinkEngine.Event.FileTransfer -> artworkSender.response(event.bytes)
 
                 is Iap2LinkEngine.Event.Dead -> {
                     log("IAPLINK: 虚拟链路终止 - ${event.reason ?: "EOF"}")
@@ -440,6 +449,11 @@ class VirtualIap2Link(
         flushOutputLocked()
         maybeStartControlCsmLocked()
         checkMfiTimeoutLocked()
+        if (artworkField != null && engine.supportsArtworkTransfer && !closed) {
+            val limit = (engine.peerSynchronization?.maxLength ?: 0) - Iap2LinkEngine.HEADER_BYTES - 1
+            val plan = artworkSender.poll(limit)
+            if (plan != null) artworkSender.submitted(plan, engine.sendFileTransfer(plan.bytes, nowMillis()))
+        }
         flushOutputLocked()
     }
 
@@ -707,11 +721,16 @@ class VirtualIap2Link(
 
             Iap2MessageIds.START_NOW_PLAYING_UPDATES -> {
                 if (!mib3) return
+                artworkField = Iap2ArtworkSender.requestedField(frame.body)
+                artworkSender.reset()
+                log("ARTWORK: WiFi 订阅字段=$artworkField 文件会话=${engine.fileTransferSessionId}")
                 nowPlayingUpdates.subscribe()
-                val nowPlaying = nowPlayingProvider?.invoke()
+                val nowPlaying = nowPlayingProvider?.invoke()?.let { artworkSender.decorate(it, artworkField, engine.supportsArtworkTransfer) }
                 if (nowPlaying != null) {
                     nowPlayingUpdates.push(nowPlaying) { value ->
-                        sendRawCsmLocked(buildNowPlayingUpdate(value))
+                        sendRawCsmLocked(buildNowPlayingUpdate(value)).also { accepted ->
+                            if (accepted) artworkSender.metadataSent(value.artworkTransferId)
+                        }
                     }
                 } else {
                     sendRawCsmLocked(MIB3_NOW_PLAYING_UPDATE_IDLE)
@@ -722,6 +741,8 @@ class VirtualIap2Link(
             Iap2MessageIds.STOP_NOW_PLAYING_UPDATES -> {
                 // 与 START 的 MIB3 门禁一致；旧 type-130 继续沿用识别后补推。
                 if (!mib3) return
+                artworkField = null
+                artworkSender.reset()
                 nowPlayingUpdates.unsubscribe()
             }
 

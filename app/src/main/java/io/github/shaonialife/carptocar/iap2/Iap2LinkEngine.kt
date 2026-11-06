@@ -102,6 +102,8 @@ class Iap2LinkEngine(
             val bytes: ByteArray,
         ) : Event()
 
+        class FileTransfer(val bytes: ByteArray) : Event()
+
         class Dead(
             val reason: String?,
         ) : Event()
@@ -370,6 +372,32 @@ class Iap2LinkEngine(
         return true
     }
 
+    /** 文件数据只使用对端明确协商的会话；可选封面不进入控制重传/死亡策略。 */
+    val fileTransferSessionId: Int? get() {
+        val sessions = peerSynchronization?.sessions ?: return null
+        return sessions.singleOrNull { it.kind == 1 && it.version == 2 }?.id
+            ?.takeIf { id -> id > 0 && sessions.count { it.id == id } == 1 }
+    }
+
+    val supportsArtworkTransfer: Boolean get() = fileTransferSessionId != null && declaredMaxOutgoing >= 2 &&
+        (peerSynchronization?.maxLength ?: 0) >= HEADER_BYTES + 1 + 12
+
+    fun sendFileTransfer(bytes: ByteArray, nowMillis: Long): Boolean {
+        if (!supportsArtworkTransfer) return false
+        val sessionId = fileTransferSessionId ?: return false
+        val peer = peerSynchronization ?: return false
+        val limit = peer.maxLength - HEADER_BYTES - 1
+        if (state != State.NORMAL || bytes.isEmpty() || bytes.size > limit || sendBacklog.isNotEmpty()) return false
+        val outstanding = lastSentAcknowledged?.let { sequenceDistance(sentSequence, it) } ?: 0
+        // 给控制消息留一格窗口；封面最多一个未确认链路包，不压入无界积压队列。
+        if (lastFileSequence != null || outstanding >= (declaredMaxOutgoing - 1).coerceAtLeast(1)) return false
+        sentSequence = nextSequence(sentSequence)
+        writePacket(bytes, sentSequence, CONTROL_ACKNOWLEDGEMENT, sessionId)
+        if (peer.maxRetransmissions > 0) lastFileSequence = sentSequence else lastSentAcknowledged = sentSequence
+        return true
+    }
+    private var lastFileSequence: Int? = null
+
     // ---- 接收解析 ----
 
     private fun parseAvailable(nowMillis: Long): Boolean {
@@ -506,6 +534,8 @@ class Iap2LinkEngine(
                 // 收到对端的数据即代表对端认为链路可用；ACK 帧若丢失/被跳过，这里兜底进入 NORMAL
                 completeNegotiationIfPending(nowMillis)
                 handleData(sequence, payload!!)
+            } else if (fileTransferSessionId != null && sessionId == fileTransferSessionId) {
+                handleData(sequence, payload!!, fileTransfer = true)
             } else if (sessionId == SESSION_EA && onEaData != null) {
                 // EA 会话数据（含触摸 HID）：对端序号账法与控制会话独立，直接上抛
                 onEaData?.invoke(payload!!)
@@ -621,6 +651,7 @@ class Iap2LinkEngine(
         nowMillis: Long,
     ) {
         completeNegotiationIfPending(nowMillis)
+        lastFileSequence?.let { if (sequenceDistance(it, acknowledgement) !in 1..declaredMaxOutgoing) lastFileSequence = null }
         lastSentAcknowledged = acknowledgement
         val window = (peerSynchronization?.maxOutgoing ?: maxOutgoing) + ACK_SLACK
         unacknowledged.removeAll { sequenceDistance(it.sequence, acknowledgement) !in 1..window }
@@ -631,6 +662,7 @@ class Iap2LinkEngine(
     private fun handleData(
         sequence: Int,
         payload: ByteArray,
+        fileTransfer: Boolean = false,
     ) {
         val distance = sequenceDistance(sequence, lastReceivedInOrder)
         val peerWindow = peerSynchronization?.maxOutgoing ?: maxOutgoing
@@ -645,7 +677,7 @@ class Iap2LinkEngine(
             die("event queue overflow")
             return
         }
-        pendingEvents += Event.Control(payload)
+        pendingEvents += if (fileTransfer) Event.FileTransfer(payload) else Event.Control(payload)
         sendAcknowledgement()
     }
 

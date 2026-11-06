@@ -142,6 +142,55 @@ class VirtualIap2LinkTest {
                 }
     }
 
+    @Test fun artworkSubscriptionTransfersExactBytesAndStopsOnUnsubscribe() {
+        val h = Harness()
+        io.github.shaonialife.carptocar.media.ArtworkRepository().use { repo ->
+            val expected = ByteArray(3000) { it.toByte() }.also {
+                it[0] = 0xff.toByte(); it[1] = 0xd8.toByte(); it[2] = 0xff.toByte()
+            }
+            val source = repo.source("track", 1) { expected }
+            source.request()
+            val end = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3)
+            while (!source.request().complete && System.nanoTime() < end) Thread.sleep(5)
+            try {
+                h.link.armMib3(); h.car.start(0); h.exchangeUntilNormal()
+                h.carSends(0x1D01, Iap2Csm.string(0, "Audi"))
+                h.nowPlaying = CarPlayNowPlaying("song", "artist", "album", 180000, 2, 1000,
+                    appName = "player", artworkSource = source)
+                h.carSends(0x5000, Iap2Csm.group(0, Iap2Csm.param(26, ByteArray(0))))
+                val media = Iap2Csm.parseParams(h.lastRawFrameOf(0x5001)!!.drop(6).toByteArray()).single { it.id == 0 }
+                val id = Iap2Csm.parseParams(media.value).single { it.id == 26 }.value.single()
+                val data = java.io.ByteArrayOutputStream()
+                var finished = false
+                repeat(16) {
+                    while (true) {
+                        val event = h.car.pollEvent() ?: break
+                        if (event is Iap2LinkEngine.Event.FileTransfer) {
+                            val bytes = event.bytes
+                            assertEquals(id, bytes[0])
+                            if (bytes[1].toInt() == 4) {
+                                assertTrue(h.car.sendFileTransfer(byteArrayOf(id, 1), h.now))
+                            } else {
+                                data.write(bytes, 2, bytes.size - 2)
+                                if (bytes[1].toInt() and 0x40 != 0) {
+                                    finished = true
+                                    assertTrue(h.car.sendFileTransfer(byteArrayOf(id, 5), h.now))
+                                }
+                            }
+                        }
+                    }
+                    h.exchange()
+                }
+                assertTrue(finished)
+                org.junit.Assert.assertArrayEquals(expected, data.toByteArray())
+                h.carSends(0x5002)
+                val count = h.allControl.size
+                h.link.pushNowPlaying(); h.link.onCarBytes(ByteArray(0)); h.exchange()
+                assertEquals(count, h.allControl.size)
+            } finally { h.link.close() }
+        }
+    }
+
     @Test
     fun mediaCallbackDoesNotWaitForVirtualLinkLock() {
         val h = Harness()

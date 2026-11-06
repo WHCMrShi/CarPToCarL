@@ -140,6 +140,90 @@ class Iap2LinkEngineTest {
         }
     }
 
+    @Test fun fileSessionRoundTripKeepsControlIndependentAndReservesWindow() {
+        val phone = Iap2LinkEngine()
+        val car = Iap2LinkEngine()
+        phone.start(0); car.start(0)
+        exchangeUntilNormal(phone, car)
+        assertNotNullFileSession(phone)
+        val file = byteArrayOf(129.toByte(), 4, 0, 0)
+        assertTrue(phone.sendFileTransfer(file, 10))
+        assertTrue(!phone.sendFileTransfer(file, 11)) // at most one unacknowledged artwork packet
+        val control = Iap2Csm.encode(0x5001)
+        assertTrue(phone.sendControl(control, 12)) // reserved capacity remains available
+        exchange(phone, car)
+        val events = generateSequence { car.pollEvent() }.toList()
+        assertArrayEquals(file, events.filterIsInstance<Iap2LinkEngine.Event.FileTransfer>().single().bytes)
+        assertArrayEquals(control, events.filterIsInstance<Iap2LinkEngine.Event.Control>().single().bytes)
+        assertTrue(phone.sendFileTransfer(file, 13)) // cumulative ACK releases artwork slot
+        exchange(phone, car)
+        phone.advanceTime(100000)
+        assertTrue(!phone.isDead)
+    }
+
+    @Test fun unacknowledgedOptionalFileNeverTriggersControlDeathWatchdog() {
+        val phone = Iap2LinkEngine()
+        val car = Iap2LinkEngine()
+        phone.start(0); car.start(0); exchangeUntilNormal(phone, car)
+        assertTrue(phone.sendFileTransfer(byteArrayOf(128.toByte(), 4), 10))
+        phone.takeOutput() // simulate peer ignoring artwork
+        repeat(20) { phone.advanceTime(100000L + it * 100000L) }
+        assertTrue(!phone.isDead)
+        assertTrue(phone.sendControl(Iap2Csm.encode(0x5001), 3000000))
+        exchange(phone, car)
+        assertTrue(!phone.isDead)
+        assertEquals(1, pollControls(car).size)
+    }
+
+    @Test fun oversizedFileIsRejectedWithoutKillingControlLink() {
+        val phone = Iap2LinkEngine()
+        val car = Iap2LinkEngine()
+        phone.start(0); car.start(0); exchangeUntilNormal(phone, car)
+        assertTrue(!phone.sendFileTransfer(ByteArray(65536), 1))
+        assertTrue(!phone.sendFileTransfer(ByteArray(0), 1))
+        assertTrue(!phone.isDead)
+        assertTrue(phone.sendControl(Iap2Csm.encode(0x5001), 2))
+        exchange(phone, car)
+        assertEquals(1, pollControls(car).size)
+    }
+
+    @Test fun fileSessionUsesNegotiatedIdAndRejectsMissingOrAmbiguousSessions() {
+        val cases = listOf(
+            listOf(Iap2LinkEngine.SessionDescriptor(1, 0, 2), Iap2LinkEngine.SessionDescriptor(9, 1, 2)) to 9,
+            listOf(Iap2LinkEngine.SessionDescriptor(1, 0, 2), Iap2LinkEngine.SessionDescriptor(2, 2, 1)) to null,
+            listOf(Iap2LinkEngine.SessionDescriptor(1, 0, 2), Iap2LinkEngine.SessionDescriptor(1, 1, 2)) to null,
+            listOf(Iap2LinkEngine.SessionDescriptor(0, 1, 2)) to null,
+            listOf(Iap2LinkEngine.SessionDescriptor(12, 1, 99)) to null,
+            listOf(Iap2LinkEngine.SessionDescriptor(12, 1, 1)) to null,
+        )
+        cases.forEach { (sessions, expected) ->
+            val phone = Iap2LinkEngine()
+            phone.enterNegotiating()
+            val payload = Iap2LinkEngine.SynchronizationPayload(4, 4096, 4000, 1000, 10, 3, sessions).encode()
+            val frame = ByteArray(payload.size + 10)
+            frame[0] = 0xff.toByte(); frame[1] = 0x5a
+            frame[2] = (frame.size ushr 8).toByte(); frame[3] = frame.size.toByte()
+            frame[4] = 0x80.toByte(); frame[5] = 99
+            frame[8] = (-frame.take(8).sumOf { it.toInt() and 255 }).toByte()
+            payload.copyInto(frame, 9)
+            frame[frame.lastIndex] = (-payload.sumOf { it.toInt() and 255 }).toByte()
+            phone.feed(Iap2LinkEngine.MARKER + frame, 1)
+            assertEquals(expected, phone.fileTransferSessionId)
+            if (expected == null) {
+                assertTrue(!phone.sendFileTransfer(byteArrayOf(128.toByte(), 4), 2))
+                assertTrue(!phone.isDead)
+            } else {
+                phone.takeOutput()
+                assertTrue(phone.sendFileTransfer(byteArrayOf(128.toByte(), 4), 2))
+                assertEquals(9, phone.takeOutput()[7].toInt() and 255)
+            }
+        }
+    }
+
+    private fun assertNotNullFileSession(engine: Iap2LinkEngine) {
+        org.junit.Assert.assertNotNull(engine.fileTransferSessionId)
+    }
+
     // ---- 协商细节回归 ----
 
     /**
@@ -378,6 +462,7 @@ class Iap2LinkEngineTest {
         while (true) {
             when (val event = engine.pollEvent() ?: return out) {
                 is Iap2LinkEngine.Event.Control -> out += event.bytes
+                is Iap2LinkEngine.Event.FileTransfer -> error("unexpected file transfer")
                 is Iap2LinkEngine.Event.Dead -> error("engine died: ${event.reason}")
             }
         }

@@ -131,6 +131,18 @@ class Iap2LinkChannel(
         }
     }
 
+    @Volatile internal var onFileTransfer: ((ByteArray) -> Unit)? = null
+    internal fun supportsFileTransfer(): Boolean = synchronized(lock) { engine.supportsArtworkTransfer }
+    internal fun fileTransferPayloadLimit(): Int = synchronized(lock) {
+        (engine.peerSynchronization?.maxLength ?: 0) - Iap2LinkEngine.HEADER_BYTES - 1
+    }
+    internal fun sendFileTransfer(bytes: ByteArray): Boolean = synchronized(lock) {
+        if (terminated) return false
+        val accepted = engine.sendFileTransfer(bytes, nowMillis())
+        drainOutputLocked()
+        accepted && !terminated
+    }
+
     /** 取下一个控制载荷；超时或链路结束返回 null。 */
     fun recvControl(timeoutMillis: Long): ByteArray? {
         if (timeoutMillis == 0L && terminated && controls.isEmpty()) return null
@@ -235,6 +247,8 @@ class Iap2LinkChannel(
                         return
                     }
                 }
+
+                is Iap2LinkEngine.Event.FileTransfer -> onFileTransfer?.invoke(event.bytes)
 
                 is Iap2LinkEngine.Event.Dead -> {
                     finishLocked(event.reason?.let { IOException(it) })

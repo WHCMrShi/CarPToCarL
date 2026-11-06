@@ -56,6 +56,7 @@ class MediaListenerService : NotificationListenerService() {
         // 必须清空：否则卡片会保留断开前的歌名/播放状态，出现「正在播放 + 未在播放」
         // 甚至「正在播放 + 无法读取播放信息」的自相矛盾显示（2026-10-19 实测：
         // 重装后监听器未被系统绑定，卡片长时间停在旧状态）。
+        artworkRepository.clear()
         MediaSessionsState.publish(null)
         // 注销回调再清集合：只 clear() 会让 MediaController 侧的回调一直挂着（重绑后叠加）。
         unregisterAll()
@@ -69,6 +70,7 @@ class MediaListenerService : NotificationListenerService() {
         // Handler 和封面位图一直留在内存里（每次重绑新增一个 media-art 线程）。
         if (MediaSessionsState.resyncHook != null) MediaSessionsState.resyncHook = null
         runCatching { artExecutor.shutdownNow() }
+        artworkRepository.close()
         cachedArt = null
         MediaSessionsState.publish(null)
         super.onDestroy()
@@ -102,6 +104,11 @@ class MediaListenerService : NotificationListenerService() {
 
     /** 封面位图缓存（键不变时复用同一实例，保证 NowPlaying 的 equals 判稳）。 */
     private var cachedArt: android.graphics.Bitmap? = null
+    private val artworkRepository = ArtworkRepository { line -> VirtualLauncher.logSink?.invoke(line) }
+    private var artworkRevision = 0L
+    private var artworkTrack = ""
+    private var artworkUri: String? = null
+    private var artworkIncarnation = 0L
 
     /** 上次「键匹配但封面为空」的时刻：切歌瞬间 metadata 常不完整（歌名先到、
      *  封面字段滞后），空结果只保持 2 秒，之后重试直到封面就绪。 */
@@ -124,6 +131,7 @@ class MediaListenerService : NotificationListenerService() {
                         }
 
                         override fun onMetadataChanged(metadata: MediaMetadata?) {
+                            artworkRevision++
                             refresh()
                         }
                     }
@@ -174,8 +182,24 @@ class MediaListenerService : NotificationListenerService() {
                 val state = controller.playbackState
                 val playing = state?.state == PlaybackState.STATE_PLAYING
                 val title = meta?.getString(MediaMetadata.METADATA_KEY_TITLE)
+                val mediaId = meta?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)?.takeIf { it.isNotBlank() }
+                val album = meta?.getString(MediaMetadata.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() }
+                val artist = meta?.getString(MediaMetadata.METADATA_KEY_ARTIST)
+                    ?: meta?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+                val stableTrack = listOf(controller.sessionToken.toString(), controller.packageName,
+                    mediaId ?: listOf(title.orEmpty(), artist.orEmpty(), album.orEmpty(),
+                        (meta?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0).toString()).joinToString("/")).joinToString("\u0001")
+                val uri = meta?.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI)
+                    ?: meta?.getString(MediaMetadata.METADATA_KEY_ART_URI)
+                if (stableTrack != artworkTrack) { artworkIncarnation++; artworkTrack = stableTrack; artworkRevision++ }
+                if (uri != artworkUri) { artworkUri = uri; artworkRevision++ }
+                val trackId = "$artworkIncarnation:$stableTrack"
+                // 元数据快照/应用 Context 可安全供后台读取，不捕获 Service 供任务长期持有。
+                val resolver = applicationContext.contentResolver
+                val artworkSource = artworkRepository.source(trackId, artworkRevision) { ArtworkEncoder.load(meta, resolver) }
                 MediaSessionsState.NowPlaying(
                     title = title,
+                    artworkSource = artworkSource,
                     album = meta?.getString(MediaMetadata.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() },
                     artist =
                         meta?.getString(MediaMetadata.METADATA_KEY_ARTIST)
@@ -273,6 +297,7 @@ object MediaSessionsState {
         /** 位置采样的 SystemClock.elapsedRealtime 锚点。 */
         val anchoredAtMs: Long = 0L,
         val album: String? = null,
+        val artworkSource: ArtworkSource? = null,
     ) {
         /** 渲染时刻的推算播放位置（播放中按速度外推，钳制在时长内）。 */
         fun displayPositionAt(elapsedRealtimeMs: Long): Long {

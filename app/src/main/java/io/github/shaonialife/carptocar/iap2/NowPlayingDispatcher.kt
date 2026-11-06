@@ -10,6 +10,7 @@ internal class NowPlayingDispatcher(
     private val provider: () -> CarPlayNowPlaying?,
     private val send: (CarPlayNowPlaying) -> Boolean,
     private val retryDelaysMs: LongArray = longArrayOf(1_500, 4_000, 8_000, 15_000, 25_000),
+    private val afterUpdate: () -> Long? = { null },
 ) : AutoCloseable {
     private val lock = Any()
     private val updates = NowPlayingUpdates()
@@ -22,6 +23,7 @@ internal class NowPlayingDispatcher(
     private var queued = false
     private var retryIndex = 0
     private var retry: ScheduledFuture<*>? = null
+    private var artworkTick: ScheduledFuture<*>? = null
 
     fun subscribe() = synchronized(lock) {
         if (closed) return
@@ -35,6 +37,8 @@ internal class NowPlayingDispatcher(
     fun unsubscribe() = synchronized(lock) {
         generation++
         subscribed = false
+        artworkTick?.cancel(false)
+        artworkTick = null
         retry?.cancel(false)
         retry = null
         updates.unsubscribe()
@@ -44,6 +48,8 @@ internal class NowPlayingDispatcher(
 
     private fun requestLocked() {
         if (closed || !subscribed || !alive()) return
+        artworkTick?.cancel(false)
+        artworkTick = null
         retry?.cancel(false)
         retry = null
         if (queued) return
@@ -71,6 +77,17 @@ internal class NowPlayingDispatcher(
                     }, delay, TimeUnit.MILLISECONDS)
                 }
             }
+            val valid = synchronized(lock) { value != null && !closed && subscribed && generation == version }
+            val delay = if (valid) afterUpdate() else null
+            if (delay != null) synchronized(lock) {
+                if (!closed && subscribed && generation == version && !queued) {
+                    artworkTick = executor.schedule({
+                        synchronized(lock) {
+                            if (!closed && subscribed && generation == version) requestLocked()
+                        }
+                    }, delay, TimeUnit.MILLISECONDS)
+                }
+            }
         }
     }
 
@@ -80,6 +97,8 @@ internal class NowPlayingDispatcher(
             closed = true
             generation++
             subscribed = false
+            artworkTick?.cancel(false)
+            artworkTick = null
             retry?.cancel(false)
             retry = null
             updates.unsubscribe()

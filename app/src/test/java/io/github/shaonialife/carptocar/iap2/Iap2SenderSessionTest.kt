@@ -244,6 +244,72 @@ class Iap2SenderSessionTest {
         }
     }
 
+    @Test fun bluetoothArtworkUsesNegotiatedFileSessionAndPausesWithoutRepeatingImage() {
+        val pair = InMemoryStreamPair()
+        val phone = Iap2LinkChannel(pair.sideA, name = "art-phone")
+        val car = Iap2LinkChannel(pair.sideB, name = "art-car")
+        io.github.shaonialife.carptocar.media.ArtworkRepository().use { repo ->
+            val expected = ByteArray(3000) { it.toByte() }.also {
+                it[0] = 0xff.toByte(); it[1] = 0xd8.toByte(); it[2] = 0xff.toByte()
+            }
+            val source = repo.source("track", 1) { expected }
+            source.request()
+            val end = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+            while (!source.request().complete && System.nanoTime() < end) Thread.sleep(5)
+            val value = AtomicReference(CarPlayNowPlaying("song", "artist", "album", 180000, 2, 1000,
+                appName = "player", artworkSource = source))
+            val session = Iap2SenderSession(phone, {}, nowPlayingProvider = { value.get() })
+            val failure = AtomicReference<Throwable>()
+            val mock = Thread {
+                try { MockAccessory(car).run() } catch (error: Throwable) { failure.set(error) }
+            }.apply { isDaemon = true; start() }
+            val complete = CountDownLatch(1)
+            val received = java.io.ByteArrayOutputStream()
+            val transfers = java.util.concurrent.atomic.AtomicInteger()
+            car.onFileTransfer = { bytes ->
+                if (bytes[1].toInt() == 4) {
+                    transfers.incrementAndGet()
+                    car.sendFileTransfer(byteArrayOf(bytes[0], 1))
+                } else {
+                    synchronized(received) { received.write(bytes, 2, bytes.size - 2) }
+                    if (bytes[1].toInt() and 0x40 != 0) {
+                        car.sendFileTransfer(byteArrayOf(bytes[0], 5))
+                        complete.countDown()
+                    }
+                }
+            }
+            var pump: Thread? = null
+            try {
+                session.run(10000)
+                mock.join(3000)
+                failure.get()?.let { throw AssertionError("mock handshake failed", it) }
+                pump = Thread { session.pumpIncomingForever() }.apply { isDaemon = true; start() }
+                car.sendControl(Iap2Csm.encode(0x5000, Iap2Csm.group(0, Iap2Csm.param(26, ByteArray(0)))))
+                assertTrue(complete.await(5, TimeUnit.SECONDS))
+                org.junit.Assert.assertArrayEquals(expected, synchronized(received) { received.toByteArray() })
+                value.set(value.get().copy(elapsedMs = 2000))
+                session.pushNowPlaying()
+                // Confirm the progress update reached the peer before checking transfer count.
+                val parser = Iap2Csm.Parser()
+                var progressArrived = false
+                val limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+                while (!progressArrived && System.nanoTime() < limit) {
+                    car.recvControl(20)?.let { bytes ->
+                        for (frame in parser.offer(bytes).filter { it.messageId == 0x5001 }) {
+                            val playback = Iap2Csm.parseParams(frame.body).single { it.id == 1 }
+                            val elapsed = Iap2Csm.parseParams(playback.value).single { it.id == 1 }
+                            progressArrived = java.nio.ByteBuffer.wrap(elapsed.value).int == 2000
+                        }
+                    }
+                }
+                assertTrue(progressArrived)
+                assertEquals(1, transfers.get())
+            } finally {
+                phone.close(); car.close(); mock.join(3000); pump?.join(3000)
+            }
+        }
+    }
+
     /** 按 DiPlay Iap2WirelessControlClient 的时序脚本化应答。 */
     private class MockAccessory(
         private val channel: Iap2LinkChannel,

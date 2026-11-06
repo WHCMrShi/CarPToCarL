@@ -26,6 +26,9 @@ data class CarPlayNowPlaying(
     val shuffleMode: Int = 0,
     val repeatMode: Int = 0,
     val appName: String?,
+    val artworkSource: io.github.shaonialife.carptocar.media.ArtworkSource? = null,
+    val artworkTransferId: Int? = null,
+    val artworkAttributeId: Int = 26,
 )
 
 object Iap2NowPlaying {
@@ -53,7 +56,8 @@ object Iap2NowPlaying {
             Iap2Csm.string(0x0001, np.title.orEmpty()) +
                 Iap2Csm.u32(0x0004, np.durationMs.toLong()) +
                 Iap2Csm.string(0x000C, np.artist.orEmpty()) +
-                Iap2Csm.string(0x0006, np.album.orEmpty())
+                Iap2Csm.string(0x0006, np.album.orEmpty()) +
+                (np.artworkTransferId?.let { Iap2Csm.u8(np.artworkAttributeId, it) } ?: ByteArray(0))
         val playback =
             Iap2Csm.u8(0x0000, np.status) +
                 Iap2Csm.u32(0x0001, np.elapsedMs.toLong()) +

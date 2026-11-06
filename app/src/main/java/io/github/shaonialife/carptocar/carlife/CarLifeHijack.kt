@@ -462,6 +462,7 @@ object CarLifeHijack {
         running.set(true)
         val scope = ConnectionResources()
         warmScope = scope
+        artworkRepository = io.github.shaonialife.carptocar.media.ArtworkRepository(log).also { scope.own(it) }
         logSink = log
         appContext = context.applicationContext
         // Q4 固定预置优先于旧缓存，避免升级后沿用此前的 720p 或其他车辆尺寸。
@@ -605,6 +606,8 @@ object CarLifeHijack {
         startupPrewarmAllowed = false
         running.set(false)
         warmScope.close()
+        artworkRepository = null
+        mediaArtwork = null
         MediaSessionsState.removeListener(mediaPlaybackListener)
         sender = null
         client?.stop()
@@ -1080,7 +1083,19 @@ object CarLifeHijack {
     }
 
     /** 收到 CarLife 媒体信息（歌名/歌手/封面）：记录并广播，供 iAP2 0x5001 转发。 */
+    @Volatile private var artworkRepository: io.github.shaonialife.carptocar.media.ArtworkRepository? = null
+    @Volatile private var mediaArtwork: Pair<CarLifeMediaInfo, io.github.shaonialife.carptocar.media.ArtworkSource?>? = null
+    private var mediaArtworkRevision = 0L
+
+    internal fun artworkFor(info: CarLifeMediaInfo): io.github.shaonialife.carptocar.media.ArtworkSource? =
+        mediaArtwork?.takeIf { it.first === info }?.second
+
     private fun onMediaInfo(info: CarLifeMediaInfo) {
+        val key = listOf(info.source, info.songId, info.song, info.artist, info.album, info.duration.toString()).joinToString("\u0001")
+        val source = artworkRepository?.source(key, ++mediaArtworkRevision) {
+            info.albumArt?.let(io.github.shaonialife.carptocar.media.ArtworkEncoder::loadBytes)
+        }
+        mediaArtwork = info to source
         latestMediaInfo = info
         mediaInfoListeners.forEach { runCatching { it(info) } }
     }

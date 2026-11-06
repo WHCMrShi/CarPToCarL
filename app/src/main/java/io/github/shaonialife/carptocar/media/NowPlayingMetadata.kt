@@ -13,4 +13,5 @@ internal fun MediaSessionsState.NowPlaying.toCarPlayNowPlaying(nowMs: Long): Car
         status = if (playing) Iap2NowPlaying.STATUS_PLAYING else Iap2NowPlaying.STATUS_PAUSED,
         elapsedMs = displayPositionAt(nowMs).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
         appName = pkg,
+        artworkSource = artworkSource,
     )

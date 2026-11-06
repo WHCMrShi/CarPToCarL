@@ -1108,25 +1108,47 @@ class Iap2SenderSession(
 
     private var nowPlayingSubscribed = false
     private var nowPlayingPumpStarted = false
+    private val artworkSender = Iap2ArtworkSender(log = log)
+    @Volatile private var artworkField: Int? = null
     private val nowPlayingDispatcher = NowPlayingDispatcher(
         alive = { channel.isAlive },
-        provider = { nowPlayingProvider?.invoke() },
+        provider = {
+            nowPlayingProvider?.invoke()?.let { artworkSender.decorate(it, artworkField, channel.supportsFileTransfer()) }
+        },
         send = { value ->
             runCatching {
                 sendFireAndForget(Iap2MessageIds.NOW_PLAYING_UPDATE, Iap2NowPlaying.body(value))
+                artworkSender.metadataSent(value.artworkTransferId)
             }.onFailure { log("iap2 0x5001 发送失败 - ${it.message}") }.isSuccess
+        },
+        afterUpdate = {
+            if (artworkField == null || !channel.supportsFileTransfer()) null else {
+                val plan = artworkSender.poll(channel.fileTransferPayloadLimit())
+                if (plan != null) artworkSender.submitted(plan, channel.sendFileTransfer(plan.bytes))
+                if (artworkSender.pending()) artworkSender.nextDelayMillis() else null
+            }
         },
     ).also { channel.own(it) }
 
+    init {
+        channel.onFileTransfer = { bytes -> artworkSender.response(bytes); nowPlayingDispatcher.request() }
+        channel.own(AutoCloseable { channel.onFileTransfer = null; artworkSender.reset() })
+    }
+
     /** 解码时统一记账，MFi/HID 等待即使消费了该帧，也不会漏订阅或重复派发。 */
-    private fun recordNowPlayingSubscription(messageId: Int) {
-        when (messageId) {
+    private fun recordNowPlayingSubscription(frame: Iap2Csm.Frame) {
+        when (frame.messageId) {
             Iap2MessageIds.START_NOW_PLAYING_UPDATES -> {
+                artworkField = Iap2ArtworkSender.requestedField(frame.body)
+                artworkSender.reset()
+                log("ARTWORK: 蓝牙订阅字段=$artworkField 文件会话=${channel.supportsFileTransfer()}")
                 nowPlayingSubscribed = true
                 // 不在握手中抢发媒体信息；保活起步会重推最终订阅状态。
                 if (nowPlayingPumpStarted) nowPlayingDispatcher.subscribe()
             }
             Iap2MessageIds.STOP_NOW_PLAYING_UPDATES -> {
+                artworkField = null
+                artworkSender.reset()
                 nowPlayingSubscribed = false
                 nowPlayingDispatcher.unsubscribe()
             }
@@ -1456,7 +1478,7 @@ class Iap2SenderSession(
         // 这里只记账不打印：日志与上层回调仍由派发路径上的 handleEaStatus 统一负责，
         // 避免同一帧打两行。
         frames.forEach { frame ->
-            recordNowPlayingSubscription(frame.messageId)
+            recordNowPlayingSubscription(frame)
             if (frame.messageId == Iap2MessageIds.EA_SESSION_STATUS) eaStatusRaw = frame.body
         }
         frames.forEachIndexed { index, frame -> if (index > 0) receivedFrames += frame }
