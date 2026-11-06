@@ -37,6 +37,7 @@ import io.github.shaonialife.carptocar.launcher.VirtualLauncher
 import io.github.shaonialife.carptocar.launcher.settings.AppOrientationCompat
 import io.github.shaonialife.carptocar.launcher.settings.DisplayPrefs
 import io.github.shaonialife.carptocar.media.MediaSessionsState
+import io.github.shaonialife.carptocar.media.toCarPlayNowPlaying
 import io.github.shaonialife.carptocar.media.NotificationAccess
 import io.github.shaonialife.carptocar.net.AirPlayFeatures
 import io.github.shaonialife.carptocar.net.CarPlayCtrlAdvertiser
@@ -340,24 +341,7 @@ object SessionController {
     private fun buildNowPlaying(): CarPlayNowPlaying? {
         val session = MediaSessionsState.nowPlaying
         if (session != null && session.title != null) {
-            return CarPlayNowPlaying(
-                title = session.title,
-                artist = session.artist,
-                album = null, // MediaSession 未单独暴露专辑名，这里留空
-                durationMs = session.durationMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
-                status =
-                    if (session.playing) {
-                        Iap2NowPlaying.STATUS_PLAYING
-                    } else {
-                        Iap2NowPlaying.STATUS_PAUSED
-                    },
-                elapsedMs =
-                    session
-                        .displayPositionAt(android.os.SystemClock.elapsedRealtime())
-                        .coerceAtMost(Int.MAX_VALUE.toLong())
-                        .toInt(),
-                appName = session.pkg,
-            )
+            return session.toCarPlayNowPlaying(android.os.SystemClock.elapsedRealtime())
         }
         val info = CarLifeHijack.latestMediaInfo ?: return null
         return CarPlayNowPlaying(

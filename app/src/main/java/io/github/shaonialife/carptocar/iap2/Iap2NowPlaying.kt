@@ -4,11 +4,11 @@ package io.github.shaonialife.carptocar.iap2
  * iAP2「正在播放」信息（0x5001 NowPlayingUpdate）的载荷与编码。
  *
  * 字段布局来自 iAP2 NowPlaying 规范（MFi Accessory Interface Specification；
- * 亦与开源实现 iap2-rs 的 NowPlayingParser 解码字段一一对应）：
+ * 专辑字段与本仓库 iPhone 空态原始帧及 xcertplay 接收端交叉核对；旧 iap2-rs 专辑映射有误）：
  *
  *   顶层 param 0x0000 = media item 组：
  *     0x0001 title(string) · 0x0004 duration(u32 ms) · 0x000C artist(string) ·
- *     0x001A album(string)
+ *     0x0006 album(string)
  *   顶层 param 0x0001 = playback 组：
  *     0x0000 status(u8: 0 停止/1 播放/2 暂停) · 0x0001 elapsed(u32 ms) ·
  *     0x0005 shuffle(u8) · 0x0006 repeat(u8) · 0x0007 appName(string)
@@ -53,7 +53,7 @@ object Iap2NowPlaying {
             Iap2Csm.string(0x0001, np.title.orEmpty()) +
                 Iap2Csm.u32(0x0004, np.durationMs.toLong()) +
                 Iap2Csm.string(0x000C, np.artist.orEmpty()) +
-                Iap2Csm.string(0x001A, np.album.orEmpty())
+                Iap2Csm.string(0x0006, np.album.orEmpty())
         val playback =
             Iap2Csm.u8(0x0000, np.status) +
                 Iap2Csm.u32(0x0001, np.elapsedMs.toLong()) +
