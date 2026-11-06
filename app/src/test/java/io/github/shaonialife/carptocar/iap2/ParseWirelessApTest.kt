@@ -117,6 +117,44 @@ class ParseWirelessApTest {
         assertEquals(2, cfg.securityType)
     }
 
+    @Test
+    fun otherMessageLayoutEmptyPasswordKeepsOpenSecurity() {
+        for (channel in listOf(1, 2, 3, 4, 149)) {
+            val cfg = Iap2SenderSession.parseWirelessAp(group(
+                string(1, "OpenCar"), string(2, ""), u8(3, 0), u8(4, channel),
+            ))!!
+            assertEquals("OpenCar", cfg.ssid)
+            assertEquals("", cfg.passphrase)
+            assertEquals(channel, cfg.channel)
+            assertEquals(0, cfg.securityType)
+        }
+    }
+
+    @Test
+    fun otherMessageLayoutOmittedPasswordKeepsOpenSecurity() {
+        for (channel in listOf(3, 149)) {
+            val cfg = Iap2SenderSession.parseWirelessAp(group(
+                string(1, "OpenCar"), u8(3, 0), u8(4, channel),
+            ))!!
+            assertEquals("", cfg.passphrase)
+            assertEquals(channel, cfg.channel)
+            assertEquals(0, cfg.securityType)
+        }
+    }
+
+    @Test
+    fun standardLayoutEmptyPasswordAndUnknownChannelStayStandard() {
+        for (channel in listOf(0, 1, 3, 149)) {
+            val cfg = Iap2SenderSession.parseWirelessAp(group(
+                string(0, "OpenCar"), string(1, ""), u8(2, channel),
+                string(3, "192.168.49.1"), u8(4, 0),
+            ))!!
+            assertEquals("", cfg.passphrase)
+            assertEquals(channel, cfg.channel)
+            assertEquals(0, cfg.securityType)
+        }
+    }
+
     /** SSID 缺失（没有可用字符串）必须返回 null，让调用方报错而不是用空 SSID 盲连。 */
     @Test
     fun missingSsidReturnsNull() {

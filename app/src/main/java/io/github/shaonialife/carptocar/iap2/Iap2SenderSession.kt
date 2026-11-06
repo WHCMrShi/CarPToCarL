@@ -286,7 +286,12 @@ class Iap2SenderSession(
             //  - B：id2 是密码字符串（不进 singles），id3 是单字节安全类型。
             val bSecurity = singles[3]?.takeIf { it in 0..4 }
             val bChannel = singles[4]?.takeIf { it in 1..196 }
-            val useOtherMessageLayout = singles[2] == null && bSecurity != null && bChannel != null
+            // 空密码 string(2, "") 是单个 NUL，也会进入 singles；不能据此认定是 A 的信道。
+            // 若 id0 已明确给出规范 SSID，仍优先按 A 解释，避免把未知信道 0 当成密码。
+            val hasStandardSsid = group.any { it.id == 0 && !it.value.asStringOrEmpty().isNullOrEmpty() }
+            val id2IsPassword = group.any { it.id == 2 && it.value.asStringOrEmpty() != null }
+            val useOtherMessageLayout = !hasStandardSsid &&
+                (singles[2] == null || id2IsPassword) && bSecurity != null && bChannel != null
 
             val channel: Int?
             val security: Int?
