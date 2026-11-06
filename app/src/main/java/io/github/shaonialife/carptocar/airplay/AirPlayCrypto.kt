@@ -129,30 +129,28 @@ object AirPlayCrypto {
         }
     }
 
-    fun chachaSeal(
-        key: ByteArray,
-        nonce: ByteArray,
-        plaintext: ByteArray,
-        aad: ByteArray = ByteArray(0),
-    ): ByteArray {
+    fun chachaSeal(key: ByteArray, nonce: ByteArray, plaintext: ByteArray, aad: ByteArray = ByteArray(0)): ByteArray =
+        chachaSealRange(key, nonce, plaintext, 0, plaintext.size, aad)
+
+    internal fun chachaSealRange(key: ByteArray, nonce: ByteArray, source: ByteArray, offset: Int, size: Int, aad: ByteArray): ByteArray {
+        require(offset >= 0 && size >= 0 && offset <= source.size - size)
         val cipher = ChaCha20Poly1305()
         cipher.init(true, AEADParameters(KeyParameter(key), MAC_BITS, nonce, aad))
-        val output = ByteArray(cipher.getOutputSize(plaintext.size))
-        val length = cipher.processBytes(plaintext, 0, plaintext.size, output, 0)
+        val output = ByteArray(cipher.getOutputSize(size))
+        val length = cipher.processBytes(source, offset, size, output, 0)
         cipher.doFinal(output, length)
         return output
     }
 
-    fun chachaOpen(
-        key: ByteArray,
-        nonce: ByteArray,
-        ciphertextAndTag: ByteArray,
-        aad: ByteArray = ByteArray(0),
-    ): ByteArray {
+    fun chachaOpen(key: ByteArray, nonce: ByteArray, ciphertextAndTag: ByteArray, aad: ByteArray = ByteArray(0)): ByteArray =
+        chachaOpenRange(key, nonce, ciphertextAndTag, 0, ciphertextAndTag.size, aad)
+
+    internal fun chachaOpenRange(key: ByteArray, nonce: ByteArray, source: ByteArray, offset: Int, size: Int, aad: ByteArray): ByteArray {
+        require(offset >= 0 && size >= 0 && offset <= source.size - size)
         val cipher = ChaCha20Poly1305()
         cipher.init(false, AEADParameters(KeyParameter(key), MAC_BITS, nonce, aad))
-        val output = ByteArray(cipher.getOutputSize(ciphertextAndTag.size))
-        val processed = cipher.processBytes(ciphertextAndTag, 0, ciphertextAndTag.size, output, 0)
+        val output = ByteArray(cipher.getOutputSize(size))
+        val processed = cipher.processBytes(source, offset, size, output, 0)
         val finalized = cipher.doFinal(output, processed)
         return if (processed + finalized == output.size) output else output.copyOf(processed + finalized)
     }

@@ -1888,21 +1888,11 @@ class AirPlayClient(
         /** RTSP 报文头结束分隔符与头部字段正则（请求/应答两条重组路径共用，勿再内联）。 */
         private val HEAD_SEPARATOR = "\r\n\r\n".toByteArray(Charsets.US_ASCII)
 
-        private val CONTENT_LENGTH_REGEX = Regex("Content-Length:\\s*(\\d+)", RegexOption.IGNORE_CASE)
 
         private val CSEQ_REGEX = Regex("CSeq:\\s*(\\d+)", RegexOption.IGNORE_CASE)
 
         /** 解析 RTSP 报文头：首行 + Content-Length（两条重组路径共用）。 */
-        fun parseRtspHead(headText: String): Pair<String, Int> {
-            val contentLength =
-                CONTENT_LENGTH_REGEX
-                    .find(headText)
-                    ?.groupValues
-                    ?.get(1)
-                    ?.toIntOrNull() ?: 0
-            val firstLine = headText.lineSequence().firstOrNull() ?: ""
-            return firstLine to contentLength
-        }
+        fun parseRtspHead(headText: String): Pair<String, Int> = RtspStreamDecoder.parseHead(headText)
 
         fun indexOf(
             source: ByteArray,
@@ -2637,9 +2627,83 @@ class AirPlayClient(
             registerEventCommandChannel(socket, cipher)
             Thread({
                 val input = socket.getInputStream()
-                val accumulator = RtspAccumulator()
-                var pending = ByteArray(0)
+                val accumulator = RtspStreamDecoder()
                 val buffer = ByteArray(8192)
+                val readCipher = cipher?.newReader()
+                fun consumeEvents(bytes: ByteArray, offset: Int = 0, length: Int = bytes.size - offset) {
+                    for (message in accumulator.offer(bytes, offset, length)) {
+                        // 完整会话录制：车机→手机的全部 RTSP（应答 + /command 请求）原文，
+                        // 含 status 行与 CSeq——拆链前车机最后说了什么，只能从这条时间线上看。
+                        SessionTrace.rtsp(
+                            SessionTrace.Dir.RX,
+                            "airplay-event",
+                            message.head,
+                            message.body,
+                        )
+                        val firstLine = message.firstLine
+                        // (a) 状态行（"RTSP/1.0 200 OK" 等）= 车机对**我们命令**的应答：
+                        //     静默跳过——不回、不记录（回应答会触发乒乓回声，见 respondEventRequest）
+                        if (firstLine.startsWith("RTSP/") || firstLine.startsWith("HTTP/")) continue
+                        // (b) 请求判定：方法 token + "/"-开头路径。畸形行（如 "OK 200 OK"：
+                        //     第 2 token 是数字）判为非请求 → 静默丢弃，不回不记
+                        val tokens = firstLine.split(" ")
+                        val isRequest = tokens.size >= 2 && tokens[1].startsWith("/")
+                        if (!isRequest) continue
+                        // 车机请求：立即回 200（echo 请求 CSeq）；/command 走分发，其余节流留痕
+                        val cseq = CSEQ_REGEX.find(message.head)?.groupValues?.get(1)
+                        respondEventRequest(cseq)
+                        if (!firstLine.contains("/command")) {
+                            unknownEventRequests++
+                            if (unknownEventRequests <= 10) {
+                                log("EVENT: 未知请求 [$firstLine] body=${message.body.size}B")
+                            }
+                            continue
+                        }
+                        var commandError: String? = null
+                        val parsed =
+                            try {
+                                val result = BinaryPlist.parseRecovered(message.body)
+                                result.note?.let { note ->
+                                    log("EVENT: /command 容错解析成功——$note")
+                                }
+                                result.value
+                            } catch (error: Throwable) {
+                                // 不能只 catch IllegalArgumentException：越界/长度异常若逃出
+                                // 这里会直接打死事件读线程，车机会把整个会话拆掉。
+                                commandError = "${error.javaClass.simpleName}: ${error.message}"
+                                null
+                            }
+                        val command = parsed as? Map<*, *>
+                        if (command == null) {
+                            // 车机每秒都会 POST 一条解不出来的 /command——按「体型指纹」
+                            // 去重，每种体型留一次全文（原因 + 报文头 + 完整 hex），其余只计数。
+                            badEventCommands++
+                            val signature =
+                                message.body.size.toString() + ":" + hexPrefix(message.body, 8)
+                            if (badEventSignatures.add(signature) && badEventSignatures.size <= 4) {
+                                log(
+                                    "EVENT: 命令无法识别 [$firstLine] body=${message.body.size}B " +
+                                        "原因=" + (commandError ?: "解析结果=${parsed?.javaClass?.simpleName}"),
+                                )
+                                log(
+                                    "EVENT: 命令报文头=" +
+                                        message.head.replace("\r\n", " | ").take(300),
+                                )
+                                log("EVENT: 命令报文体（${message.body.size}B）hex=" + hexDump(message.body))
+                            }
+                            if (badEventCommands % 120 == 0) {
+                                log("EVENT: 累计 $badEventCommands 条 /command 解析失败（已静默，仅计数）")
+                            }
+                            continue
+                        }
+                        try {
+                            onCommand(command)
+                        } catch (error: Exception) {
+                            log("EVENT: 命令处理异常 - ${error.message}")
+                        }
+                    }
+                }
+                val consumePlain: (ByteArray) -> Unit = { consumeEvents(it) }
                 try {
                     while (true) {
                         val count =
@@ -2654,87 +2718,12 @@ class AirPlayClient(
                             log("EVENT: 通道关闭（EOF）")
                             break
                         }
-                        pending += buffer.copyOf(count)
-                        val plain =
-                            if (cipher == null) {
-                                val all = pending
-                                pending = ByteArray(0)
-                                all
-                            } else {
-                                val decrypted = cipher.decrypt(pending)
-                                pending = decrypted.rest
-                                decrypted.data
-                            }
-                        var eventOtherLogged = 0
-                        for (message in accumulator.offer(plain)) {
-                            // 完整会话录制：车机→手机的全部 RTSP（应答 + /command 请求）原文，
-                            // 含 status 行与 CSeq——拆链前车机最后说了什么，只能从这条时间线上看。
-                            SessionTrace.rtsp(
-                                SessionTrace.Dir.RX,
-                                "airplay-event",
-                                message.head,
-                                message.body,
-                            )
-                            val firstLine = message.firstLine
-                            // (a) 状态行（"RTSP/1.0 200 OK" 等）= 车机对**我们命令**的应答：
-                            //     静默跳过——不回、不记录（回应答会触发乒乓回声，见 respondEventRequest）
-                            if (firstLine.startsWith("RTSP/") || firstLine.startsWith("HTTP/")) continue
-                            // (b) 请求判定：方法 token + "/"-开头路径。畸形行（如 "OK 200 OK"：
-                            //     第 2 token 是数字）判为非请求 → 静默丢弃，不回不记
-                            val tokens = firstLine.split(" ")
-                            val isRequest = tokens.size >= 2 && tokens[1].startsWith("/")
-                            if (!isRequest) continue
-                            // 车机请求：立即回 200（echo 请求 CSeq）；/command 走分发，其余节流留痕
-                            val cseq = CSEQ_REGEX.find(message.head)?.groupValues?.get(1)
-                            respondEventRequest(cseq)
-                            if (!firstLine.contains("/command")) {
-                                unknownEventRequests++
-                                if (unknownEventRequests <= 10) {
-                                    log("EVENT: 未知请求 [$firstLine] body=${message.body.size}B")
-                                }
-                                continue
-                            }
-                            var commandError: String? = null
-                            val parsed =
-                                try {
-                                    val result = BinaryPlist.parseRecovered(message.body)
-                                    result.note?.let { note ->
-                                        log("EVENT: /command 容错解析成功——$note")
-                                    }
-                                    result.value
-                                } catch (error: Throwable) {
-                                    // 不能只 catch IllegalArgumentException：越界/长度异常若逃出
-                                    // 这里会直接打死事件读线程，车机会把整个会话拆掉。
-                                    commandError = "${error.javaClass.simpleName}: ${error.message}"
-                                    null
-                                }
-                            val command = parsed as? Map<*, *>
-                            if (command == null) {
-                                // 车机每秒都会 POST 一条解不出来的 /command——按「体型指纹」
-                                // 去重，每种体型留一次全文（原因 + 报文头 + 完整 hex），其余只计数。
-                                badEventCommands++
-                                val signature =
-                                    message.body.size.toString() + ":" + hexPrefix(message.body, 8)
-                                if (badEventSignatures.add(signature) && badEventSignatures.size <= 4) {
-                                    log(
-                                        "EVENT: 命令无法识别 [$firstLine] body=${message.body.size}B " +
-                                            "原因=" + (commandError ?: "解析结果=${parsed?.javaClass?.simpleName}"),
-                                    )
-                                    log(
-                                        "EVENT: 命令报文头=" +
-                                            message.head.replace("\r\n", " | ").take(300),
-                                    )
-                                    log("EVENT: 命令报文体（${message.body.size}B）hex=" + hexDump(message.body))
-                                }
-                                if (badEventCommands % 120 == 0) {
-                                    log("EVENT: 累计 $badEventCommands 条 /command 解析失败（已静默，仅计数）")
-                                }
-                                continue
-                            }
+                        if (readCipher == null) consumeEvents(buffer, 0, count)
+                        else {
                             try {
-                                onCommand(command)
+                                readCipher.offer(buffer, 0, count, consumePlain)
                             } catch (error: Exception) {
-                                log("EVENT: 命令处理异常 - ${error.message}")
+                                throw IOException("事件通道解密/解码失败", error)
                             }
                         }
                     }
@@ -2752,40 +2741,6 @@ class AirPlayClient(
             return false
         }
         return true
-    }
-
-    /** 流式 RTSP 报文重组器：喂入任意分片明文，弹出完整消息（首行 + body）。 */
-    private class RtspAccumulator {
-        /** 完整报文：首行（分类用）、头部全文（提取 CSeq）、body。 */
-        class Message(
-            val firstLine: String,
-            val head: String,
-            val body: ByteArray,
-        )
-
-        private var buffer = ByteArray(0)
-
-        fun offer(bytes: ByteArray): List<Message> {
-            if (bytes.isEmpty()) return emptyList()
-            buffer += bytes
-            val messages = ArrayList<Message>()
-            while (true) {
-                val index = indexOf(buffer, HEAD_SEPARATOR)
-                if (index < 0) break
-                val headText = String(buffer, 0, index, Charsets.ISO_8859_1)
-                val (firstLine, contentLength) = parseRtspHead(headText)
-                val bodyStart = index + HEAD_SEPARATOR.size
-                if (buffer.size - bodyStart < contentLength) break
-                messages +=
-                    Message(
-                        firstLine,
-                        headText,
-                        buffer.copyOfRange(bodyStart, bodyStart + contentLength),
-                    )
-                buffer = buffer.copyOfRange(bodyStart + contentLength, buffer.size)
-            }
-            return messages
-        }
     }
 
     /**
@@ -3040,9 +2995,12 @@ class AirPlayClient(
         client: Socket,
         generation: Int,
     ) {
-        var cipherPending = ByteArray(0)
-        var buffer = ByteArray(0)
-        var encryptedMode = false
+        var accumulator = RtspStreamDecoder()
+        var readEncryption: ControlCipher? = null
+        var readCipher: ControlCipher.Reader? = null
+        val consumePlain: (ByteArray) -> Unit = { plain ->
+            for (message in accumulator.offer(plain)) dispatchResponse(message.firstLine, message.body, message.head)
+        }
         try {
             val input = client.getInputStream()
             val chunk = ByteArray(8192)
@@ -3050,32 +3008,23 @@ class AirPlayClient(
                 val count = input.read(chunk)
                 if (count < 0) break
                 val encryption = cipher
-                if (encryption != null && !encryptedMode) {
-                    // 切换点：清掉明文侧残留，之后一律走帧解密
-                    encryptedMode = true
-                    cipherPending = ByteArray(0)
+                if (encryption !== readEncryption) {
+                    // 密钥/明密文边界不得带入旧残片；每个 cipher 的 nonce 与 reader 一同归属本连接。
+                    readEncryption = encryption
+                    readCipher = encryption?.newReader()
+                    accumulator = RtspStreamDecoder()
                 }
-                val data =
-                    if (encryption == null) {
-                        chunk.copyOf(count)
-                    } else {
-                        cipherPending += chunk.copyOf(count)
-                        val decrypted =
-                            try {
-                                synchronized(encryption) { encryption.decrypt(cipherPending) }
-                            } catch (error: Exception) {
-                                log("AIRPLAY: 控制通道解密失败 - ${error.message}")
-                                break
-                            }
-                        cipherPending = decrypted.rest
-                        decrypted.data
+                val decoder = readCipher
+                if (decoder == null) {
+                    for (message in accumulator.offer(chunk, 0, count)) dispatchResponse(message.firstLine, message.body, message.head)
+                } else {
+                    try {
+                        // 单读消费者；读写 nonce/工作区独立。分发回调不能持有发送侧 cipher 锁。
+                        decoder.offer(chunk, 0, count, consumePlain)
+                    } catch (error: Exception) {
+                        log("AIRPLAY: 控制通道解密失败 - ${error.message}")
+                        break
                     }
-                if (data.isEmpty()) continue
-                buffer += data
-                while (true) {
-                    val parsed = parseRtspMessage(buffer) ?: break
-                    buffer = parsed.rest
-                    dispatchResponse(parsed.statusLine, parsed.body, parsed.head)
                 }
             }
         } catch (_: IOException) {
@@ -3209,35 +3158,6 @@ class AirPlayClient(
             ?.let { responseHeads[it] }
             ?.replace("\r\n", " | ")
             .orEmpty()
-
-    /** 解析结果（报文 + 未消费的剩余字节）。 */
-    private class ParsedRtsp(
-        val statusLine: String,
-        val body: ByteArray,
-        val head: String,
-        val rest: ByteArray,
-    )
-
-    /**
-     * 从缓冲区切出完整报文（头 + Content-Length body）。
-     * 只在控制通道读线程里调用（缓冲区是该线程的局部状态，无跨线程共享）。
-     */
-    private fun parseRtspMessage(buffer: ByteArray): ParsedRtsp? {
-        val separatorIndex = indexOf(buffer, HEAD_SEPARATOR)
-        if (separatorIndex < 0) return null
-        val headText = String(buffer, 0, separatorIndex, Charsets.ISO_8859_1)
-        val (statusLine, contentLength) = parseRtspHead(headText)
-        val bodyStart = separatorIndex + HEAD_SEPARATOR.size
-        if (buffer.size - bodyStart < contentLength) return null
-        val responseBody = buffer.copyOfRange(bodyStart, bodyStart + contentLength)
-        val rest =
-            if (buffer.size > bodyStart + contentLength) {
-                buffer.copyOfRange(bodyStart + contentLength, buffer.size)
-            } else {
-                ByteArray(0)
-            }
-        return ParsedRtsp(statusLine, responseBody, headText, rest)
-    }
 
     // ---- 身份持久化 ----
 

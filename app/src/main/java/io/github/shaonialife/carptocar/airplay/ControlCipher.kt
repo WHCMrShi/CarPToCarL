@@ -1,5 +1,7 @@
 package io.github.shaonialife.carptocar.airplay
 
+import io.github.shaonialife.carptocar.util.StreamByteQueue
+
 /**
  * 控制通道加密帧（与参考接收端 ControlCipher 逐字节兼容）：
  * 每帧 = [2 字节小端密文长度(作 AAD)][密文][16 字节 tag]，
@@ -24,42 +26,102 @@ class ControlCipher(
     private var readCounter = 0L
     private var writeCounter = 0L
 
+    private val readAad = ByteArray(HEADER_SIZE)
+
+    private fun openFrame(
+        source: ByteArray,
+        offset: Int,
+        length: Int,
+    ): ByteArray {
+        source.copyInto(readAad, 0, offset, offset + HEADER_SIZE)
+        val plain =
+            AirPlayCrypto.chachaOpenRange(
+                readKey,
+                AirPlayCrypto.nonce64(readCounter),
+                source,
+                offset + HEADER_SIZE,
+                length + TAG_SIZE,
+                readAad,
+            )
+        readCounter++ // 认证成功才推进 nonce，失败的明文绝不交给解析器。
+        return plain
+    }
+
+    /** 兼容原先由调用方保存 rest 的 API；结果独立拥有数组。 */
     fun decrypt(buffer: ByteArray): Decrypted {
-        val output = ArrayList<ByteArray>()
+        val frames = ArrayList<ByteArray>()
         var offset = 0
+        var total = 0
         while (buffer.size - offset >= HEADER_SIZE) {
             val length = readU16Le(buffer, offset)
             val frameEnd = offset + HEADER_SIZE + length + TAG_SIZE
             if (buffer.size < frameEnd) break
-            val aad = buffer.copyOfRange(offset, offset + HEADER_SIZE)
-            val ciphertextAndTag = buffer.copyOfRange(offset + HEADER_SIZE, frameEnd)
-            output += AirPlayCrypto.chachaOpen(readKey, AirPlayCrypto.nonce64(readCounter), ciphertextAndTag, aad)
-            readCounter++
+            val plain = openFrame(buffer, offset, length)
+            frames.add(plain)
+            total += plain.size
             offset = frameEnd
         }
-        val joined = if (output.isEmpty()) ByteArray(0) else output.reduce { acc, bytes -> acc + bytes }
+        val joined = ByteArray(total)
+        var target = 0
+        for (frame in frames) {
+            frame.copyInto(joined, target)
+            target += frame.size
+        }
         return Decrypted(joined, buffer.copyOfRange(offset, buffer.size))
     }
 
+    /** 每条连接仅一个读消费者；残片由 reader 持有，不再每次拼接整个 pending。 */
+    internal fun newReader(): Reader = Reader()
+
+    internal inner class Reader {
+        private val pending = StreamByteQueue()
+
+        fun offer(
+            bytes: ByteArray,
+            offset: Int,
+            size: Int,
+            onPlain: (ByteArray) -> Unit,
+        ) {
+            pending.append(bytes, offset, size)
+            while (pending.size >= HEADER_SIZE) {
+                val length = readU16Le(pending.storage, pending.start)
+                val frameSize = HEADER_SIZE + length + TAG_SIZE
+                if (pending.size < frameSize) break
+                val plain = openFrame(pending.storage, pending.start, length)
+                pending.discard(frameSize)
+                onPlain(plain)
+            }
+        }
+    }
+
     fun encrypt(plaintext: ByteArray): ByteArray {
-        val output = ArrayList<ByteArray>()
+        val frames = maxOf(1L, (plaintext.size.toLong() + MAX_PAYLOAD - 1) / MAX_PAYLOAD)
+        val outputSize = plaintext.size.toLong() + frames * (HEADER_SIZE + TAG_SIZE)
+        require(outputSize <= Int.MAX_VALUE)
+        val output = ByteArray(outputSize.toInt())
+        val aad = ByteArray(HEADER_SIZE)
         var offset = 0
+        var target = 0
         do {
-            val chunk = plaintext.copyOfRange(offset, minOf(offset + MAX_PAYLOAD, plaintext.size))
-            val header = byteArrayOf(chunk.size.toByte(), (chunk.size ushr 8).toByte())
-            val ciphertextAndTag =
-                AirPlayCrypto.chachaSeal(
+            val size = minOf(MAX_PAYLOAD, plaintext.size - offset)
+            aad[0] = size.toByte()
+            aad[1] = (size ushr 8).toByte()
+            val sealed =
+                AirPlayCrypto.chachaSealRange(
                     writeKey,
                     AirPlayCrypto.nonce64(writeCounter),
-                    chunk,
-                    header,
+                    plaintext,
+                    offset,
+                    size,
+                    aad,
                 )
-            output += header
-            output += ciphertextAndTag
+            aad.copyInto(output, target)
+            sealed.copyInto(output, target + HEADER_SIZE)
             writeCounter++
-            offset += MAX_PAYLOAD
+            target += HEADER_SIZE + sealed.size
+            offset += size
         } while (offset < plaintext.size)
-        return output.reduce { acc, bytes -> acc + bytes }
+        return output
     }
 
     private fun readU16Le(
