@@ -19,17 +19,17 @@
 
 **最新正式版**（免编译，直接装）：
 
-> **[`CarPToCarL-1.2.22.apk`](https://github.com/jjuugk/CarPToCarL/releases/download/v1.2.22/CarPToCarL-1.2.22.apk)**
-> —— 主线固定直链（当前 1.2.22，13.6 MB）。**刻意不用 `releases/latest`**：那个指针
+> **[`CarPToCarL-1.2.24.apk`](https://github.com/jjuugk/CarPToCarL/releases/download/v1.2.24/CarPToCarL-1.2.24.apk)**
+> —— 主线固定直链（当前 1.2.24，13.6 MB）。**刻意不用 `releases/latest`**：那个指针
 > 按发布时间算，`-switchpool` 分支包一发布就会把它抢走，主线的 `latest` 直链随之 404
 
 | 项        | 值                                                                              |
 | -------- | ------------------------------------------------------------------------------ |
 | 全部版本     | [Releases 页面](https://github.com/jjuugk/CarPToCarL/releases)（含更新日志与历史版本）        |
-| 本版固定包    | [`CarPToCarL-1.2.22.apk`](https://github.com/jjuugk/CarPToCarL/releases/download/v1.2.22/CarPToCarL-1.2.22.apk) |
+| 本版固定包    | [`CarPToCarL-1.2.24.apk`](https://github.com/jjuugk/CarPToCarL/releases/download/v1.2.24/CarPToCarL-1.2.24.apk) |
 | 系统要求     | Android 12 及以上（minSdk 31）                                                      |
-| 签名       | 作者个人调试证书（仓库不含发布密钥）→ 可直接**覆盖安装** 1.0.0 ~ 1.2.22，但不要与其它来源的包混装                    |
-| 安装       | 系统安装器直接装，或 `adb install -r CarPToCarL-1.2.22.apk`                              |
+| 签名       | 作者个人调试证书（仓库不含发布密钥）→ 可直接**覆盖安装** 1.0.0 ~ 1.2.24，但不要与其它来源的包混装                    |
+| 安装       | 系统安装器直接装，或 `adb install -r CarPToCarL-1.2.24.apk`                              |
 | 前置       | 手机需装 **CarLife+**（荣耀机型为 `com.baidu.carlife.honor`）                             |
 
 首次启动会弹出免责声明，需手动同意。装好后怎么配、常见故障怎么查，见
@@ -41,8 +41,8 @@
 
 | 项    | 值                                                                             |
 | ---- | ----------------------------------------------------------------------------- |
-| 当前版本 | `1.2.22`（正式版；**修语音键**：回看车上日志发现语音键根本不走 `0x6802` HID `0xCF`，而是 AirPlay 事件通道 `requestSiri`（`siriAction` 1=Prewarm / 2=ButtonDown / 3=ButtonUp，取自 Apple `AirPlayCommon.h`），1.2.21 那条链路在这些车上是死代码；现在两条通路统一进 `VoiceKeyRouter`，按下发 `0x68008 KEYCODE_VR_START=0x21`，**长按 ≥1.5s 松手才补 `KEYCODE_VR_STOP=0x22`**（短按交给 CarLife+ 自己结束，避免松手就把刚起来的识别掐掉）；同时补上 `hidSendReport` 通路漏掉的语音键转发；1.2.21 的**车机 GPS 转发 + 「使用车机 GPS」开关**不变；版本号唯一来源是 `app/build.gradle.kts` 顶部 `appVersionName`） |
-| 下载   | **[`CarPToCarL-1.2.22.apk`](https://github.com/jjuugk/CarPToCarL/releases/download/v1.2.22/CarPToCarL-1.2.22.apk)**（见上方「立即下载」）       |
+| 当前版本 | `1.2.24`（正式版；**修 0x4301 无线组解析**：信道/安全类型此前按取值区间盲猜，1 基编号车机 + 信道 1~4 时二者会被互换、安全类型漏读，WPA2 热点确定性连不上；现改为按 **ID 定位**（0 基 id2=信道/id4=安全类型，1 基 id3/id5，都读不到再按 ID 顺序兜底），并补 `/info displays[].features` / `primaryInputDevice` 解析入日志（旋钮车机盲发触摸可一眼诊断）；1.2.23 的**隧道一帧一传输单元（修 QNX 卡死）**、1.2.22 的语音键、1.2.21 的车机 GPS 转发均不变；版本号唯一来源是 `app/build.gradle.kts` 顶部 `appVersionName`） |
+| 下载   | **[`CarPToCarL-1.2.24.apk`](https://github.com/jjuugk/CarPToCarL/releases/download/v1.2.24/CarPToCarL-1.2.24.apk)**（见上方「立即下载」）       |
 | 包名   | `io.github.shaonialife.carptocar`                                             |
 | 应用名  | **CarPToCarL**（不含任何第三方商标）                                                     |
 | 最低系统 | Android 12（minSdk 31，targetSdk 34）                                            |
@@ -821,6 +821,87 @@ app/src/main/aidl/io/github/shaonialife/carptocar/input/ICarInput.aidl
 ---
 
 ## 十一、版本历史
+
+### 1.2.24 —— 2026-11-05（修 0x4301 无线凭据解析：信道/安全类型按 ID 定位，兼容 1 基车机；补 /info 输入能力解析，正式版）
+
+**一、问题：某些 WPA2 车机确定性连不上，日志里 SSID/密码都对**
+
+0x4301 的无线组子参数，规范是 0 基（`0=SSID, 1=密码, 2=信道, 3=IP, 4=安全类型`），
+但个别车机把整套 ID +1（`3=信道, 5=安全类型`）。旧实现用「取值区间盲猜」区分：
+信道 1..196、安全类型 0..4——二者在 **1..4 区间重叠**。于是 1 基车机 + 信道 1~4 时，
+`singles[4]` 里其实是信道值（1~4）被当成安全类型，真实安全类型（在 id5）被漏掉，
+结果 `channel=0`、`securityType=信道值`——按开放网络去连 WPA2 热点，必然失败。
+
+**二、修法：按 ID 定位，不猜取值**
+
+- 0 基：`id2=信道、id4=安全类型`（Apple 规范；WinPlay 车机模拟器构造 0x4301 也是这套，
+  `build/engine/iap.js` 里 `param(2, channel)` / `param(4, [2])` 实测）；
+- 1 基兜底：`id3=信道、id5=安全类型`；
+- 都读不到：按 ID 顺序兜底——低 ID 是信道、高 ID 是安全类型（规范里信道 ID 永远小于安全类型 ID）。
+
+解析逻辑移入伴生对象并新增 `ParseWirelessApTest`（0 基 / 1 基 / 信道落 1~4 重叠区 /
+缺失 SSID / 4 字节 IP 排除，共 6 例）。现有 `Iap2SenderSessionTest` 的 0 基回环
+（channel=36、security=2）保持不变。
+
+**三、顺带：/info 输入能力解析进日志**
+
+`CarDisplayGeometry.Screen` 新增 `features`（位图：0x1 KNOBS / 0x2 LOWFI_TOUCH /
+0x4 HIGHFI_TOUCH / 0x8 TOUCHPAD）与 `primaryInputDevice`（1 触屏 / 2 触摸板 / 3 旋钮），
+并解码进「/info 共 N 块屏候选」那行日志。此前只有注释里人肉写着「奥迪 features=0x08」，
+面板不解析，旋钮车机盲发触摸时无从诊断。**纯增量**：不改屏幕选择与触摸路由，
+只把证据摆到日志里。
+
+### 1.2.23 —— 2026-11-05（隧道发送改为一帧一个传输单元，修 QNX 车机随机卡死，正式版）
+
+**一、问题：投屏跑到一半随机卡死，且不是每次都死**
+
+这类故障最难归因——没有固定复现步骤、日志里也看不到异常，因为**报文本身都没错**，
+错的是「报文怎么装进传输单元」。2026-11-05 的《CarPlay 手机侧分析报告》§9 把这条
+写成了硬性契约：**同一传输只放一个 iAP2 包，接收侧按流式处理即可，发送时不要合并；
+违反后果是 QNX 车机随机卡死。**
+
+我们确实在合并。`AirPlayClient.IapTunnelClient.writeIapBytes` 把
+`engine.takeOutput()` 的**全部**字节封成一个 `APTransportPackage` 写出去，而链路引擎
+的输出缓冲里经常连着「同步标记 + 一个应答 + 一个数据帧」；MIB3（HARMAN，正是 QNX 系）
+在 `0xAA05` 之后的认证突发更是一次连发 8 条消息。接收端按「一个传输单元 = 一个包」
+解析时，第二个帧的包头就落到了第一个帧的载荷位置上，链路直接错位。
+
+**二、改法：按帧边界切分，但一切以「不丢帧」为前提**
+
+新增 `Iap2LinkPacket.splitFrames`，两种包头分别处理：
+
+| 包头 | 长度字段含义 | 切分依据 |
+| --- | --- | --- |
+| `FF 5A`（数据帧） | 头后的 u16 是**整帧**长度（9B 头 + 载荷 + 1B 校验） | 直接按该值切 |
+| `FF 55`（同步标记） | 头后的 u16 **不是**长度（`FF 55 02 00 EE 10` 里 `02 00` 大端读 512、小端读 2，两个都不对） | 按固定 6 字节形态 `FF 55 02 00 EE 10` 识别 |
+
+保守兜底：首字节不认识 / 声明长度越界 / 末尾有残帧，**一律整段原样返回**，调用方按
+旧行为「一坨」写出。丢一帧等于控制链路死锁，宁可保持现状也不要为了切开而丢数据。
+
+首轮出现多帧时打一行日志（`输出缓冲含 N 帧 → 已按帧拆成 N 个传输单元`），下次上车
+就能确认这台车机是否真的踩到了合并形态；只打一次，不刷屏。
+
+**三、影响范围**
+
+只影响走 iAP 隧道（type-130）的车机；走事件通道 `iAPSendMessage` 的老车机行为完全不变。
+`flushOutputLocked` 的 `mib3Armed` / `eventLinkArmed` 分支仍把多帧塞进一条
+`iAPSendMessage` 命令——那条路奥迪 MIB3 真车验证过可用，报告也没说 HTTP 命令要拆，
+本次不动；若将来出现「突发只生效第一条」，先查这里。
+
+**四、验证**
+
+- 新增 `Iap2LinkFrameSplitTest` 9 例：单帧 / 两帧 / 仅同步标记 / 三帧 / 未知包头 /
+  前导杂字节 / 残帧 / 脏长度 / 空输入。
+- 单测 **431 例 0 失败**（1.2.22 的 422 + 新增 9），`assembleRelease` 通过。
+- **没有实车回归**：QNX 车机上的实际效果要等下一次上车验证。
+
+**五、本版顺带移除 `7a2243a`（原「fix(net): 复用缓存 Network 前校验系统仍承认，修 ENONET 死循环」）**
+
+该提交会导致**车机取消链接后再次链接时重复卡在「加入」**：重连时复用的缓存
+`Network` 仍被系统承认，但车机侧的会话已失效，于是反复发起加入又失败。1.2.23 的
+重新发版把它从提交历史里摘除（rebase 删除 + 强推），本版构建不再包含该改动。若之后
+又遇到「断开再连卡加入」，优先排查 `net/` 里网络缓存复用的逻辑，不要再沿用 7a2243a
+的那条修法。
 
 ### 1.2.22 —— 2026-11-04（语音键改走 requestSiri + 长按收尾，正式版）
 
