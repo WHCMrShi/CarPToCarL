@@ -30,6 +30,7 @@ import io.github.shaonialife.carptocar.iap2.NmeaAssembler
 import io.github.shaonialife.carptocar.iap2.NmeaLocation
 import io.github.shaonialife.carptocar.iap2.ReceiverProfile
 import io.github.shaonialife.carptocar.input.ConsumerKeys
+import io.github.shaonialife.carptocar.input.HidReportProfiles
 import io.github.shaonialife.carptocar.input.TouchReports
 import io.github.shaonialife.carptocar.input.TouchRouter
 import io.github.shaonialife.carptocar.launcher.VirtualLauncher
@@ -3590,6 +3591,12 @@ object SessionController {
                             currentSharedSecret = sessionKey
                             currentAudioHost =
                                 client.activeHost ?: EndpointHosts.candidates(client.currentEndpoint.ipAddresses).firstOrNull()
+                            val hidProfiles = HidReportProfiles()
+                            val touchGeneration = CarLifeHijack.beginTouchInput()
+                            val touchContext = context.applicationContext
+                            val touchSink = TouchReports.ContactSink { slot, x, y, down ->
+                                TouchRouter.onContact(touchContext, slot, x, y, down, touchGeneration)
+                            }
                             val eventChannelOk =
                                 client.connectEventChannel(sessionKey, setup) { command ->
                                 when (command["type"]) {
@@ -3604,8 +3611,8 @@ object SessionController {
                                         // DiPlay 的 knob(4B) 与 telephony(1B) 报告长度与媒体键重叠，
                                         // 只靠长度会误判（如 telephony usage 0xB3 会误发「快进」）。
                                         val descriptor = uuid?.let { setup.hidDescriptors[it] }
-                                        val keyMap =
-                                            descriptor?.let(ConsumerKeys::parseDescriptor)
+                                        val profile = hidProfiles.get(uuid, descriptor)
+                                        val keyMap = profile.keys
                                         val rawValue =
                                             report
                                                 ?.takeIf { it.isNotEmpty() }
@@ -3621,14 +3628,9 @@ object SessionController {
                                             }
                                         // 触摸格式按设备描述符判定（Digitizer 页 + 单指/多槽），
                                         // 描述符不可用时按报文长度回退——不依赖车机型号或 uuid
-                                        val touchFormat =
-                                            descriptor?.let(TouchReports::formatFromDescriptor)
-                                        val contacts =
-                                            if (consumerUsage == null && report != null) {
-                                                TouchReports.parse(report, touchFormat)
-                                            } else {
-                                                null
-                                            }
+                                        val touchFormat = profile.touch
+                                        val isTouch = consumerUsage == null && report != null &&
+                                            TouchReports.canParse(report, touchFormat)
                                         if (consumerUsage != null) {
                                             val keyCode = ConsumerKeys.keyCodeFor(consumerUsage)
                                             lastConsumerUsage = consumerUsage
@@ -3661,7 +3663,7 @@ object SessionController {
                                                 voiceKey.onHidUp("hidSendReport 0xCF")
                                             }
                                             lastConsumerUsage = null
-                                        } else if (contacts != null) {
+                                        } else if (isTouch) {
                                             // 限频只压 MOVE（拖拽时每秒上百条）；
                                             // **抬起永远记录**——排查手势卡死时最需要看的就是
                                             // 「UP 到底有没有从车机发过来」。
@@ -3678,22 +3680,17 @@ object SessionController {
                                                         },
                                                 )
                                             }
-                                            val hasRelease = contacts.any { it.slot == 0 && !it.down }
+                                            val hasRelease = TouchReports.hasPrimaryRelease(report, touchFormat)
                                             if (hasRelease || touchLogCount <= 30 || touchLogCount % 50 == 0) {
                                                 appendLog(
                                                     "EVENT: 触摸 " +
-                                                        contacts.joinToString {
+                                                        TouchReports.parse(report, touchFormat).orEmpty().joinToString {
                                                             "#${it.slot}(${it.xPixels},${it.yPixels})${if (it.down) "↓" else "↑"}"
                                                         },
                                                 )
                                             }
                                             touchLogCount++
-                                            contacts.forEach {
-                                                TouchRouter.onContact(
-                                                    context.applicationContext,
-                                                    it,
-                                                )
-                                            }
+                                            TouchReports.visit(report, touchFormat, touchSink)
                                         } else if (report != null) {
                                             appendLog(
                                                 "EVENT: 其他 HID 报告 uuid=$uuid bytes=${report.size}" +

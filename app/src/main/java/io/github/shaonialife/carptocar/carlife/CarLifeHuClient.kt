@@ -485,7 +485,14 @@ class CarLifeHuClient(
                     probeQueue.joinToString(",") + "）",
             )
         }
-        if (touchOut != null) startTouchWorker()
+        touchOut?.let { output ->
+            touchForwarder = TouchForwarder(
+                output,
+                onWrite = { sentTouchCount++ },
+                onFailure = { log("CARLIFE: 触摸通道写入失败 - ${it.message}") },
+                onOverflow = { log("CARLIFE: 触摸边界队列已满——收尾已发送手势，等待物理抬起后恢复") },
+            ).also { it.start() }
+        }
 
         startReader("carlife-cmd") { cmdReader(cmd.getInputStream()) }
         sockets[CarLifeProtocol.PORT_VIDEO]?.let { video ->
@@ -505,13 +512,8 @@ class CarLifeHuClient(
 
     fun stop() {
         running.set(false)
-        touchLock.lock()
-        try {
-            touchQueue.clear()
-            touchReady.signalAll()
-        } finally {
-            touchLock.unlock()
-        }
+        touchForwarder?.stop()
+        touchForwarder = null
         closeAll()
     }
 
@@ -533,137 +535,17 @@ class CarLifeHuClient(
         y: Int,
     ) = enqueueTouch(CarLifeProtocol.TOUCH_ACTION, x, y, action)
 
-    /**
-     * 触摸下发队列。
-     *
-     * 为什么不在调用线程上直接写 socket：CarLife 引擎处理触摸是**串行**的，
-     * 慢的时候一条事件要几百毫秒才消费完，`write` 随之阻塞。如果直接写，
-     * 车机端每 16ms 的触摸回调就会被这条慢 socket 拖住，事件在本地越堆越多，
-     * 表现为「拖一下松手，画面半天才动；再点就没反应了」。
-     *
-     * 策略：
-     * - 单 worker 线程按序写，DOWN/UP 绝不丢（否则会留下按住不放的幽灵触点）；
-     * - MOVE 只保留最新一条（手指位置天然是「最后的值才有效」），
-     *   引擎消费不过来时自动合并，不做无意义的排队；
-     * - 队列总长有上限，超了从最老的 MOVE 开始丢，仍保留 DOWN/UP。
-     */
-    private val touchQueue = ArrayDeque<IntArray>()
-
-    private val touchLock = java.util.concurrent.locks.ReentrantLock()
-
-    private val touchReady = touchLock.newCondition()
-
     @Volatile
-    private var touchWorker: Thread? = null
+    private var touchForwarder: TouchForwarder? = null
 
-    private fun enqueueTouch(
-        serviceType: Int,
-        x: Int,
-        y: Int,
-        action: Int = -1,
-    ) {
-        if (touchOut == null) return
-        // 只做安全范围约束，**不按视频分辨率（SPS/协商档位）钳位**：
-        // 触摸坐标的域是「车机 display 坐标」，引擎自己乘 getTouchXOffset() 换算到手机屏。
-        // 以前按 videoSize 钳位，码流 1280×720 而车机画布 1412×654 时，右侧 132 像素
-        // 的点击会被压到 x=1279（整块区域变成同一个点），拖到右侧也拖不动。
-        val px = x.coerceIn(0, TOUCH_COORD_MAX)
-        val py = y.coerceIn(0, TOUCH_COORD_MAX)
-        touchLock.lock()
-        try {
-            if (!running.get()) return
-            if (isMoveEvent(serviceType, action)) {
-                // 队尾已是 MOVE：直接覆盖坐标，等价于「只发最新位置」。
-                val last = touchQueue.lastOrNull()
-                if (last != null && isMoveEvent(last[0], last[3])) {
-                    last[1] = px
-                    last[2] = py
-                    return
-                }
-            }
-            if (touchQueue.size >= TOUCH_QUEUE_MAX) {
-                val removable = touchQueue.indexOfFirst { isMoveEvent(it[0], it[3]) }
-                if (removable >= 0) touchQueue.removeAt(removable) else return
-            }
-            touchQueue.addLast(intArrayOf(serviceType, px, py, action))
-            touchReady.signalAll()
-        } finally {
-            touchLock.unlock()
-        }
-    }
-
-    /** 是不是「可合并的移动事件」：单点 MOVE，或复合动作里的 ACTION_MOVE。 */
-    private fun isMoveEvent(
-        serviceType: Int,
-        action: Int,
-    ): Boolean =
-        serviceType == CarLifeProtocol.TOUCH_MOVE ||
-            (serviceType == CarLifeProtocol.TOUCH_ACTION && action >= 0 && (action and 0xFF) == CarLifeProtocol.TouchAction.MOVE)
-
-    private fun startTouchWorker() {
-        if (touchWorker?.isAlive == true) return
-        val worker = Thread({
-            while (running.get()) {
-                var event: IntArray? = null
-                touchLock.lock()
-                try {
-                    if (touchQueue.isEmpty()) touchReady.await(400, java.util.concurrent.TimeUnit.MILLISECONDS)
-                    if (touchQueue.isNotEmpty()) event = touchQueue.removeFirst()
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    break
-                } finally {
-                    touchLock.unlock()
-                }
-                if (!running.get()) break
-                if (event != null) sendTouch(event[0], event[1], event[2], event[3])
-            }
-        }, "carlife-touch").apply {
-            isDaemon = true
-            priority = Thread.NORM_PRIORITY + 1
-        }
-        touchWorker = worker
-        worker.start()
-    }
-
-    /**
-     * 触控走 9340，但用的是**控制帧格式**（8B 头）而不是视频那种 12B 流格式——
-     * 手机端把这条 socket 当 ConnectSocket 读，按 CarlifeCmdMessage 解。
-     */
-    private fun sendTouch(
-        serviceType: Int,
-        x: Int,
-        y: Int,
-        action: Int,
-    ) {
-        val out = touchOut ?: return
-        val px = x.coerceIn(0, TOUCH_COORD_MAX)
-        val py = y.coerceIn(0, TOUCH_COORD_MAX)
-        // 复合动作（0x68001）的负载是 CarlifeTouchAction{action,x,y}，
-        // 单点消息（0x68002/3/4）的负载是 CarlifeTouchSinglePoint{x,y}——两者不能混用。
-        val payload =
-            if (serviceType == CarLifeProtocol.TOUCH_ACTION) {
-                CarLifeProtocol.touchAction(action, px, py)
-            } else {
-                CarLifeProtocol.touchPoint(px, py)
-            }
-        val frame = CarLifeProtocol.packCommand(serviceType, payload)
-        sentTouchCount++
-        if (!runCatching { out.write(frame); out.flush() }.isSuccess) {
-            touchWriteFailures++
-            if (touchWriteFailures == 1 || touchWriteFailures % 50 == 0) {
-                log("CARLIFE: 触摸写入失败 ${touchWriteFailures} 次（通道可能已断）")
-            }
-        }
+    private fun enqueueTouch(serviceType: Int, x: Int, y: Int, action: Int = -1) {
+        touchForwarder?.enqueue(serviceType, x, y, action)
     }
 
     /** 已下发的触摸报文条数（诊断：确认车机事件真的写进了通道）。 */
     @Volatile
     var sentTouchCount = 0
         private set
-
-    @Volatile
-    private var touchWriteFailures = 0
 
     // ---- 握手 ----
 
@@ -1825,7 +1707,6 @@ class CarLifeHuClient(
          * 触摸队列上限。正常情况队列长度是 1~2（worker 写得比车机发得快）；
          * 只有引擎消费卡住时才会涨，此时丢掉最老的 MOVE 比继续排队更有意义。
          */
-        private const val TOUCH_QUEUE_MAX = 8
 
         /**
          * 触摸坐标安全上限：**不是**视频分辨率钳位。
@@ -1833,7 +1714,6 @@ class CarLifeHuClient(
          * 坐标系是车机 display 坐标，由引擎自己乘 `getTouchXOffset()` 换算到手机屏。
          * 这里只挡住明显非法的超大值（protobuf varint 无长度限制，但超大坐标无意义）。
          */
-        private const val TOUCH_COORD_MAX = 8191
 
         /** 单个视频帧上限（1080p 高码率 I 帧实测 < 400KB，留足余量）。 */
         private const val MAX_VIDEO_FRAME = 4 * 1024 * 1024

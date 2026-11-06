@@ -171,9 +171,20 @@ object SessionTrace {
         channel: String,
         text: String,
     ) {
-        if (!isActive()) return
-        val line = formatRtsp(stamp.format(Date()), dir, channel, text)
-        synchronized(lock) { appendLocked(line) }
+        if (!isActive() || linked) return
+        synchronized(lock) {
+            if (linked) return
+            appendLocked(formatRtsp(stamp.format(Date()), dir, channel, text))
+        }
+    }
+
+    /** 事件报告高频：在构造 body hex 前检查失败快照是否仍需录制。 */
+    fun rtsp(dir: Dir, channel: String, head: String, body: ByteArray) {
+        if (!isActive() || linked) return
+        synchronized(lock) {
+            if (linked) return
+            appendLocked(formatRtsp(stamp.format(Date()), dir, channel, head + binary(body)))
+        }
     }
 
     /**

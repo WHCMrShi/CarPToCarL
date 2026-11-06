@@ -252,8 +252,7 @@ object CarLifeHijack {
     private var appContext: android.content.Context? = null
 
     /** 触摸按下状态（HID 只给 down 布尔，需要自己合成 DOWN/MOVE/UP）。 */
-    @Volatile
-    private var touchPressed = false
+    private val touchState = TouchPressState()
 
     // ---- 双指（HID 槽 1）----
     //
@@ -277,7 +276,6 @@ object CarLifeHijack {
     /** 本次双指手势内已发出的 MOVE 条数（日志节流 + 摘要用）。 */
     private var multiMoves = 0
 
-    private var lastTouchAt = 0L
     private var touchCount = 0
 
     /** 按下点（视频坐标），用于短促点击的坐标回吸。 */
@@ -464,12 +462,8 @@ object CarLifeHijack {
         log(
             "CARLIFE: Q4 首轮画布 $initialCanvasW×$initialCanvasH（固定预置，不依赖缓存或 CarPlay 时序）",
         )
-        touchPressed = false
+        resetTouchState()
         touchCount = 0
-        gestureMoves = 0
-        slot1Down = false
-        multiActive = false
-        multiMoves = 0
         observedMaxX = 0
         observedMaxY = 0
         hasVideo = false
@@ -591,7 +585,10 @@ object CarLifeHijack {
     }
 
     /** 会话结束：断开视频通道，回到「只缓存」状态（CarLife 连接保持不断）。 */
+    @Synchronized
     fun detach() {
+        releaseTouch()
+        touchState.newSession()
         sender = null
         firstDeliverLogged = false
         deliverWindowFrames = 0
@@ -608,11 +605,7 @@ object CarLifeHijack {
         audioSink = null
         ttsSink?.stop()
         ttsSink = null
-        touchPressed = false
-        gestureMoves = 0
-        slot1Down = false
-        multiActive = false
-        multiMoves = 0
+        resetTouchState()
         worker?.interrupt()
         worker = null
         logSink = null
@@ -700,7 +693,10 @@ object CarLifeHijack {
                 initialHeight = initialCanvasH,
             )
             if (hu.start()) {
-                client = hu
+                synchronized(this) {
+                    resetTouchState()
+                    client = hu
+                }
                 // SETUP 先于 client 创建的边界（requestedW/H 已缓存车机画布）：把它回放为
                 // 「申请值」，让引擎尝试按车机画布编码；确认值（videoWidth）仍由引擎回显，
                 // 不受影响。
@@ -725,7 +721,12 @@ object CarLifeHijack {
             while (running.get() && hu.isRunning) {
                 sleep(500)
             }
-            if (client === hu) client = null
+            synchronized(this) {
+                if (client === hu) {
+                    client = null
+                    resetTouchState()
+                }
+            }
             sink.stop()
             if (audioSink === sink) audioSink = null
             naviSink.stop()
@@ -1063,6 +1064,13 @@ object CarLifeHijack {
 
     // ---- 触控回传（车机 → 手机）----
 
+    /** 事件连接独占的触摸代次；旧 reader 即使晚到也不得操作下一轮手势。 */
+    @Synchronized
+    fun beginTouchInput(): Long {
+        releaseTouch()
+        return touchState.newSession()
+    }
+
     /**
      * 处理一次车机触摸报文。返回 true = 已被劫持链路消费（调用方不要再走虚拟屏注入）。
      *
@@ -1075,12 +1083,18 @@ object CarLifeHijack {
      * 码流 1280×720、车机画布 1412×654 时横竖向各缩 10%，拖拽位移同比变小、
      * 松手落点偏移（v0.2.15 引入的问题，v0.2.17 撤销）。
      */
+    fun handleTouch(slot: Int, x: Int, y: Int, down: Boolean): Boolean =
+        handleTouch(slot, x, y, down, 0L)
+
+    @Synchronized
     fun handleTouch(
         slot: Int,
         x: Int,
         y: Int,
         down: Boolean,
+        generation: Long,
     ): Boolean {
+        if (generation != 0L && !touchState.isCurrent(generation)) return true
         if (!isActive) return false
         // HID 触摸报文最多两槽（TouchReports.SLOTS）；再多的槽位直接吞掉，避免漏到注入路径
         if (slot < 0 || slot > 1) return true
@@ -1099,35 +1113,14 @@ object CarLifeHijack {
             return true
         }
 
-        // ---- 手势收尾：车机漏发 UP 会让引擎永久卡在「按住」状态 ----
-        //
-        // 引擎 onActionDownEvent 里有这段（已反汇编确认）：
-        //   if (isErrorTouchModel()) { if (eventIng) { 记录 errorDown; return } }  // DOWN 被丢弃
-        //   eventIng = true
-        // 一旦某一笔的 UP 没送到，eventIng 永远是 true → 之后每一次 DOWN 都被丢弃，
-        // 只剩 MOVE，而 MOVE 又被 isErrorEvent 判成「更靠近上次的错误按下点」而 return。
-        // 表现就是：点一下（或拖一下）之后，整块屏幕再也点不动、拖不动。
-        //
-        // 所以不能等 3 秒兜底：只要与上一笔间隔超过 NEW_GESTURE_GAP_MS 又收到按下，
-        // 就认定上一笔缺抬起，先补一个 UP 再开新笔。
-        if (touchPressed) {
-            val gap = now - lastTouchAt
-            if (gap > NEW_GESTURE_GAP_MS && down) {
-                finishGesture(hu, lastMoveX, lastMoveY, now, gap, "上一笔缺抬起 ${gap}ms")
-            } else if (gap > STALE_TOUCH_MS) {
-                finishGesture(hu, lastMoveX, lastMoveY, now, gap, "触摸超时 ${gap}ms")
-            }
-        }
-
-        when {
-            down && !touchPressed -> {
-                touchPressed = true
+        // 持续按下是同一手势，不能用报告间隔猜测丢失 UP。
+        when (touchState.accept(down)) {
+            TouchPressState.Change.DOWN -> {
                 gestureStartAt = now
                 gestureMoves = 0
                 downX = tx
                 downY = ty
                 tapStartedAt = now
-                lastTouchAt = now
                 lastMoveX = tx
                 lastMoveY = ty
                 hu.touchDown(tx, ty)
@@ -1136,11 +1129,10 @@ object CarLifeHijack {
                 )
             }
 
-            down -> {
+            TouchPressState.Change.MOVE -> {
                 // 不做本地节流：引擎 dispatchTouchEvent 自带 10ms 限频，
                 // 本地再丢一次只会让拖拽变成「跳跃采样」。发送队列已按
                 // 「MOVE 只留最新」合并，不会积压。
-                lastTouchAt = now
                 lastMoveX = tx
                 lastMoveY = ty
                 gestureMoves++
@@ -1154,7 +1146,7 @@ object CarLifeHijack {
                 }
             }
 
-            touchPressed -> {
+            TouchPressState.Change.UP -> {
                 // 短促且几乎没有位移 = 点击：用按下点收尾，避免车机端把轻微抖动
                 // 当拖动、或把抬起坐标算到相邻控件上。双指手势不算点击。
                 val isTap = !multiActive &&
@@ -1166,8 +1158,6 @@ object CarLifeHijack {
                     if (isTap) downX else tx,
                     if (isTap) downY else ty,
                     now,
-                    now - lastTouchAt,
-                    null,
                 )
             }
 
@@ -1202,14 +1192,14 @@ object CarLifeHijack {
         if (!down) {
             if (!slot1Down) return
             slot1Down = false
-            if (multiActive && touchPressed) {
+            if (multiActive && touchState.pressed) {
                 hu.touchAction(act.withPointer(act.POINTER_UP, 1), slot1X, slot1Y)
                 logSink?.invoke("CARLIFE: 多指 ↑2 ($slot1X,$slot1Y) → POINTER_UP（手指 1）")
             }
             return
         }
         // 第一根手指还没按下就来了槽 1：多半是车机把占位槽报成按下，忽略
-        if (!touchPressed) return
+        if (!touchState.pressed) return
         if (!slot1Down) {
             slot1Down = true
             slot1X = tx
@@ -1238,17 +1228,32 @@ object CarLifeHijack {
         }
     }
 
+    /** 明确的会话断开才收尾；短暂重连保留 CarLife socket 时也不能留下按住状态。 */
+    private fun releaseTouch() {
+        val hu = client
+        if (touchState.pressed && hu != null) {
+            finishGesture(hu, lastMoveX, lastMoveY, android.os.SystemClock.uptimeMillis())
+        }
+        resetTouchState()
+    }
+
+    @Synchronized
+    private fun resetTouchState() {
+        touchState.reset()
+        gestureMoves = 0
+        slot1Down = false
+        multiActive = false
+        multiMoves = 0
+    }
+
     /** 结束一笔手势：发 UP，并按需打印拖动摘要（点击不刷屏）。 */
     private fun finishGesture(
         hu: CarLifeHuClient,
         ux: Int,
         uy: Int,
         now: Long,
-        gap: Long,
-        abnormal: String?,
     ) {
-        touchPressed = false
-        lastTouchAt = now
+        touchState.reset()
         lastMoveX = ux
         lastMoveY = uy
         val act = CarLifeProtocol.TouchAction
@@ -1261,8 +1266,7 @@ object CarLifeHijack {
             }
             hu.touchAction(act.UP, ux, uy)
             logSink?.invoke(
-                "CARLIFE: 双指手势结束（手指 2 移动 ${multiMoves} 次）→ 复合通道 UP" +
-                    (if (abnormal != null) " · $abnormal" else ""),
+                "CARLIFE: 双指手势结束（手指 2 移动 ${multiMoves} 次）→ 复合通道 UP",
             )
             multiActive = false
             multiMoves = 0
@@ -1272,9 +1276,7 @@ object CarLifeHijack {
         }
         val duration = now - gestureStartAt
         val span = kotlin.math.abs(ux - downX) + kotlin.math.abs(uy - downY)
-        if (abnormal != null) {
-            logSink?.invoke("CARLIFE: $abnormal → 补发 UP ($ux,$uy)")
-        } else if (!multiActive && (gestureMoves >= 3 || duration >= 300L)) {
+        if (!multiActive && (gestureMoves >= 3 || duration >= 300L)) {
             logSink?.invoke(
                 "CARLIFE: 手势结束 ${gestureMoves}次移动 时长${duration}ms " +
                     "位移${span}px ↓($downX,$downY) → UP($ux,$uy)",
@@ -1283,17 +1285,11 @@ object CarLifeHijack {
         gestureMoves = 0
     }
 
-    /** 新手势间隔：超过这个时长又收到按下，就认定上一笔的 UP 丢了（毫秒）。 */
-    private const val NEW_GESTURE_GAP_MS = 220L
-
     /** 点击判定：按住时长上限（毫秒）。 */
     private const val TAP_MAX_MS = 350L
 
     /** 点击判定：允许的手指抖动（视频像素）。 */
     private const val TAP_MAX_DRIFT_PX = 8
-
-    /** 按下后多久没有任何事件就认定 UP 丢失（毫秒）。 */
-    private const val STALE_TOUCH_MS = 3_000L
 
     /** 「音频被丢弃」提示的限频（毫秒）。 */
     private const val AUDIO_DROP_LOG_MS = 10_000L

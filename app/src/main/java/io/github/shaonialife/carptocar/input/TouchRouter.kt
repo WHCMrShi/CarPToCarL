@@ -78,6 +78,12 @@ object TouchRouter {
         coordScaleY = if (viewH > 0) streamH.toFloat() / viewH else 1f
     }
 
+    /** CarLife 热路径使用原始字段；旧虚拟屏入口保持兼容。 */
+    fun onContact(context: Context, slot: Int, x: Int, y: Int, down: Boolean, generation: Long = 0L) {
+        if (CarLifeHijack.handleTouch(slot, x, y, down, generation)) return
+        routeContact(context, Contact(slot, x, y, down))
+    }
+
     fun onContact(
         context: Context,
         contact: Contact,
@@ -92,6 +98,10 @@ object TouchRouter {
         if (CarLifeHijack.handleTouch(contact.slot, contact.xPixels, contact.yPixels, contact.down)) {
             return
         }
+        routeContact(context, contact)
+    }
+
+    private fun routeContact(context: Context, contact: Contact) {
         // 空闲槽占位（未按下且 0,0）忽略
         if (!contact.down && contact.xPixels == 0 && contact.yPixels == 0) return
         val px = (contact.xPixels * coordScaleX).toInt().coerceAtLeast(0)

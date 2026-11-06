@@ -119,6 +119,42 @@ object TouchReports {
         }
     }
 
+    fun interface ContactSink {
+        fun onContact(slot: Int, x: Int, y: Int, down: Boolean)
+    }
+
+    private fun resolve(report: ByteArray, format: Format?): Format? = format ?: when {
+        report.size == 5 -> Format.SINGLE_ABSOLUTE
+        report.size >= SLOTS * BYTES_PER_FINGER -> Format.MULTI_SLOT
+        else -> null
+    }
+
+    fun canParse(report: ByteArray, format: Format?): Boolean = resolve(report, format) != null
+
+    /** 与 parse 的边界行为一致；稳定的 sink 可避免每报告创建 List/Contact。 */
+    fun visit(report: ByteArray, format: Format?, sink: ContactSink) {
+        when (resolve(report, format)) {
+            Format.SINGLE_ABSOLUTE -> if (report.size >= 5) {
+                sink.onContact(0, readU16Le(report, 1), readU16Le(report, 3), report[0].toInt() and 1 != 0)
+            }
+            Format.MULTI_SLOT -> if (report.size >= SLOTS * BYTES_PER_FINGER) {
+                for (slot in 0 until SLOTS) {
+                    val offset = slot * BYTES_PER_FINGER
+                    sink.onContact(slot, readU16Le(report, offset + 2), readU16Le(report, offset + 4),
+                        report[offset + 1].toInt() and 255 == 1)
+                }
+            }
+            null -> Unit
+        }
+    }
+
+    /** 仅用于保留原有 UP 诊断策略，不分配触点集合。 */
+    fun hasPrimaryRelease(report: ByteArray, format: Format?): Boolean = when (resolve(report, format)) {
+        Format.SINGLE_ABSOLUTE -> report.size >= 5 && report[0].toInt() and 1 == 0
+        Format.MULTI_SLOT -> report.size >= SLOTS * BYTES_PER_FINGER && report[1].toInt() and 255 != 1
+        null -> false
+    }
+
     /** 兼容旧调用点：按 uuid 选择解析器（描述符不可得时的回退路径）。 */
     fun parseByUuid(
         uuid: String?,

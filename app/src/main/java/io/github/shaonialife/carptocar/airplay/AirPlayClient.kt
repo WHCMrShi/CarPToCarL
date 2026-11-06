@@ -2672,7 +2672,8 @@ class AirPlayClient(
                             SessionTrace.rtsp(
                                 SessionTrace.Dir.RX,
                                 "airplay-event",
-                                message.head + SessionTrace.binary(message.body),
+                                message.head,
+                                message.body,
                             )
                             val firstLine = message.firstLine
                             // (a) 状态行（"RTSP/1.0 200 OK" 等）= 车机对**我们命令**的应答：
