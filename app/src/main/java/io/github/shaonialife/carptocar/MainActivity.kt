@@ -1110,7 +1110,7 @@ class MainActivity : AppCompatActivity() {
         if (CarLifeHijack.isEnabled(this)) {
             mainHandler.postDelayed(
                 {
-                    CarLifeHijack.prewarm(applicationContext) { line ->
+                    CarLifeHijack.prewarmFromStartup(applicationContext) { line ->
                         runOnUiThread { log(line) }
                     }
                 },

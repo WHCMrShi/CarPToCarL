@@ -449,16 +449,22 @@ class CarLifeHuClient(
         private set
 
     /** 连接并开始握手。阻塞不超过 [connectTimeoutMs] × 端口数，需在后台线程调用。 */
-    fun start(): Boolean {
+    fun start(): Boolean = start { true }
+
+    internal fun start(keepStarting: () -> Boolean): Boolean {
+        if (!keepStarting()) return false
         if (running.get()) return true
         log("CARLIFE: 连接本机车机端口 $host …")
         for (port in PORTS) {
+            if (!keepStarting()) { closeAll(); return false }
             val socket = Socket()
+            sockets[port] = socket
             try {
                 socket.tcpNoDelay = true
                 socket.connect(InetSocketAddress(host, port), connectTimeoutMs)
-                sockets[port] = socket
+                if (!keepStarting()) { closeAll(); return false }
             } catch (error: Exception) {
+                sockets.remove(port, socket)
                 log("CARLIFE: 端口 $port 连接失败 - ${error.message}")
                 runCatching { socket.close() }
             }
@@ -469,9 +475,11 @@ class CarLifeHuClient(
             closeAll()
             return false
         }
+        if (!keepStarting()) { closeAll(); return false }
         cmdOut = cmd.getOutputStream()
         touchOut = sockets[CarLifeProtocol.PORT_TOUCH]?.getOutputStream()
         running.set(true)
+        if (!keepStarting()) { stop(); return false }
         lastFrameAt = android.os.SystemClock.uptimeMillis()
         // 首轮有序初始化的闸门：每条新会话都要从「98386 还没确认、首条 98311 还没发」开始。
         firstInitSent = false

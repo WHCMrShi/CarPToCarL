@@ -1,5 +1,7 @@
 package io.github.shaonialife.carptocar.carlife
 
+import io.github.shaonialife.carptocar.util.ConnectionResources
+
 import android.content.Context
 import io.github.shaonialife.carptocar.media.MediaSessionsState
 import io.github.shaonialife.carptocar.video.VideoSender
@@ -444,12 +446,22 @@ object CarLifeHijack {
      * 可在 App 启动时调用；重复调用安全（已在跑直接返回 true）。
      * 成功只代表「守候线程已启动」，真正连上后 [isStreaming] 才变 true。
      */
+    private var startupPrewarmAllowed = true
+
+    /** App 延迟初始化不应覆盖用户稍早的最终断开；显式启动仍走 prewarm。 */
+    @Synchronized
+    fun prewarmFromStartup(context: Context, log: (String) -> Unit): Boolean =
+        startupPrewarmAllowed && prewarm(context, log)
+
+    @Synchronized
     fun prewarm(
         context: Context,
         log: (String) -> Unit,
     ): Boolean {
         if (running.get()) return true
         running.set(true)
+        val scope = ConnectionResources()
+        warmScope = scope
         logSink = log
         appContext = context.applicationContext
         // Q4 固定预置优先于旧缓存，避免升级后沿用此前的 720p 或其他车辆尺寸。
@@ -496,11 +508,8 @@ object CarLifeHijack {
             ?.takeIf { it.isNotEmpty() }
             ?: CarLifeProtocol.FRAME_RATE_PROBE_IDS
 
-        worker = Thread({ workerLoop() }, "carlife-hijack").apply {
-            isDaemon = true
-            start()
-        }
-        startStallWatchdog()
+        worker = scope.start("carlife-hijack") { workerLoop(scope) }
+        startStallWatchdog(scope)
         MediaSessionsState.addListener(mediaPlaybackListener)
         return true
     }
@@ -591,8 +600,11 @@ object CarLifeHijack {
     }
 
     /** 完全停止（退出 App / 关闭开关）。 */
+    @Synchronized
     fun stop() {
+        startupPrewarmAllowed = false
         running.set(false)
+        warmScope.close()
         MediaSessionsState.removeListener(mediaPlaybackListener)
         sender = null
         client?.stop()
@@ -616,9 +628,11 @@ object CarLifeHijack {
 
     // ---- 后台主循环 ----
 
-    private fun workerLoop() {
+    @Volatile private var warmScope = ConnectionResources()
+
+    private fun workerLoop(scope: ConnectionResources) {
         var announcedWait = false
-        while (running.get()) {
+        while (running.get() && !scope.isClosed) {
             // 2026-10-25 回滚：**不再自动拉起** CarLife 引擎。
             // 自动拉起（bindService / startForegroundService / CarlifeActivity）实测能让
             // 引擎起来并监听 7240，但拿不到荣耀的画面源——引擎只会把「荣耀车联 Powered by
@@ -638,11 +652,15 @@ object CarLifeHijack {
                 continue
             }
             announcedWait = false
-            val sink = CarLifeAudioSink(logSink ?: {})
-            audioSink = sink
-            // 导航播报走 TTS 通道（9241）：独立 sink、不参与暂停丢弃（见字段注释）
-            val naviSink = CarLifeAudioSink(logSink ?: {}, dropWhenPaused = false)
-            ttsSink = naviSink
+            val sink: CarLifeAudioSink
+            val naviSink: CarLifeAudioSink
+            synchronized(this) {
+                if (scope.isClosed) return
+                sink = CarLifeAudioSink(logSink ?: {})
+                naviSink = CarLifeAudioSink(logSink ?: {}, dropWhenPaused = false)
+                audioSink = sink
+                ttsSink = naviSink
+            }
             // 创建即应用当前播放状态：若此刻音乐已是 PAUSED，立刻截断（否则 listener 只在
             // 状态「变化」时触发，稳态 PAUSED 下新 sink 会漏掉这次联动）。
             // 注意：nowPlaying == null（读不到媒体会话：未授权通知使用权 / 本地模拟无会话）
@@ -654,20 +672,20 @@ object CarLifeHijack {
                 // routeAudio → sink.write → feedPcm 返回前已消费或复制；GOP 视频仍独立持有数组。
                 borrowPcmInput = true,
                 log = { line -> logSink?.invoke(line) },
-                onVideoFrame = { data, key, ts -> onFrame(data, key, ts) },
-                onVideoParams = { w, h, f -> logSink?.invoke("CARLIFE: 手机编码参数 ${w}x$h@$f") },
+                onVideoFrame = { data, key, ts -> if (!scope.isClosed) onFrame(data, key, ts) },
+                onVideoParams = { w, h, f -> if (!scope.isClosed) logSink?.invoke("CARLIFE: 手机编码参数 ${w}x$h@$f") },
                 // SPS 是码流的真相：确认后立刻告诉上层（界面显示、落盘快照都跟着它）。
-                onStreamSize = { w, h -> onActualStreamSize?.invoke(w, h) },
-                onAudioFormat = { rate, channels -> sink.configure(rate, channels) },
-                onAudioPcm = { pcm, size -> routeAudio(sink, pcm, size) },
+                onStreamSize = { w, h -> if (!scope.isClosed) onActualStreamSize?.invoke(w, h) },
+                onAudioFormat = { rate, channels -> if (!scope.isClosed) sink.configure(rate, channels) },
+                onAudioPcm = { pcm, size -> if (!scope.isClosed) routeAudio(sink, pcm, size) },
                 // 导航播报：TTS 通道独立格式、独立 sink，喂给同一个音频发送端
-                onTtsFormat = { rate, channels -> naviSink.configure(rate, channels) },
-                onTtsPcm = { pcm, size -> routeAudio(naviSink, pcm, size) },
-                onAudioGate = { active -> onEngineAudioGate(active) },
+                onTtsFormat = { rate, channels -> if (!scope.isClosed) naviSink.configure(rate, channels) },
+                onTtsPcm = { pcm, size -> if (!scope.isClosed) routeAudio(naviSink, pcm, size) },
+                onAudioGate = { active -> if (!scope.isClosed) onEngineAudioGate(active) },
                 // 音频沉默看门狗判据：音乐会话确实在播 = 此刻「应该」有声，
                 // 9240 却连续零 PCM 才是异常。读不到会话（null）时按「不确定」放行不重连。
                 audioExpected = { MediaSessionsState.nowPlaying?.playing == true },
-                onMediaInfo = { info -> onMediaInfo(info) },
+                onMediaInfo = { info -> if (!scope.isClosed) onMediaInfo(info) },
                 requestedFps = requestedFps,
                 initialConnectType = connectType,
                 probeIds = probeIds,
@@ -690,11 +708,20 @@ object CarLifeHijack {
                 initialWidth = initialCanvasW,
                 initialHeight = initialCanvasH,
             )
-            if (hu.start()) {
-                synchronized(this) {
-                    resetTouchState()
-                    client = hu
-                }
+            val cleanup = AutoCloseable { hu.stop() }
+            val connected = try {
+                scope.own(cleanup) && hu.start { running.get() && !scope.isClosed }
+            } catch (error: Exception) {
+                hu.stop()
+                if (error is InterruptedException) Thread.currentThread().interrupt()
+                if (!scope.isClosed) logSink?.invoke("CARLIFE: 接管中止 - ${error.message}")
+                false
+            }
+            val adopted = connected && synchronized(this) {
+                if (!running.get() || scope.isClosed || !hu.isRunning) false
+                else { resetTouchState(); client = hu; true }
+            }
+            if (adopted) {
                 // SETUP 先于 client 创建的边界（requestedW/H 已缓存车机画布）：把它回放为
                 // 「申请值」，让引擎尝试按车机画布编码；确认值（videoWidth）仍由引擎回显，
                 // 不受影响。
@@ -712,13 +739,15 @@ object CarLifeHijack {
                     startSourceRestartWatchdog(hu)
                 }
                 logSink?.invoke("CARLIFE: 劫持成功，已接管本机 CarLife 码流（等待连接车机）")
-            } else {
+            } else if (!scope.isClosed) {
                 logSink?.invoke("CARLIFE: 握手失败，2 秒后重试（确认 CarLife 停在「正在连接」）")
             }
             // 保持连接直到断开或停止
-            while (running.get() && hu.isRunning) {
+            while (running.get() && !scope.isClosed && hu.isRunning) {
                 sleep(500)
             }
+            hu.stop()
+            scope.release(cleanup)
             synchronized(this) {
                 if (client === hu) {
                     client = null
@@ -729,8 +758,8 @@ object CarLifeHijack {
             if (audioSink === sink) audioSink = null
             naviSink.stop()
             if (ttsSink === naviSink) ttsSink = null
-            hasVideo = false
-            if (running.get()) sleep(1500)
+            if (warmScope === scope) hasVideo = false
+            if (running.get() && !scope.isClosed) sleep(1500)
         }
     }
 
@@ -785,17 +814,17 @@ object CarLifeHijack {
      * 用来区分「引擎真没画面」与「链路/车机侧解码问题」——两者处置完全不同。
      * 不主动重建编码器：通话期间根本没有画面可编，硬重建只会把水搅浑。
      */
-    private fun startStallWatchdog() {
-        Thread {
+    private fun startStallWatchdog(scope: ConnectionResources) {
+        scope.start("carlife-stall-watch") {
             var previous = frameSeq
             var lowRateSince = 0L
-            while (running.get()) {
+            while (running.get() && !scope.isClosed) {
                 try {
                     Thread.sleep(STALL_POLL_MILLIS)
                 } catch (_: InterruptedException) {
-                    return@Thread
+                    return@start
                 }
-                if (!running.get()) return@Thread
+                if (!running.get() || scope.isClosed) return@start
                 val now = android.os.SystemClock.uptimeMillis()
                 val current = frameSeq
                 val delta = current - previous
@@ -822,10 +851,6 @@ object CarLifeHijack {
                         "恢复后会补关键帧）",
                 )
             }
-        }.apply {
-            isDaemon = true
-            name = "carlife-stall-watch"
-            start()
         }
     }
 

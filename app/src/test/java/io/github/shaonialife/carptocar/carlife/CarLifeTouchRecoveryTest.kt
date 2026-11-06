@@ -119,4 +119,14 @@ class CarLifeTouchRecoveryTest {
             client.stop()
         }
     }
+
+    @Test fun cancelledStartupDoesNotOpenPortsOrPublishRunningState() {
+        val client =
+            CarLifeHuClient(
+                log = { throw AssertionError("startup must stop before connecting") },
+                onVideoFrame = { _, _, _ -> },
+            )
+        assertFalse(client.start { false })
+        assertFalse(client.isRunning)
+    }
 }

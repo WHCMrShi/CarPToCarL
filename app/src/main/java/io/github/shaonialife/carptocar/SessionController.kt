@@ -1351,6 +1351,7 @@ object SessionController {
         io.github.shaonialife.carptocar.util.RtspDump.init(context.filesDir)
         // 用户明确要连：解冻恢复的前提之一（断开后再解冻不该自己爬起来）
         sessionWanted = true
+        if (CarLifeHijack.isEnabled(context)) CarLifeHijack.prewarm(context) { line -> appendLog(line) }
         // 新一次点击 = 新的重试预算（上一轮用完的三次不该算到这一轮头上）；
         // 令牌 +1 让还在退避睡眠里的旧线程作废，避免与手动这一轮并行交接
         synchronized(connectRetryLock) {
@@ -1414,6 +1415,7 @@ object SessionController {
         SessionTrace.sessionEnd("用户手动断开")
         pendingEndpointUpdate = null
         retireSession()
+        CarLifeHijack.stop()
         // BT 控制会话只在这里（用户终态）退役，socket close 让保活读循环立刻退出：
         // 否则它阻塞到对端超时（实测 ~24s）才结束，用户取消后英雄卡持续转圈。
         // 配对中绝不能断——DiPlay 在隧道 iAP2 就绪前看到 RFCOMM 断开即判
@@ -1463,7 +1465,7 @@ object SessionController {
         TouchRouter
             .reset()
         currentClient?.cancelled = true
-        currentClient?.close()
+        currentClient?.dispose()
         currentClient = null
         // 注意：这里绝不能 detach BT 控制会话。本方法在每轮配对起步时也会执行，
         // 而 DiPlay 在 WiFi 隧道就绪前看到 RFCOMM 断开即判 bring-up failed、
@@ -3473,6 +3475,7 @@ object SessionController {
                         // 端点未解析（无 IP）/端口未开时绝不值得断 BT（2026-10-11 踩过：
                         // mDNS 失败也触发 detach，白白拆掉车机窗口）。
                         detachActiveBtSessions()
+                        client.dispose()
                         client = newClient()
                         currentClient = client
                         drainPendingEndpoint(client)

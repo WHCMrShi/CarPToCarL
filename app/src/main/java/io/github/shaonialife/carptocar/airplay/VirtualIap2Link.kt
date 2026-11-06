@@ -66,7 +66,9 @@ class VirtualIap2Link(
      * 由 SessionController 注入（数据源 = `AudioManager.mode`，见 `callStateOf`）。
      */
     private val callStateProvider: (() -> Int)? = null,
-) {
+) : AutoCloseable {
+    @Volatile private var closed = false
+    private val pacer: Thread
     private val lock = Any()
     private val engine = Iap2LinkEngine()
     private val parser = Iap2Csm.Parser()
@@ -161,20 +163,22 @@ class VirtualIap2Link(
      * 屏幕激活必须排在这之后（见 `SessionController` 的 MIB3 二次激活）。
      */
     val controlSessionReady: Boolean
-        get() = synchronized(lock) { engine.state == Iap2LinkEngine.State.NORMAL && mfiFinished }
+        get() = synchronized(lock) { !closed && engine.state == Iap2LinkEngine.State.NORMAL && mfiFinished }
 
     init {
         engine.onEaData = { bytes -> handleEaData(bytes) }
         engine.onSynchronizationEchoSent = { pendingEchoFlush = true }
-        Thread(
+        pacer = Thread(
             {
-                while (alive()) {
+                while (!closed && alive()) {
                     try {
                         Thread.sleep(200)
                     } catch (_: InterruptedException) {
                         return@Thread
                     }
+                    if (closed) return@Thread
                     synchronized(lock) {
+                        if (closed) return@Thread
                         engine.advanceTime(System.nanoTime() / 1_000_000L)
                         drainLocked()
                     }
@@ -185,6 +189,11 @@ class VirtualIap2Link(
             isDaemon = true
             start()
         }
+    }
+
+    override fun close() {
+        closed = true
+        pacer.interrupt()
     }
 
     /** 事件形态启动：服务端待命（收到 marker 回 marker，等车机 SYN）。 */
@@ -280,6 +289,7 @@ class VirtualIap2Link(
     /** 车机链路字节入口（事件通道 iAPSendMessage 的 data）。 */
     fun onCarBytes(bytes: ByteArray) {
         synchronized(lock) {
+            if (closed) return
             // 隧道存在时切换「回显先行」协商语义（DiPlay 对端引擎硬性期望）
             engine.echoFirst = tunnelWriter() != null
             val isMarker =
