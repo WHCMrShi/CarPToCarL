@@ -651,6 +651,8 @@ object CarLifeHijack {
             sink.setPlaybackPaused(MediaSessionsState.nowPlaying?.playing == false)
             val hu = CarLifeHuClient(
                 host = "127.0.0.1",
+                // routeAudio → sink.write → feedPcm 返回前已消费或复制；GOP 视频仍独立持有数组。
+                borrowPcmInput = true,
                 log = { line -> logSink?.invoke(line) },
                 onVideoFrame = { data, key, ts -> onFrame(data, key, ts) },
                 onVideoParams = { w, h, f -> logSink?.invoke("CARLIFE: 手机编码参数 ${w}x$h@$f") },

@@ -178,6 +178,8 @@ class CarLifeHuClient(
      * 让引擎在「已有编码器」的状态下重建一次。只做一次，避免把引擎打进反复重建。
      */
     private val settleReinit: Boolean = true,
+    /** true 时 PCM 数组仅在回调内有效，消费者必须同步消费/复制；默认保留独立数组 API。 */
+    private val borrowPcmInput: Boolean = false,
 ) {
 
     private val running = AtomicBoolean(false)
@@ -585,9 +587,9 @@ class CarLifeHuClient(
 
     private fun cmdReader(input: InputStream) {
         val data = DataInputStream(input)
+        val header = ByteArray(8)
         try {
             while (running.get()) {
-                val header = ByteArray(8)
                 data.readFully(header)
                 val length = ((header[0].toInt() and 0xFF) shl 8) or (header[1].toInt() and 0xFF)
                 val serviceType = readU32(header, 4)
@@ -914,13 +916,14 @@ class CarLifeHuClient(
         owner: Socket? = null,
     ) {
         val data = DataInputStream(input)
+        val header = ByteArray(12)
+        var headerAllocation = header.size
         // 实测帧率窗口：每 5 秒统计一次，回答「98311 声明 60 到底有没有让引擎真的吐 60 帧」。
         var windowStart = android.os.SystemClock.uptimeMillis()
         var windowFrames = 0L
         val metrics = PipelineWindow("CarLife-video-callback")
         try {
             while (running.get()) {
-                val header = ByteArray(12)
                 data.readFully(header)
                 val length = readU32(header, 0)
                 if (length < 0 || length > MAX_VIDEO_FRAME) {
@@ -967,7 +970,8 @@ class CarLifeHuClient(
                 val workStarted = System.nanoTime()
                 onVideoFrame(payload, isKeyFrame(payload), sourceTimestampMs)
                 val done = System.nanoTime()
-                metrics.record(length, length + 12, done - workStarted, now = done)?.let(log)
+                metrics.record(length, length + headerAllocation, done - workStarted, now = done)?.let(log)
+                headerAllocation = 0
             }
         } catch (error: Exception) {
             if (running.get()) log("CARLIFE: 视频通道断开 - ${error.message}")
@@ -1345,13 +1349,15 @@ class CarLifeHuClient(
         val label = channel.label
         val isTts = channel.isTts
         val data = DataInputStream(input)
+        val head = ByteArray(CarLifeProtocol.AUDIO_HEAD_LEN)
+        var headerAllocation = head.size
+        val payloads = PacketPayloadBuffer()
         // 格式宣告状态挂在 channel 上（不是局部变量）：重连后必须沿用已宣告过的值，
         // 否则新读线程会以为引擎没宣告过，给上层报 48kHz 兜底值把真实的 44.1kHz 覆盖掉。
         var ttsPackets = 0L
         val metrics = PipelineWindow("CarLife-$label-callback")
         try {
             while (running.get()) {
-                val head = ByteArray(CarLifeProtocol.AUDIO_HEAD_LEN)
                 data.readFully(head)
                 val length = readU32(head, 0)
                 val type = readU32(head, 8)
@@ -1359,8 +1365,8 @@ class CarLifeHuClient(
                     log("CARLIFE: $label 音频包长度异常（$length），放弃该通道")
                     return
                 }
-                val payload = ByteArray(length)
-                if (length > 0) data.readFully(payload)
+                val pcmPacket = if (isTts) type != CarLifeProtocol.TTS_PKG_INIT else type == CarLifeProtocol.MUSIC_PKG_NORMAL
+                val payload = payloads.read(data, length, borrowPcmInput && pcmPacket)
                 val workStarted = System.nanoTime()
                 try {
                     if (isTts) {
@@ -1448,7 +1454,8 @@ class CarLifeHuClient(
                     }
                 } finally {
                     val done = System.nanoTime()
-                    metrics.record(length, length + CarLifeProtocol.AUDIO_HEAD_LEN, done - workStarted, now = done)?.let(log)
+                    metrics.record(length, payloads.lastAllocatedBytes + headerAllocation, done - workStarted, now = done)?.let(log)
+                    headerAllocation = 0
                 }
             }
         } catch (error: Exception) {
