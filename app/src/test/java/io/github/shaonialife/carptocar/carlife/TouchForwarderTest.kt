@@ -239,4 +239,122 @@ class TouchForwarderTest {
             sender.stop()
         }
     }
+
+    @Test fun retireDiscardsWholeQueuedClicksEvenWhenFrontendAlreadyReleased() {
+        val out = RecordingOutput()
+        val sender = TouchForwarder(out)
+        try {
+            sender.enqueue(down, 1, 2)
+            sender.enqueue(up, 1, 2)
+            sender.retireInput()
+            sender.enqueue(down, 50, 60)
+            sender.enqueue(up, 50, 60)
+            sender.start()
+            assertArrayEquals(expected(down, 50, 60), out.next())
+            assertArrayEquals(expected(up, 50, 60), out.next())
+            assertTrue(out.frames.isEmpty())
+        } finally {
+            sender.stop()
+        }
+    }
+
+    @Test fun retireOnSameConnectionLiftsInFlightDownBeforeNewInputWithoutReplayingQueue() {
+        val out = RecordingOutput(1)
+        val sender = TouchForwarder(out)
+        try {
+            sender.start()
+            sender.enqueue(down, 10, 20)
+            assertTrue(out.entered.await(3, TimeUnit.SECONDS))
+            sender.enqueue(move, 30, 40)
+            sender.enqueue(up, 30, 40)
+            sender.retireInput()
+            sender.enqueue(down, 50, 60)
+            sender.enqueue(up, 50, 60)
+            out.release.countDown()
+            assertArrayEquals(expected(down, 10, 20), out.next())
+            assertArrayEquals(expected(up, 10, 20), out.next())
+            assertArrayEquals(expected(down, 50, 60), out.next())
+            assertArrayEquals(expected(up, 50, 60), out.next())
+            assertTrue(out.frames.isEmpty())
+        } finally {
+            out.release.countDown()
+            sender.stop()
+        }
+    }
+
+    @Test fun repeatedRetirementDiscardsInterveningQueuedInput() {
+        val out = RecordingOutput(1)
+        val sender = TouchForwarder(out)
+        try {
+            sender.start()
+            sender.enqueue(down, 10, 20)
+            assertTrue(out.entered.await(3, TimeUnit.SECONDS))
+            sender.retireInput()
+            sender.enqueue(down, 30, 40)
+            sender.enqueue(up, 30, 40)
+            sender.retireInput()
+            sender.enqueue(down, 50, 60)
+            sender.enqueue(up, 50, 60)
+            out.release.countDown()
+            assertArrayEquals(expected(down, 10, 20), out.next())
+            assertArrayEquals(expected(up, 10, 20), out.next())
+            assertArrayEquals(expected(down, 50, 60), out.next())
+            assertArrayEquals(expected(up, 50, 60), out.next())
+        } finally {
+            out.release.countDown()
+            sender.stop()
+        }
+    }
+
+    @Test fun retireClearsOverflowDropModeWithoutWaitingForOldPhysicalUp() {
+        val out = RecordingOutput(1)
+        val sender = TouchForwarder(out)
+        try {
+            sender.start()
+            sender.enqueue(down, 10, 20)
+            assertTrue(out.entered.await(3, TimeUnit.SECONDS))
+            repeat(4) {
+                sender.enqueue(up, 1, 2)
+                sender.enqueue(down, 3, 4)
+            }
+            sender.enqueue(move, 30, 40)
+            sender.retireInput()
+            sender.enqueue(down, 50, 60)
+            sender.enqueue(up, 50, 60)
+            out.release.countDown()
+            assertArrayEquals(expected(down, 10, 20), out.next())
+            assertArrayEquals(expected(up, 10, 20), out.next())
+            assertArrayEquals(expected(down, 50, 60), out.next())
+            assertArrayEquals(expected(up, 50, 60), out.next())
+        } finally {
+            out.release.countDown()
+            sender.stop()
+        }
+    }
+
+    @Test fun retireOnSameCompoundConnectionLiftsPointersBeforeNewDown() {
+        val out = RecordingOutput(2)
+        val sender = TouchForwarder(out)
+        try {
+            sender.start()
+            sender.enqueue(down, 10, 20)
+            sender.enqueue(compound, 30, 40, 261)
+            assertTrue(out.entered.await(3, TimeUnit.SECONDS))
+            sender.enqueue(compound, 100, 100, 2)
+            sender.enqueue(compound, 100, 100, 1)
+            sender.retireInput()
+            sender.enqueue(down, 50, 60)
+            sender.enqueue(up, 50, 60)
+            out.release.countDown()
+            assertArrayEquals(expected(down, 10, 20), out.next())
+            assertArrayEquals(expected(compound, 30, 40, 261), out.next())
+            assertArrayEquals(expected(compound, 30, 40, 262), out.next())
+            assertArrayEquals(expected(compound, 10, 20, 1), out.next())
+            assertArrayEquals(expected(down, 50, 60), out.next())
+            assertArrayEquals(expected(up, 50, 60), out.next())
+        } finally {
+            out.release.countDown()
+            sender.stop()
+        }
+    }
 }

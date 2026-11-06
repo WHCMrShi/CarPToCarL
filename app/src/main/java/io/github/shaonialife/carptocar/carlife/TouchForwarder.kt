@@ -39,6 +39,18 @@ internal class TouchForwarder(
             ready.signal()
         }
 
+    /** 保留 socket，撤销未发送的旧输入。worker 先收尾实际触点，再消费新队列。
+     * worker 已取出处理的单条帧不能撤回，也不能通过并发写 UP 打断，否则会破坏 TCP 帧边界。
+     */
+    fun retireInput() =
+        lock.withLock {
+            if (stopped) return
+            size = 0
+            resetting = true
+            dropping = false
+            ready.signal()
+        }
+
     fun enqueue(
         service: Int,
         x: Int,

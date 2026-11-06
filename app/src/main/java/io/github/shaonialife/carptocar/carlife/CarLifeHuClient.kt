@@ -485,14 +485,7 @@ class CarLifeHuClient(
                     probeQueue.joinToString(",") + "）",
             )
         }
-        touchOut?.let { output ->
-            touchForwarder = TouchForwarder(
-                output,
-                onWrite = { sentTouchCount++ },
-                onFailure = { log("CARLIFE: 触摸通道写入失败 - ${it.message}") },
-                onOverflow = { log("CARLIFE: 触摸边界队列已满——收尾已发送手势，等待物理抬起后恢复") },
-            ).also { it.start() }
-        }
+        touchOut?.let(::startTouchForwarding)
 
         startReader("carlife-cmd") { cmdReader(cmd.getInputStream()) }
         sockets[CarLifeProtocol.PORT_VIDEO]?.let { video ->
@@ -537,6 +530,26 @@ class CarLifeHuClient(
 
     @Volatile
     private var touchForwarder: TouchForwarder? = null
+
+    /** 与 CarPlay 输入会话一同退役队列，CarLife 连接本身继续保留。 */
+    fun retireTouchInput() {
+        touchForwarder?.retireInput()
+    }
+
+    internal fun startTouchForwarding(output: OutputStream) {
+        touchForwarder = TouchForwarder(
+            output,
+            onWrite = { sentTouchCount++ },
+            onFailure = { error ->
+                val wasRunning = running.get()
+                // 部分帧可能已经送出，不能在原流上重试。先停止整个故障客户端，
+                // 让 CarLifeHijack 既有的守候循环重建连接和手势状态。
+                stop()
+                if (wasRunning) log("CARLIFE: 触摸通道写入失败，已停止本轮连接，等待重新接管 - ${error.message}")
+            },
+            onOverflow = { log("CARLIFE: 触摸边界队列已满——收尾已发送手势，等待物理抬起后恢复") },
+        ).also { it.start() }
+    }
 
     private fun enqueueTouch(serviceType: Int, x: Int, y: Int, action: Int = -1) {
         touchForwarder?.enqueue(serviceType, x, y, action)

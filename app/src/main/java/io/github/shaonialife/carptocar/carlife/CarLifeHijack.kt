@@ -285,10 +285,6 @@ object CarLifeHijack {
     /** 本次按下的起始时刻（点击判定用）。 */
     private var tapStartedAt = 0L
 
-    /** 最近一次真正发出的坐标（补发 UP / 超时清理用）。 */
-    private var lastMoveX = 0
-    private var lastMoveY = 0
-
     /** 本次手势内已发送的 MOVE 条数（手势日志用）。 */
     private var gestureMoves = 0
 
@@ -1121,8 +1117,6 @@ object CarLifeHijack {
                 downX = tx
                 downY = ty
                 tapStartedAt = now
-                lastMoveX = tx
-                lastMoveY = ty
                 hu.touchDown(tx, ty)
                 logSink?.invoke(
                     "CARLIFE: 触控 ↓ ($x,$y)→($tx,$ty)（视图 ${viewW}x$viewH）",
@@ -1133,8 +1127,6 @@ object CarLifeHijack {
                 // 不做本地节流：引擎 dispatchTouchEvent 自带 10ms 限频，
                 // 本地再丢一次只会让拖拽变成「跳跃采样」。发送队列已按
                 // 「MOVE 只留最新」合并，不会积压。
-                lastMoveX = tx
-                lastMoveY = ty
                 gestureMoves++
                 if (multiActive) {
                     // 双指手势已切换到复合动作通道，第一根手指的移动也得走同一条通道，
@@ -1230,10 +1222,9 @@ object CarLifeHijack {
 
     /** 明确的会话断开才收尾；短暂重连保留 CarLife socket 时也不能留下按住状态。 */
     private fun releaseTouch() {
-        val hu = client
-        if (touchState.pressed && hu != null) {
-            finishGesture(hu, lastMoveX, lastMoveY, android.os.SystemClock.uptimeMillis())
-        }
+        // 前端已收到 UP 时，后端仍可能积压整笔点击，不能只看 pressed。
+        // 由唯一写线程按实际已发送状态收尾，避免把 UP 排在全部旧点击之后。
+        client?.retireTouchInput()
         resetTouchState()
     }
 
@@ -1254,8 +1245,6 @@ object CarLifeHijack {
         now: Long,
     ) {
         touchState.reset()
-        lastMoveX = ux
-        lastMoveY = uy
         val act = CarLifeProtocol.TouchAction
         if (multiActive) {
             // 双指手势：先把还按着的手指 1 抬起，再用 ACTION_UP 收尾。

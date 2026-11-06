@@ -17,15 +17,23 @@
 - TouchForwarder 每连接使用独立输出流、固定大小原始字段环形队列和单 worker。合并相同格式的队尾 MOVE，保留立即唤醒与 TCP_NODELAY，空闲时不再每 400ms 轮询。
 - worker 复用 32 字节编码缓冲，直接编码 8 字节头和 protobuf 字段后单次写出；不改报文字节、指针动作或 0..8191 坐标安全范围。保留输出 flush，不加入人为批量等待。
 - 普通满队列先淘汰最老 MOVE。若 8 个位置全部是边界事件，清除未发送的积压，由 worker 收尾实际已经发送的触点，并忽略当前物理手势剩余数据，直到主触点 UP 后恢复。队列始终有界，接收线程不等待慢 socket；过载恢复会记录日志，并非承诺过载时保留每次点击。通用复合动作先释放第二触点再释放主触点。
-- stop 清队列并唤醒 worker；旧 worker 只能访问旧流。实际 socket 仍由 CarLifeHuClient 关闭，以解除阻塞写入。写入异常终止该 forwarder，不重试可能部分发送的协议帧，等待连接重建。
+- stop 清队列并唤醒 worker；旧 worker 只能访问旧流。实际 socket 仍由 CarLifeHuClient 关闭，以解除阻塞写入。写入异常终止该 forwarder，并停止所属 CarLife 客户端，让既有守候循环重建连接；不重试可能部分发送的协议帧。
 - 失败快照在连接成功后停止 RTSP 格式化/保存；事件 RX 在构造 body hex 前判断是否仍需录制。独立 RTSP dump、手势边界日志与原有低频诊断保留。
 
 这些变化减少本地重复解析、分配和无效唤醒，不代表已测得端到端延迟降低。CarLife 的触摸消费、应用处理、画面返回及车机显示仍会影响感知速度。
+
+## 审核修复（后续独立提交）
+
+- 输入退役不再依据前端 pressed 决定是否追加 UP。即使物理 UP 已经收到，也清除发送器中尚未发送的旧点击/拖动，取消旧的溢出等待状态，并设置 worker 收尾屏障。新输入可立即入队，但必须在实际已发送触点释放之后写出；保留同一条 CarLife socket。
+- worker 已取出处理（可能正在 socket.write）的单条旧帧无法安全撤回。它完成后 worker 收尾，再发新事件；不并发插入 UP、不破坏 TCP 帧边界。若该写入失败，则走故障客户端重建。
+- 触摸写入异常先执行所属 CarLifeHuClient.stop，再记录诊断；isRunning 变为 false，CarLifeHijack 的既有轮询因此结束旧轮次并重新接管。会短暂中断本地 CarLife 音视频，但不新增重试线程或直接重放触摸帧；用户停止守候后不会由此额外启动重连。
+- 新增同发送器退役、前端已释放但队列仍有点击、阻塞中的 DOWN、连续退役、溢出模式解除和复合动作收尾测试。另模拟握手已完成状态，调用真实客户端的触摸故障回调，验证 isRunning 失效、替代客户端可发送新点击，以及退役 UP 失败同样触发停止。这部分为 JVM 夹具，不代表真实 Android socket 握手和自动重连已经过实车测试。
+- 修复后执行相同的 `build-local.ps1` 校验：486 项测试全部通过（本次新增 7 项），0 失败/错误/跳过；lintDebug 通过（0 Error、109 Warning、2 Information）；assembleDebug 通过。尚未安装或实车验证。
 
 ## 验证与回归
 
 新增测试涵盖持续按下/真实释放/会话重置、旧输入代次失效、HID 缓存更新、原始字段解析与旧解析器在畸形和回退输入下等价、varint 边界报文字节等价、MOVE 合并、协议格式隔离、坐标限制、满队列淘汰、阻塞写入时单点/复合动作溢出恢复、停止重连隔离以及写入失败。
 
-最终运行 `scripts/build-local.ps1 -NoDaemon -Offline -GradleArguments '--max-workers=2'`：479 项测试全部通过（新增 15 项），0 失败/错误/跳过；lintDebug 通过（0 Error、109 Warning、2 Information）；assembleDebug 通过。格式化严格限定本次新增文件，未重排历史文件。另用 javap 检查了编码器 encode/field 方法无 new/newarray/anewarray 指令，输入代次参数为原始 long；这只是分配路径检查，不是端到端性能测量。
+初次优化提交 `c34e6fd` 运行 `scripts/build-local.ps1 -NoDaemon -Offline -GradleArguments '--max-workers=2'`：479 项测试全部通过（新增 15 项），0 失败/错误/跳过；lintDebug 通过（0 Error、109 Warning、2 Information）；assembleDebug 通过。格式化严格限定本次新增文件，未重排历史文件。另用 javap 检查了编码器 encode/field 方法无 new/newarray/anewarray 指令，输入代次参数为原始 long；这只是分配路径检查，不是端到端性能测量。
 
 尚未安装实车测试。重点回归：快速点击、长按、拖到半屏停住超过 220ms/3秒再继续、停住后真实抬起、长距离滑动，以及按住期间断开再重连。需观察是否出现提前翻页、手势卡住、坐标偏移或旧手势重放；不能用本机单测替代这部分验证。
