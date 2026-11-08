@@ -1425,6 +1425,7 @@ object SessionController {
         val message: String,
         val positive: String,
         val negative: String,
+        val isValid: () -> Boolean = { true },
     )
 
     /**
@@ -2138,11 +2139,27 @@ object SessionController {
     }
 
     /** 应用专属网络被系统拒绝/超时：让用户重试或转手动连接。 */
+    private fun carWifiReady(ssid: String): Boolean {
+        val net = wifiConnector?.currentNetwork ?: return false
+        if (boundCarSsid != ssid) return false
+        val caps = appContext?.getSystemService(android.net.ConnectivityManager::class.java)?.getNetworkCapabilities(net)
+        return caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
+    }
+
+    private fun wifiGuidanceRequired(ssid: String, generation: Long?): Boolean =
+        !connectCancelled && sessionWanted && pendingCtrlInvite.currentGeneration() == generation &&
+            !isStreaming() && !carWifiReady(ssid)
+
+    private val wifiFailurePromptOpen = AtomicBoolean(false)
+
     private fun promptSpecifierFailed(
         wifi: Iap2SenderSession.WifiConfiguration,
         shellReady: Boolean,
     ) {
-        if (connectCancelled) return
+        val generation = pendingCtrlInvite.currentGeneration()
+        val needed = { wifiGuidanceRequired(wifi.ssid, generation) }
+        if (!needed() || !wifiFailurePromptOpen.compareAndSet(false, true)) return
+        try {
         val choice =
             askWifiJoinChoice(
                 DialogSpec(
@@ -2153,9 +2170,9 @@ object SessionController {
                             "手动连接会把热点保存为系统网络，可能影响移动数据。",
                     positive = "重试",
                     negative = "打开 WLAN 设置",
-                ),
+                ), needed,
             )
-        if (connectCancelled) return
+        if (!needed()) return
         when (choice) {
             true -> {
                 // force：用户明确点了「重试」——绕过 5 秒去重窗口
@@ -2172,16 +2189,21 @@ object SessionController {
             false -> manualJoinCarWifi(wifi)
 
             null -> {
+                if (!needed()) return
                 phaseHint = "未能加入车机热点——请重新连接"
                 appendLog("WIFI: 弹窗无人应答——自动加入中止")
             }
         }
+        } finally { wifiFailurePromptOpen.set(false) }
     }
 
     /** 手动兜底：密码进剪贴板 + 跳 WLAN 设置，轮询用户是否连上。 */
     private fun manualJoinCarWifi(wifi: Iap2SenderSession.WifiConfiguration) {
+        val generation = pendingCtrlInvite.currentGeneration()
+        val needed = { wifiGuidanceRequired(wifi.ssid, generation) }
+        if (!needed()) return
         copyHotspotPsk(wifi.passphrase)
-        openWlanSettings()
+        openWlanSettings(needed)
         phaseHint = "请在 WLAN 设置中连接 ${wifi.ssid}…"
         appendLog(
             "WIFI: 用户选择手动连接——等待 WLAN 连上 \"${wifi.ssid}\"（最长 120 秒）；" +
@@ -2189,13 +2211,15 @@ object SessionController {
         )
         val manualDeadline = android.os.SystemClock.uptimeMillis() + WLAN_WAIT_TIMEOUT_MS
         while (android.os.SystemClock.uptimeMillis() < manualDeadline) {
-            if (connectCancelled) return
+            if (!needed()) return
             Thread.sleep(5_000)
+            if (!needed()) return
             if (shellWifiStatus().second == wifi.ssid) {
                 bindCarWifiAndRegister(wifi.ssid)
                 return
             }
         }
+        if (!needed()) return
         phaseHint = "尚未连接 ${wifi.ssid}——自动加入已中止"
         appendLog("WIFI: 手动连接等待超时——自动加入中止")
     }
@@ -2349,28 +2373,25 @@ object SessionController {
      * 弹窗询问用户（阻塞调用线程直到选择/关闭/90 秒超时）：
      * true=positive；false=negative；null=无人应答（调用方决定兜底）。
      */
-    private fun askWifiJoinChoice(spec: DialogSpec): Boolean? {
-        val latch = java.util.concurrent.CountDownLatch(1)
-        var choice: Boolean? = null
+    private fun askWifiJoinChoice(spec: DialogSpec, valid: () -> Boolean = { !connectCancelled }): Boolean? {
+        val decision = io.github.shaonialife.carptocar.util.GuardedDecision<Boolean>(valid)
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             val sink = dialogSink
-            if (sink == null) {
+            if (sink == null || !decision.pending) {
                 // 无 UI 宿主（Activity 销毁窗口）：宁可中止也不默认替用户决定加入
-                latch.countDown()
+                decision.complete(null)
                 return@post
             }
-            sink(spec) { result ->
-                choice = result
-                latch.countDown()
-            }
+            sink(spec.copy(isValid = { decision.pending })) { result -> decision.complete(result) }
         }
-        latch.await(JOIN_DIALOG_TIMEOUT_S, java.util.concurrent.TimeUnit.SECONDS)
-        return choice
+        return decision.await(JOIN_DIALOG_TIMEOUT_S * 1000)
     }
 
-    private fun openWlanSettings() {
+    private fun openWlanSettings(valid: () -> Boolean = { !connectCancelled }) {
         appContext?.let { ctx ->
             android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (!valid()) return@post
+                appendLog("CONNECT-DIAG: opening WLAN settings from connection guidance")
                 runCatching {
                     ctx.startActivity(
                         android.content

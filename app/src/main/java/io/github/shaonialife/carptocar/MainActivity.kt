@@ -720,7 +720,7 @@ class MainActivity : AppCompatActivity() {
         // 取消连接时 cancel() 联动关闭（触发 onChoice(null) → 流程检查取消标志中止）
         SessionController.dialogSink = { spec, onChoice ->
             runOnUiThread {
-                if (isFinishing || isDestroyed) {
+                if (isFinishing || isDestroyed || !spec.isValid()) {
                     onChoice(null)
                     return@runOnUiThread
                 }
@@ -737,7 +737,7 @@ class MainActivity : AppCompatActivity() {
                                 DarkMessageDialog.Action(spec.negative) {
                                     answered = true
                                     log("CONNECT-DIAG: wifi-dialog choice=negative title=${spec.title}")
-                                    onChoice(false)
+                                    onChoice(false.takeIf { spec.isValid() })
                                 },
                                 DarkMessageDialog.Action(
                                     spec.positive,
@@ -745,12 +745,24 @@ class MainActivity : AppCompatActivity() {
                                 ) {
                                     answered = true
                                     log("CONNECT-DIAG: wifi-dialog choice=positive title=${spec.title}")
-                                    onChoice(true)
+                                    onChoice(true.takeIf { spec.isValid() })
                                 },
                             ),
                         onCancel = { if (!answered) onChoice(null) },
                     )
                 wifiJoinDialog = dialog
+                log("CONNECT-DIAG: wifi-dialog shown title=${spec.title}")
+                val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                val monitor = object : Runnable {
+                    override fun run() {
+                        if (!dialog.isShowing) return
+                        if (isFinishing || isDestroyed || !spec.isValid()) {
+                            log("CONNECT-DIAG: wifi-dialog retired title=${spec.title}")
+                            dialog.cancel()
+                        } else handler.postDelayed(this, 200)
+                    }
+                }
+                handler.postDelayed(monitor, 200)
             }
         }
         SessionController.ssidSink = ssidSink
