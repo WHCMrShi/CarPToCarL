@@ -60,7 +60,8 @@ class CarPlayCtrlAdvertiser(
         private const val FORCE_COOLDOWN_MILLIS = 2_000L
     }
 
-    private var serverSocket: ServerSocket? = null
+    private val tcpListener = CtrlListener()
+    private val serverSocket: ServerSocket? get() = tcpListener.current
     private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
 
     @Volatile
@@ -133,12 +134,12 @@ class CarPlayCtrlAdvertiser(
         force: Boolean = false,
         network: android.net.Network? = null,
     ): Boolean {
-        if (registered && registeredSsid == ssid && !force && !macPlaceholder) return true
+        val sameNetwork = network == null || network == registeredNetwork
+        if (registered && registeredSsid == ssid && !force && !macPlaceholder && sameNetwork) return true
         // force 冷却：绑定后的一连串「确保」调用（bindCarWifiAndRegister → 端点交接）
         // 常在同一秒内发生，逐次 unregister+register 会撞 NsdManager 的
         // listener-already-in-use 并吃 1.2s 重试，反而拖慢连接。
         // 例外：广播里的 MAC 是占位值、或进程网络已变都不能放过。
-        val sameNetwork = network == null || network == registeredNetwork
         if (force &&
             registered &&
             registeredSsid == ssid &&
@@ -149,9 +150,11 @@ class CarPlayCtrlAdvertiser(
             log("$TAG: 跳过重复的强制重注册（${SystemClock.uptimeMillis() - registeredAtMillis}ms 前刚注册）")
             return true
         }
-        if (registered) {
+        if (registered || (!sameNetwork && serverSocket != null)) {
             log("$TAG: 重新注册 mDNS 广播（${registeredSsid ?: "?"}${if (force) "，绑定后时机修正" else " → $ssid"}）")
-            stop()
+            // Keep the TCP port for a same-network refresh. Actual network changes
+            // must recreate the listener under the new Android process binding.
+            if (sameNetwork) unregisterAnnouncement() else stop()
         }
         registeredSsid = ssid
         registeredNetwork = network ?: registeredNetwork
@@ -172,8 +175,8 @@ class CarPlayCtrlAdvertiser(
     fun start(): Boolean {
         if (registered) return true
         return try {
-            val socket = ServerSocket(0)
-            serverSocket = socket
+            val lease = tcpListener.acquire()
+            val socket = lease.socket
             // 占位 MAC 时强制重试一次（启动连接即发布广播时，蓝牙栈可能还没就绪；
             // 广播内容错了车机就永远不会邀请我们）
             var mac = DeviceIdentity.bluetoothMac(context)
@@ -212,9 +215,11 @@ class CarPlayCtrlAdvertiser(
                 // 别让「广播提前到启动连接」反而把 TXT id 写错（2026-10-18）。
                 Bg.run("ctrl-mac-repair") { repairPlaceholderMac() }
             }
-            Thread(::acceptLoop, "ctrl-accept").apply {
-                isDaemon = true
-                start()
+            if (lease.fresh) {
+                Thread({ acceptLoop(socket) }, "ctrl-accept").apply {
+                    isDaemon = true
+                    start()
+                }
             }
             true
         } catch (error: Exception) {
@@ -222,8 +227,7 @@ class CarPlayCtrlAdvertiser(
             // 漏一个监听端口 + 一条 accept 线程（registerService 之前就 throw，连
             // accept 线程都还没起，socket 谁也不会再管）。
             log("$TAG: 启动失败 - ${error.message}")
-            runCatching { serverSocket?.close() }
-            serverSocket = null
+            runCatching { tcpListener.close() }
             registered = false
             false
         }
@@ -247,20 +251,19 @@ class CarPlayCtrlAdvertiser(
         log("$TAG: 30s 内未能解析真实蓝牙 MAC——ctrl 广播 id 仍是占位值，车机可能不会邀请（Shizuku 已移除，需车机侧手动允许本机）")
     }
 
-    private fun acceptLoop() {
-        val socket = serverSocket ?: return
-        while (registered) {
+    private fun acceptLoop(socket: ServerSocket) {
+        while (serverSocket === socket && !socket.isClosed) {
             val client =
                 try {
                     socket.accept()
                 } catch (_: Exception) {
                     break
                 }
-            Bg.run("ctrl-client") { handleClient(client) }
+            Bg.run("ctrl-client") { handleClient(client, socket) }
         }
     }
 
-    private fun handleClient(client: Socket) {
+    private fun handleClient(client: Socket, owner: ServerSocket) {
         val peer = client.inetAddress?.hostAddress ?: "?"
         try {
             client.soTimeout = 10_000
@@ -282,6 +285,7 @@ class CarPlayCtrlAdvertiser(
             // 车机 ctrl 邀请：这是「车机已发现手机、AirPlay 窗口已开」的权威信号
             // （catplay CarPlayCtrlSession：收到即把邀请交给连接流程）。
             if (requestLine.startsWith("GET /ctrl-int/1/connect")) {
+                if (serverSocket !== owner || owner.isClosed) return
                 val receiverId =
                     head
                         .lineSequence()
@@ -362,21 +366,26 @@ class CarPlayCtrlAdvertiser(
 
     @Synchronized
     fun stop() {
-        registered = false
+        unregisterAnnouncement()
         registeredSsid = null
         registeredWithMac = null
         registeredNetwork = null
-        activeListener?.let { runCatching { nsdManager.unregisterService(it) } }
-        activeListener = null
-        runCatching { serverSocket?.close() }
-        serverSocket = null
+        runCatching { tcpListener.close() }
         log("$TAG: 已停止")
+    }
+
+    private fun unregisterAnnouncement() {
+        registered = false
+        val old = activeListener
+        activeListener = null
+        old?.let { runCatching { nsdManager.unregisterService(it) } }
     }
 
     /** 每次注册新建 listener（见 start() 注释；复用同一实例会触发 already in use）。 */
     private fun createListener(): NsdManager.RegistrationListener =
         object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
+                if (activeListener !== this) return
                 log("$TAG: mDNS 注册成功 ${serviceInfo.serviceName}")
             }
 
@@ -384,15 +393,13 @@ class CarPlayCtrlAdvertiser(
                 serviceInfo: NsdServiceInfo,
                 errorCode: Int,
             ) {
-                // 注册是异步的：这里失败时 `start()` 已经把 registered 置 true 并起好了
-                // accept 线程。只把标志打回 false 会留下「旧 ServerSocket + 旧 accept
-                // 线程」无人可关（下一次 start() 用新 socket 覆盖字段，stop() 再也够不到
-                // 旧的），每失败一次漏一个 fd 和一条常驻线程。
-                registered = false
-                runCatching { serverSocket?.close() }
-                serverSocket = null
-                activeListener = null
-                log("$TAG: mDNS 注册失败 code=$errorCode（已释放端口，下次会话重试）")
+                synchronized(this@CarPlayCtrlAdvertiser) {
+                    if (activeListener !== this) return
+                    registered = false
+                    activeListener = null
+                    // Kept under explicit ownership until stop; retry uses the same port/thread.
+                    log("$TAG: mDNS 注册失败 code=$errorCode（保留监听端口，等待重新公告）")
+                }
             }
 
             override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) = Unit
