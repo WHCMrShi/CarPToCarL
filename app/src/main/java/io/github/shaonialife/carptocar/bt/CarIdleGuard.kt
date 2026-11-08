@@ -32,29 +32,47 @@ object CarIdleGuard {
      */
     private const val KILL_DELAY_MILLIS = 600L
     private const val DEADLINE_KEY = "car_idle_deadline_elapsed"
-    private const val STARTUP_TIMEOUT_MILLIS = 180_000L
+    private const val IDENTITY_KEY = "car_idle_boot_target"
+    private var budget: IdleBudget? = null
+    private var budgetIdentity: String? = null
     private var lastVerdict: CarIdlePolicy.Verdict? = null
     private var stopGeneration = 0L
 
     private fun prefs(context: Context) = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
+    private fun state(context: Context): IdleBudget {
+        val boot = android.provider.Settings.Global.getInt(context.contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)
+        val identity = "$boot:${TargetDevicePrefs.get(context)?.address?.uppercase() ?: "auto"}"
+        if (budget == null || budgetIdentity != identity) {
+            val restored = if (prefs(context).getString(IDENTITY_KEY, null) == identity) prefs(context).getLong(DEADLINE_KEY, 0L) else 0L
+            budget = IdleBudget(restored)
+            budgetIdentity = identity
+        }
+        return budget!!
+    }
+
     /** 首次启动时没有收到过 ACL 断开广播，也必须有有限的空等预算。 */
     fun beginStartup(context: Context) {
         cancel(context)
-        if (!CarApproachPrefs.aclConnected(context)) arm(context, STARTUP_TIMEOUT_MILLIS)
+        state(context).start(SystemClock.elapsedRealtime())
+        persist(context)
     }
 
     /** 起 30 秒计时（重复广播保留较早期限，不延长恢复窗口）。 */
     fun schedule(context: Context) {
-        arm(context, CarIdlePolicy.IDLE_TIMEOUT_MILLIS)
+        state(context).disconnected(SystemClock.elapsedRealtime())
+        persist(context)
     }
 
-    private fun arm(context: Context, budget: Long) {
+    private fun persist(context: Context) {
         val now = SystemClock.elapsedRealtime()
-        val previous = prefs(context).getLong(DEADLINE_KEY, 0L)
-        val triggerAt = if (previous in 1..(now + budget)) previous else now + budget
-        prefs(context).edit().putLong(DEADLINE_KEY, triggerAt).apply()
+        val triggerAt = state(context).deadline
+        prefs(context).edit().putLong(DEADLINE_KEY, triggerAt).putString(IDENTITY_KEY, budgetIdentity).apply()
         lastVerdict = null
+        if (triggerAt == 0L) {
+            cancelAlarm(context)
+            return
+        }
         DebugFileLog.append(context, "IDLE: armed remainingMs=${(triggerAt - now).coerceAtLeast(0)} elapsed=$now; service tick + inexact alarm")
         val manager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
         val pending =
@@ -71,8 +89,13 @@ object CarIdleGuard {
     /** 车机回连（或用户主动给了新指令）时撤掉计时。 */
     fun cancel(context: Context) {
         stopGeneration++
+        state(context).clear()
         prefs(context).edit().remove(DEADLINE_KEY).apply()
         lastVerdict = null
+        cancelAlarm(context)
+    }
+
+    private fun cancelAlarm(context: Context) {
         val manager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
         val pending = pendingIntent(context, PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE) ?: return
         runCatching { manager.cancel(pending) }
@@ -86,23 +109,25 @@ object CarIdleGuard {
 
     /** 服务心跳持续检查：闹钟延迟或到点仍在推流均不能丢失后续收尾。 */
     fun check(context: Context, source: String = "service"): Boolean {
-        val deadline = prefs(context).getLong(DEADLINE_KEY, 0L)
-        if (deadline == 0L) return false
+        val state = state(context)
+        val previousDeadline = state.deadline
         val now = SystemClock.elapsedRealtime()
-        // elapsedRealtime 跨重启归零；不继承上一开机周期的未来期限。
-        if (deadline - now > STARTUP_TIMEOUT_MILLIS) {
-            cancel(context)
-            return false
-        }
-        if (now < deadline) return false
+        val target = TargetDevicePrefs.get(context)?.address
+        val protocolPresent = BtSessionGate.iap2Ready && BtSessionGate.activePeerAddress?.let { target == null || it.equals(target, true) } == true
+        val aclPresent = CarApproachPrefs.aclConnected(context)
+        val streaming = SessionController.isStreaming()
+        if (source == "alarm" && previousDeadline == 0L) return false
+        val expired = state.expired(now, aclPresent || protocolPresent || streaming)
+        if (state.deadline != previousDeadline) persist(context)
+        if (!expired) return false
         val verdict =
             CarIdlePolicy.onIdleTimeout(
-                aclConnected = CarApproachPrefs.aclConnected(context),
-                streaming = SessionController.isStreaming(),
+                aclConnected = aclPresent || protocolPresent,
+                streaming = streaming,
                 uiVisible = AppUiPresence.isVisible,
             )
         if (verdict != lastVerdict) {
-            DebugFileLog.append(context, "IDLE: check source=$source lateMs=${now - deadline} verdict=$verdict uiVisible=${AppUiPresence.isVisible}")
+            DebugFileLog.append(context, "IDLE: check source=$source lateMs=${now - state.deadline} verdict=$verdict uiVisible=${AppUiPresence.isVisible}")
             lastVerdict = verdict
         }
         if (verdict == CarIdlePolicy.Verdict.STILL_CONNECTED) cancel(context)
