@@ -410,6 +410,11 @@ class AudioSender(
                 "AUDIO: 已启动直通模式（外部注入 PCM → $host:$dataPort，" +
                     "通路=t$streamType/${codec.name}，目标 ${sampleRate}Hz 立体声）",
             )
+            ingress = AudioIngressQueue(
+                consume = { data, rate, channels, gap -> processPcm(data, data.size, rate, channels, gap) },
+                log = log,
+                failed = { error -> log("AUDIO-DIAG: PCM worker failed=${error.javaClass.simpleName}"); stop() },
+            )
             startSyncLoop()
             startSilenceKeepAlive()
             true
@@ -433,6 +438,7 @@ class AudioSender(
     @Volatile
     private var lastRealFeedAt = 0L
     private val continuity = AudioContinuityWindow()
+    @Volatile private var ingress: AudioIngressQueue? = null
 
     private var keepAliveThread: Thread? = null
 
@@ -470,7 +476,7 @@ class AudioSender(
                         }
                         if (!running.get()) break
                         val now = android.os.SystemClock.uptimeMillis()
-                        if (now - lastRealFeedAt < IDLE_FILL_AFTER_MILLIS) {
+                        if (now - lastRealFeedAt < IDLE_FILL_AFTER_MILLIS || ingress?.pending() == true) {
                             nextFillAt = 0L
                             continue
                         }
@@ -490,7 +496,7 @@ class AudioSender(
                             guard < MAX_KEEPALIVE_FRAMES_PER_TICK
                         ) {
                             if (android.os.SystemClock.uptimeMillis() - lastRealFeedAt <
-                                IDLE_FILL_AFTER_MILLIS
+                                IDLE_FILL_AFTER_MILLIS || ingress?.pending() == true
                             ) {
                                 break // 真实 PCM 回来了，本拍不再补
                             }
@@ -526,11 +532,9 @@ class AudioSender(
     /**
      * 外部注入 PCM（CarLife 直通）。
      *
-     * **必须同步**：媒体（9240）与 TTS（9241）是两条独立读线程，2026-10-27 接入导航播报
-     * 后两路会同时进来；组帧缓冲与发送工作区由同一把锁保护，
-     * 不加锁会出现半帧交错（爆音/破音）甚至丢数据。
+     * 媒体与 TTS 可并发提交，输入队列负责复制和串行消费。
+     * 组帧、编码与发送工作区的同步由 processPcm 保证，读线程不等待网络发送。
      */
-    @Synchronized
     fun feedPcm(
         srcPcm: ByteArray,
         size: Int,
@@ -539,10 +543,19 @@ class AudioSender(
     ) {
         if (!running.get() || record != null) return // 采集模式在跑时不接受注入
         if (size <= 0 || size > srcPcm.size) return
-        continuity.input(System.nanoTime())
-        // 真实 PCM 到场：静音保活立刻让位（这一行必须在 alignPcm 之前，
-        // 否则重采样失败时空转判定会误以为「一直没声音」）
         lastRealFeedAt = android.os.SystemClock.uptimeMillis()
+        continuity.input(System.nanoTime())
+        ingress?.offer(srcPcm, size, if (srcRate > 0) srcRate else sampleRate, if (srcChannels == 1) 1 else 2)
+    }
+
+    /** 唯一真实音频消费线程；与补静音共用帧/加密状态锁，读线程不等待此锁。 */
+    @Synchronized
+    private fun processPcm(srcPcm: ByteArray, size: Int, srcRate: Int, srcChannels: Int, gap: Boolean) {
+        if (!running.get()) return
+        if (gap) {
+            pcmFrames.clear(); passthroughBuffer.reset(); markerPending = true
+            log("AUDIO-DIAG: ingress discontinuity; discard partial frame, preserve RTP/nonce counters")
+        }
         if (codec == AudioCodec.PCM) {
             // CarLife 合并音频已在源端混音；原生同格式直接组帧，不重采样、不复制整块输入。
             if ((srcRate <= 0 || srcRate == sampleRate) && srcChannels != 1) {
@@ -655,6 +668,8 @@ class AudioSender(
     fun stop() {
         if (!stopped.compareAndSet(false, true)) return
         running.set(false)
+        ingress?.close()
+        ingress = null
         runCatching { record?.stop() }
         runCatching { record?.release() }
         record = null
