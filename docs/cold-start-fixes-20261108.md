@@ -11,3 +11,10 @@
 从未出帧、等待至少 30 秒且初始化至少重试两次后，仅在 CarPlay 发送器已接入时允许完整关闭 HU 会话，让已有 worker 重建。预算由上层跨 HU 实例保留，最多两次，真实视频恢复或新的 prewarm 才复位。已经出过帧的暂时停摆不触发此升级，不主动重连 CarPlay。
 
 完整 `build-local.ps1 -NoDaemon -Offline -GradleArguments --max-workers=2` 通过：682 项单测、lint 0 errors / 95 warnings、Debug APK 构建通过。未修改 lint baseline，未进行实车验证，原生引擎是否接受自动重建仍待车测。
+
+## 2. 首次播放被历史静默时长误判
+
+12:42:44.413 开始播放，仅 522ms 后看门狗因此前 58 秒静默关闭音频 socket，随后整个 CarLife 重置。
+媒体期望状态从 false 变为 true 后独立等待 20 秒；有效格式宣告后也重新给 20 秒宽限。原有 PCM 静默、socket 打开宽限、真实视频存活和重连次数限制继续生效。真实断链仍走既有恢复，TTS 不按静默重连，不改变正常 PCM 内容或发送策略。
+
+完整构建通过：685 项单测、lint 0 errors / 95 warnings、assembleDebug 通过；未实车验证。

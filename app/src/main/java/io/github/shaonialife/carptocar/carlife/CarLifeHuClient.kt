@@ -242,6 +242,7 @@ class CarLifeHuClient(
         val label: String,
         val isTts: Boolean,
     ) {
+        val expectation = AudioExpectationWindow()
         /** 读线程已退出（socket 不可用），需要重连。 */
         @Volatile
         var dead = false
@@ -1404,6 +1405,7 @@ class CarLifeHuClient(
                         if (type == CarLifeProtocol.TTS_PKG_INIT) {
                             val format = parseAudioInit(payload)
                             if (format != null) {
+                                channel.expectation.format(android.os.SystemClock.uptimeMillis())
                                 val (rate, channelConfig, _) = format
                                 channel.rate = rate
                                 channel.channels = channelsOf(channelConfig)
@@ -1528,6 +1530,7 @@ class CarLifeHuClient(
 
     private fun superviseAudio(channel: AudioChannel) {
         val now = android.os.SystemClock.uptimeMillis()
+        channel.expectation.observe(now, engineAudioActive || audioExpected())
         val socket = sockets[channel.port]
         if (socket == null || socket.isClosed || channel.dead) {
             // 断链重连：不设次数上限（引擎冷启动期可能连续 reset，重连成功才停）
@@ -1546,6 +1549,8 @@ class CarLifeHuClient(
         if (silentFor < SILENT_RECONNECT_MS) return
         // 刚（重新）接上的宽限期：给引擎一点时间把流推起来。
         if (now - channel.openedAt < SILENT_GRACE_MS) return
+        // 从本次开始播放/新格式算宽限，不能用桌面静默的历史时长立即拆音频口。
+        if (!channel.expectation.ready(now, SILENT_GRACE_MS)) return
         // 画面还在出帧 = 引擎活着，问题只在这条音频流上。视频也停了说明整条链路有事，
         // 那是会话冻结/断链恢复的活，这里跟着重连只会把水搅浑。
         if (lastFrameAt == 0L || now - lastFrameAt > VIDEO_ALIVE_MS) return
