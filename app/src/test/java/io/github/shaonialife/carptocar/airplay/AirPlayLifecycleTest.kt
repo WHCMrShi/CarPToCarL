@@ -13,6 +13,29 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class AirPlayLifecycleTest {
+    @Test fun replacementControlSocketCannotValidateAnOlderSetupResult() {
+        ServerSocket(0).use { server ->
+            val client = client(server.localPort)
+            val generation = AirPlayClient::class.java.getDeclaredField("lifecycleGeneration").apply { isAccessible = true }
+            val check = AirPlayClient::class.java.getDeclaredMethod("checkSetupOwner", Long::class.javaPrimitiveType, String::class.java)
+                .apply { isAccessible = true }
+            try {
+                assertTrue(connect(client))
+                server.accept().use { first ->
+                    val old = generation.getLong(client)
+                    assertEquals(true, check.invoke(client, old, "test"))
+                    client.close()
+                    assertPeerClosed(first)
+                    assertTrue(connect(client))
+                    server.accept().use {
+                        assertTrue(client.controlConnectionAlive)
+                        assertEquals(false, check.invoke(client, old, "publish"))
+                        assertEquals(true, check.invoke(client, generation.getLong(client), "publish"))
+                    }
+                }
+            } finally { client.dispose() }
+        }
+    }
     @Test fun liveControlEvidenceEndsWhenPeerClosesBeforeVideoStartup() {
         ServerSocket(0).use { server ->
             val client = client(server.localPort)

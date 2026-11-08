@@ -4321,7 +4321,7 @@ object SessionController {
                                 setup = client.runSetup()
                             }
                         }
-                        if (setup == null && pairedKeys != null) {
+                        if (setup == null && pairedKeys != null && client.lastSetupFailureStatus == 403) {
                             // 反向兜底（2026-10-24 WinPlay 实测）：接收端能完成
                             // pair-setup/pair-verify，却对带 et 的 SETUP 回 403——
                             // 典型是只支持 AirPlay 1 明文会话的自制/PC 端接收端。
@@ -4338,6 +4338,10 @@ object SessionController {
                             }
                         }
                         if (setup != null) {
+                            if (connectCancelled || currentClient !== client || !client.controlConnectionAlive) {
+                                appendLog("CONNECT-DIAG: refusing retired SETUP result; no screen negotiation")
+                                return@run
+                            }
                             connectBudget.enter(ConnectStage.FIRST_FRAME)
                             // 记录会话凭据：投影授权晚于连接时用于动态补启音频。
                             // 用 client.currentEndpoint 而非 effectiveEndpoint：配对期间

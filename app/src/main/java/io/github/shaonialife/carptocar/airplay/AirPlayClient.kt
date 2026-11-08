@@ -104,6 +104,19 @@ class AirPlayClient(
             socket?.let { it.isConnected && !it.isClosed } == true
     }
 
+    @Volatile var lastSetupFailureStatus: Int? = null
+        private set
+
+    private fun setupOwnerAlive(generation: Long): Boolean = synchronized(connectionLock) {
+        lifecycleGeneration == generation && controlConnectionAlive
+    }
+
+    private fun checkSetupOwner(generation: Long, phase: String): Boolean {
+        if (setupOwnerAlive(generation)) return true
+        log("CONNECT-DIAG: setup aborted phase=$phase reason=control-retired generation=$generation current=$lifecycleGeneration")
+        return false
+    }
+
     /**
      * 最近一次成功连上接收端时使用的地址（字符串形式，IPv6 链路本地地址带 `%<iface>`）。
      *
@@ -1015,6 +1028,8 @@ class AirPlayClient(
      * 清单对照 catplay（真车验证的发送端，含 viewAreas/uiContext 等视频必需项）。
      */
     fun runSetup(): SetupInfo? {
+        val setupGeneration = lifecycleGeneration
+        lastSetupFailureStatus = null
         log("CONNECT-DIAG: client=${System.identityHashCode(this)} setup-start encrypted=${cipher != null} cancelled=$cancelled disposed=$disposed")
         // 计时端口：catplay 真车实现始终绑定真实 UDP timing server 通告给车机
         // （媒体时钟同步源）；timingPort=0 曾是我们的屏幕流 400 头号嫌疑。
@@ -1046,6 +1061,7 @@ class AirPlayClient(
                 return null
             }
         if (!statusLine.contains("200")) {
+            lastSetupFailureStatus = statusLine.split(' ').getOrNull(1)?.toIntOrNull()
             log("AIRPLAY: SETUP 应答 [$statusLine]（自报 deviceID=$deviceId）")
             // 接收端拒绝时**必须**把响应头与正文打出来：403 的成因（设备过滤 /
             // 不接受加密会话 / 已在会话中）只能从接收端的措辞区分，只打状态行
@@ -1098,6 +1114,7 @@ class AirPlayClient(
         // `hidDevices uuids=[]` / `displayUuid=null` 两个结果，看不到原因。
         var infoRoot: Map<*, *>? = null
         val infoMap = loadInfoWithDiagnostics()
+        if (!checkSetupOwner(setupGeneration, "after-info")) return null
         infoRoot = infoMap
         // 候选屏全表。旧实现写死 `displays[0]`——多屏车机（大连屏/仪表）若先声明副屏，
         // 画面就被推到那块屏上，比例与触摸坐标全错，而日志里看不出选错了。
@@ -1216,6 +1233,7 @@ class AirPlayClient(
                 // 奥迪 MMI 0000 声明 true：屏幕流 keepAlive 用 opcode=5 带 bplist 统计体
                 keepAliveSendStatsAsBody = (infoRoot?.get("keepAliveSendStatsAsBody") as? Boolean) == true,
             )
+        if (!checkSetupOwner(setupGeneration, "publish")) return null
         log(
             "AIRPLAY: ✓ SETUP 完成 eventPort=${info.eventPort} timingPort=${info.timingPort} " +
                 "keepAlive=${info.keepAlivePort ?: "无"} features=${info.enabledFeatures} " +
@@ -3345,6 +3363,9 @@ class AirPlayClient(
             val chunk = ByteArray(8192)
             while (socket === client && generation == readerGeneration && !client.isClosed) {
                 val count = input.read(chunk)
+                if (count < 0 && socket === client && generation == readerGeneration) {
+                    log("CONNECT-DIAG: control-reader ended reason=EOF generation=$generation pending=${pendingResponses.size}")
+                }
                 if (count < 0 || socket !== client || generation != readerGeneration) break
                 val encryption = cipher
                 if (encryption !== readEncryption) {
@@ -3369,7 +3390,10 @@ class AirPlayClient(
                     }
                 }
             }
-        } catch (_: IOException) {
+        } catch (error: IOException) {
+            if (socket === client && readerGeneration == generation) {
+                log("CONNECT-DIAG: control-reader ended reason=${error.javaClass.simpleName} generation=$generation pending=${pendingResponses.size}")
+            }
         } finally {
             // 只由「当前」读线程清账：重连会换 socket 与新读线程，旧线程不得误伤新会话
             closeIfCurrent(client, generation)
