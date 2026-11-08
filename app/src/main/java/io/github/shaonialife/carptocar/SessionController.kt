@@ -4685,6 +4685,8 @@ object SessionController {
                                         } else {
                                             null
                                         }
+                                    // 自动建立新一轮 CarPlay 时重新接管；真实断连后不保持后台 HU。
+                                    if (hijackMode) context?.let { CarLifeHijack.prewarm(it, ::appendLog) }
                                     videoSender =
                                         VideoSender(
                                             host = host,
@@ -4726,7 +4728,14 @@ object SessionController {
                                                 } else {
                                                     null
                                                 },
-                                            onEnded = {
+                                            onEnded = onStreamEnded@{ ended ->
+                                                CarLifeHijack.stopIfAttached(ended)
+                                                if (videoSender !== ended || currentClient !== client) {
+                                                    appendLog("CONNECT-DIAG: ignored retired video end callback")
+                                                    return@onStreamEnded
+                                                }
+                                                audioSender?.stop()
+                                                audioSender = null
                                                 // 会话真实结束：解除静默降噪（客户端恢复探测/重连）
                                                 appendLog(">>> CarPlay 会话结束（推流终止）——恢复蓝牙探测")
                                                 BtSessionGate.sessionActive = false

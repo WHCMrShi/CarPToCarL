@@ -555,6 +555,7 @@ object CarLifeHijack {
      * 「旧 SPS + 新参考帧」的混搭）；不带 SPS 才退回旧行为等当期 IDR。
      * 开关见 [io.github.shaonialife.carptocar.video.FirstFramePolicy]（可一键回退）。
      */
+    @Synchronized
     fun attach(videoSender: VideoSender, log: (String) -> Unit) {
         logSink = log
         sender = null
@@ -665,7 +666,16 @@ object CarLifeHijack {
         deliverWindowFrames = 0
     }
 
-    /** 完全停止（退出 App / 关闭开关）。 */
+    /** 只允许当前 CarPlay 视频所有者结束 HU；上一轮迟到的回调不能停止下一轮。 */
+    @Synchronized
+    fun stopIfAttached(owner: VideoSender): Boolean {
+        if (sender !== owner) return false
+        logSink?.invoke("CONNECT-DIAG: CarPlay owner ended; stopping attached CarLife session")
+        stop()
+        return true
+    }
+
+    /** 完全停止（退出 App / 关闭开关 / 当前 CarPlay 真实结束）。 */
     @Synchronized
     fun stop() {
         startupPrewarmAllowed = false
@@ -674,6 +684,7 @@ object CarLifeHijack {
         artworkRepository = null
         mediaArtworkEncodingCache = null
         mediaArtwork = null
+        latestMediaInfo = null
         MediaSessionsState.removeListener(mediaPlaybackListener)
         sender = null
         client?.stop()

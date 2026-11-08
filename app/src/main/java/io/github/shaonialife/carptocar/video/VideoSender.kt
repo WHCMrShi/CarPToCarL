@@ -42,7 +42,7 @@ class VideoSender(
     private val targetFps: Int = 30,
     private val log: (String) -> Unit,
     /** 推流自然结束（对端断开等）时回调——CarPlay 会话真实结束的信号。 */
-    private val onEnded: (() -> Unit)? = null,
+    private val onEnded: ((VideoSender) -> Unit)? = null,
     /**
      * 屏幕流内 keepAlive 帧是否携带统计体（车机 /info 的 `keepAliveSendStatsAsBody`）。
      * 奥迪 MMI 0000 声明 true → opcode=5 + bplist 统计体；否则 opcode=2 空帧。
@@ -848,7 +848,7 @@ class VideoSender(
      */
     private fun endOnce() {
         if (!ended.compareAndSet(false, true)) return
-        runCatching { onEnded?.invoke() }
+        runCatching { onEnded?.invoke(this) }
     }
 
     /**
