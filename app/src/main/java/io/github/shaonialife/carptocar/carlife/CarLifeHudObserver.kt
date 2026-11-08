@@ -34,6 +34,10 @@ internal class CarLifeHudObserver(
             lastSummary = now
             val ok = send(CarLifeHudProtocol.SUBSCRIBE, CarLifeHudProtocol.subscription(CarLifeHudProtocol.modules))
             log("HUD-DIAG: SUBSCRIBE id=0x18043 modules=[0,1] sent=$ok (TBT=0, assistant=1)")
+            if (!ok) {
+                startAttempted = true
+                log("HUD-DIAG: abandoned subscription after send failure; wait for a fresh HU control session")
+            }
             return
         }
         if (!startAttempted && (reply != null || now - requestedAt!! >= 5_000)) {
@@ -49,6 +53,7 @@ internal class CarLifeHudObserver(
             } else {
                 val ok = send(CarLifeHudProtocol.START, CarLifeHudProtocol.subscription(ids))
                 startSent = ok
+                if (!ok) log("HUD-DIAG: abandoned START after send failure; unsafe to replay a possibly partial control frame")
                 log("HUD-DIAG: START id=0x18045 modules=$ids sent=$ok confirmed=${response != null}; no-reply fallback is attempted once only")
             }
         }

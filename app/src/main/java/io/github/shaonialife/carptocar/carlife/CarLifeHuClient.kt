@@ -1716,6 +1716,7 @@ class CarLifeHuClient(
     // ---- 底层写入 ----
 
     private fun send(serviceType: Int, payload: ByteArray): Boolean {
+        if (!running.get()) return false
         val out = cmdOut ?: return false
         return try {
             synchronized(writeLock) {
@@ -1725,6 +1726,8 @@ class CarLifeHuClient(
             true
         } catch (error: Exception) {
             log("CARLIFE: 发送 0x%X 失败 - %s".format(serviceType, error.message))
+            log("HUD-DIAG: control-write failed; frame boundary uncertain, retiring HU instead of retrying a partial command")
+            stop()
             false
         }
     }

@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CarLifeHudObserverTest {
+    @Test fun failedSubscribeCannotFallThroughToUnconfirmedStart() {
+        val ids = mutableListOf<Int>()
+        val lines = mutableListOf<String>()
+        val observer = CarLifeHudObserver({ id, _ -> ids += id; false }, lines::add)
+        observer.versionMatched(); observer.tick(0); observer.tick(6000)
+        assertEquals(listOf(CarLifeHudProtocol.SUBSCRIBE), ids)
+        assertTrue(lines.any { it.contains("abandoned subscription") })
+    }
     @Test fun boundedControlHistogramAndNavigationStateExplainMissingTbt() {
         val f = Fixture()
         f.observer.versionMatched()
