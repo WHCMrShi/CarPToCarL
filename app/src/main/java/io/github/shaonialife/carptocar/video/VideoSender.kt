@@ -283,6 +283,7 @@ class VideoSender(
      * [frameCounter] 归零并重发 VideoConfig，否则重连后每一帧都会校验失败。
      */
     private fun reconnectDataPort(): Boolean {
+        if (!recoveryOwner.compareAndSet(false, true)) return true
         reconnecting = true
         try {
             runCatching { socket?.close() }
@@ -318,7 +319,15 @@ class VideoSender(
             return false
         } finally {
             reconnecting = false
+            recoveryOwner.set(false)
         }
+    }
+
+    private val recoveryOwner = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val failurePolicy = StreamFailurePolicy(::reconnectDataPort) { reason ->
+        log("CONNECT-DIAG: video terminal reason=$reason after bounded data-port recovery")
+        stop()
+        endOnce()
     }
 
     /**
@@ -496,39 +505,23 @@ class VideoSender(
     }
 
     private fun passthroughKeepAliveLoop() {
-        try {
-            while (running.get()) {
-                if (reconnecting) {
-                    // 重连窗口期 socket 正在被替换：让出，别抢写。
-                    Thread.sleep(100)
-                    continue
-                }
+        while (running.get()) {
+            try {
+                if (reconnecting) { Thread.sleep(100); continue }
                 val output = socket?.getOutputStream()
-                if (output == null) {
-                    // 不能 `?: return`——那会让保活线程在 socket 短暂为空时永久退出。
-                    Thread.sleep(200)
-                    continue
-                }
+                if (output == null) { Thread.sleep(200); continue }
                 maybeSendKeepAlive(output)
                 maybeResendIdleFrame(output)
                 Thread.sleep(200)
+            } catch (_: InterruptedException) {
+                return
+            } catch (error: Exception) {
+                if (!running.get()) return
+                log("VIDEO: transient keepAlive write failure - ${error.message}; recovering data port")
+                if (!failurePolicy.failed("keepalive-recovery-exhausted")) return
             }
-        } catch (error: Exception) {
-            log("VIDEO: 直通 keepAlive 中止 - ${error.message}")
-            // 车机侧的会话已经没了（EOF/Broken pipe）：必须复位 running，否则
-            // `isRunning` 会一直为 true，接收端重发 0x4301 时被「会话推流中」挡掉，
-            // 表现为「车机重连了但画面永远不再出现」（2026-10-24 日志实测）。
-            stop()
-            // 这条路径同样意味着「会话真的结束了」，必须通知上层——否则
-            // `BtSessionGate.sessionActive` 永远停在 true（蓝牙探测被门闸挡住，车机
-            // 再邀请也不会重连）、暗幕 45s 后把手机屏变黑、横屏覆盖不复原。
-            // 旧实现只在 `drainEncoder` 的 finally 里回调，而当前产品只走直通，
-            // 那个方法根本不会执行（2026-11-02 自查）。
-            endOnce()
-            log("VIDEO: 直通通道已失效——等待车机重新建立会话")
         }
     }
-
     /**
      * 空闲保活：CarLife 不再出帧时，周期性重发**最后一个 IDR**。
      *
@@ -740,8 +733,7 @@ class VideoSender(
             log("VIDEO: 直通送帧失败 - ${error.message}")
             // 先试着在接收端的 8s 恢复窗口内重连视频通道；连不回来才认输复位，
             // 让下一轮 0x4301 重新起会话。
-            if (reconnectDataPort()) return false
-            stop()
+            failurePolicy.failed("frame-write-recovery-exhausted")
             false
         }
     }
