@@ -7,6 +7,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AudioIngressQueueTest {
+    @Test fun largeTtsBlockRetainsFrameAlignedTailInsteadOfBeingSilenced() {
+        val done = CountDownLatch(1)
+        val input = ByteArray(8192) { (it / 2).toByte() }
+        var received: ByteArray? = null
+        var discontinuity = false
+        AudioIngressQueue(consume = { bytes, rate, channels, gap ->
+            assertEquals(16000, rate)
+            assertEquals(1, channels)
+            received = bytes; discontinuity = gap; done.countDown()
+        }, clock = { 0L }).use { queue ->
+            assertTrue(queue.offer(input, input.size, 16000, 1))
+            assertTrue(done.await(3, TimeUnit.SECONDS))
+            assertTrue(discontinuity)
+            assertArrayEquals(input.copyOfRange(1792, 8192), received)
+        }
+    }
+
     @Test fun blockedNetworkDoesNotBlockProducerAndBorrowedArraysAreCopied() {
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)

@@ -26,11 +26,19 @@ internal class AudioIngressQueue(
 
     fun offer(data: ByteArray, size: Int, rate: Int, channels: Int): Boolean = synchronized(lock) {
         if (closed || size <= 0 || size > data.size || rate <= 0 || channels !in 1..2) return false
-        val span = size.toLong() * 1_000_000_000L / (rate.toLong() * channels * 2)
-        if (size > maxBytes || span > maxDurationNs) { dropped++; gap = true; return false }
-        while (queue.isNotEmpty() && (bytes + size > maxBytes || duration + span > maxDurationNs)) dropFirst()
-        queue += Block(data.copyOf(size), rate, channels, clock(), span)
-        bytes += size; duration += span
+        val frameBytes = channels * 2
+        val durationLimit = maxDurationNs * rate * frameBytes / 1_000_000_000L
+        val limit = minOf(maxBytes.toLong(), durationLimit).toInt() / frameBytes * frameBytes
+        if (limit <= 0) return false
+        // TTS 可能一次提交超过 200ms：保留最新、采样帧对齐的尾部，不能整块拒绝而持续无声。
+        val skip = if (size > limit) ((size - limit + frameBytes - 1) / frameBytes) * frameBytes else 0
+        val retained = size - skip
+        if (retained <= 0) return false
+        if (skip > 0) { dropped++; gap = true }
+        val span = retained.toLong() * 1_000_000_000L / (rate.toLong() * frameBytes)
+        while (queue.isNotEmpty() && (bytes + retained > maxBytes || duration + span > maxDurationNs)) dropFirst()
+        queue += Block(data.copyOfRange(skip, size), rate, channels, clock(), span)
+        bytes += retained; duration += span
         lock.notifyAll()
         true
     }
