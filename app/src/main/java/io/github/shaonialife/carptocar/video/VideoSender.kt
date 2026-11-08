@@ -123,9 +123,14 @@ class VideoSender(
     private fun startWriteWatchdog() {
         Thread({
             try {
+                var reportAt = System.nanoTime() / 1_000_000
                 while (running.get()) {
                     Thread.sleep(250)
                     val now = System.nanoTime() / 1_000_000
+                    if (now - reportAt >= 5_000) {
+                        log("VIDEO-PATH: wireFrames=$framesSent sourceSeen=${realSourceSeen.get()} queue=[${sourceQueue?.describe(System.nanoTime())}] write=[${writeDeadline.describe(now)}]")
+                        reportAt = now
+                    }
                     val lease = writeDeadline.overdue(now) ?: continue
                     log("VIDEO-WRITE: timeout kind=${lease.kind} elapsedMs=${now - lease.startedAt}; closing owned socket to unblock writer")
                     // Close the captured socket only; a replacement belongs to another write.

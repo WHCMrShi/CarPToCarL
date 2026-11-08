@@ -46,6 +46,10 @@ internal class VideoIngressQueue(
 
     fun isCurrent(frame: Frame): Boolean = synchronized(lock) { !closed && frame.owner === identity && frame.epoch == epoch }
 
+    fun describe(now: Long): String = synchronized(lock) {
+        "pending=${frames.size},bytes=$bytes,oldestMs=${frames.firstOrNull()?.let { (now - it.at) / 1_000_000 } ?: 0},dropped=$dropped,waitingIdr=$waitingIdr,epoch=$epoch"
+    }
+
     private fun take(): Frame? = synchronized(lock) {
         while (true) {
             while (!closed && frames.isEmpty()) lock.wait()

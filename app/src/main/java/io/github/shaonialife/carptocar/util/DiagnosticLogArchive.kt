@@ -33,6 +33,8 @@ internal class DiagnosticLogArchive(private val main: File, private val limit: L
         private val tags = Regex("(?:STAGE:|CONNECT-DIAG:|ARTWORK:|BT-C:|BT:|WIFI:|CTRL:|NSD:|PROC:|SESSION |LINK closed:|PAIR|pair-setup:|pair-verify:|AIRPLAY: (?:端点|连接候选|重试|配对|本次 close|✓|初始 SETUP|音频 SETUP)|EVENT: 读取结束)")
         internal fun isDiagnostic(line: String): Boolean {
             if (line.contains("RAW tx:") || line.contains("RAW rx:") || line.contains("原始体=")) return false
+            if (listOf("VIDEO-WRITE:", "VIDEO-QUEUE:", "VIDEO-PATH:", "CARLIFE-DIAG:", "EVENT-DIAG:").any(line::contains)) return true
+            if (line.contains("CARLIFE:") && listOf("控制端口", "版本握手", "版本匹配", "首帧", "通道断开", "通道已重连", "等待本机引擎").any(line::contains)) return true
             return tags.containsMatchIn(line) || line.contains("HUD-DIAG:") || line.contains("AUDIO-DIAG:") || line.contains("PROFILE:") || line.contains("PROTO!") ||
                 line.contains("iap2 0x1d01") ||
                 (line.contains("IAPLINK:") && listOf("清单", "链路", "MFi", "订阅").any(line::contains))

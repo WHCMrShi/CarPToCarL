@@ -4478,6 +4478,9 @@ object SessionController {
                                     }
 
                                     "changeModes" -> {
+                                        appendLog("EVENT-DIAG: changeModes request=" + command.filterKeys {
+                                            it.toString() in setOf("params", "resources", "appStates", "reason")
+                                        }.toString().take(800))
                                         // 车机请求资源仲裁（如用户在 MMI 上点了手机）：
                                         // 回 modesChanged 声明手机持有主屏/主音频
                                         appendLog("EVENT: 车机请求 changeModes → 回 modesChanged 接管资源")

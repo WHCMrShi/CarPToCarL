@@ -6,8 +6,6 @@ import android.content.Context
 import io.github.shaonialife.carptocar.media.MediaSessionsState
 import io.github.shaonialife.carptocar.video.FirstFramePolicy
 import io.github.shaonialife.carptocar.video.VideoSender
-import java.net.InetSocketAddress
-import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -432,16 +430,7 @@ object CarLifeHijack {
     fun sendVoiceKey(keycode: Int = CarLifeProtocol.HardKey.VR_START): Boolean =
         client?.sendHardKeyCode(keycode) ?: false
 
-    /**
-     * 当前 CarLife **引擎确认**的编码分辨率（65544 回显值），prewarm 阶段即可用于
-     * 计算推流画布。
-     *
-     * 这是「码流有多大」，**不是 VideoConfig 声明的依据**：真车按车机画布（`/info`
-     * `displays[0]`）建解码器，声明跟码流走时，引擎一旦白名单降档（申请 1412×654
-     * 实编 1280×720）车机就会拿 720p 画布去解 1412×654 的屏 → 整屏黑
-     * （2026-11-04 奥迪 3810 实测）。声明请用 [SessionController] 传给 VideoSender 的
-     * `canvasSize`，这里只作为没有画布信息时的兜底。触摸映射请用 [touchVideoSize]。
-     */
+    /** Negotiated encoder size; decoder config prefers each access unit's SPS. */
     val videoSize: Pair<Int, Int>
         get() = client?.negotiatedSize ?: (1280 to 720)
 

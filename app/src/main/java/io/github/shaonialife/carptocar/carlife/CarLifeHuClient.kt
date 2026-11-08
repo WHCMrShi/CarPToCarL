@@ -214,6 +214,9 @@ class CarLifeHuClient(
 
     @Volatile
     private var versionMatched = false
+    private val controlEndReason = java.util.concurrent.atomic.AtomicReference<String?>(null)
+    private data class VideoReadPhase(val owner: Socket?, val name: String, val at: Long)
+    @Volatile private var videoReadPhase: VideoReadPhase? = null
 
     /**
      * 视频通道（9242）是否已失效。
@@ -467,6 +470,8 @@ class CarLifeHuClient(
         if (!keepStarting()) return false
         if (running.get()) return true
         controlConnected = false
+        controlEndReason.set(null)
+        versionMatched = false
         for (port in PORTS) {
             if (!keepStarting()) { closeAll(); return false }
             val socket = Socket()
@@ -536,7 +541,8 @@ class CarLifeHuClient(
     }
 
     fun stop() {
-        running.set(false)
+        controlEndReason.compareAndSet(null, "local-stop-or-cancel")
+        if (running.getAndSet(false)) log("CARLIFE-DIAG: stopped reason=${controlEndReason.get()}")
         touchForwarder?.stop()
         touchForwarder = null
         closeAll()
@@ -608,12 +614,13 @@ class CarLifeHuClient(
         }
         if (!versionMatched) {
             val elapsed = android.os.SystemClock.uptimeMillis() - startedAt
-            val reason = if (running.get()) "version-timeout" else "channel-closed-or-cancelled"
+            val reason = controlEndReason.get() ?: if (running.get()) "version-timeout" else "local-stop-or-cancel"
             log("CARLIFE: 版本握手失败 reason=$reason elapsedMs=$elapsed；参见此前通道关闭日志")
             stop()
             return false
         }
         log("CARLIFE: 版本匹配成功（协议 3.0）")
+        log("CARLIFE-DIAG: handshake=matched elapsedMs=${android.os.SystemClock.uptimeMillis() - startedAt}")
         return true
     }
 
@@ -630,7 +637,10 @@ class CarLifeHuClient(
                 handleMessage(serviceType, payload)
             }
         } catch (error: Exception) {
-            if (running.get()) log("CARLIFE: 控制通道断开 - ${error.message}")
+            if (running.get()) {
+                controlEndReason.compareAndSet(null, "control-read:${error.javaClass.simpleName}")
+                log("CARLIFE: 控制通道断开 - ${error.message}")
+            }
         } finally {
             stop()
         }
@@ -966,8 +976,14 @@ class CarLifeHuClient(
         var windowStart = android.os.SystemClock.uptimeMillis()
         var windowFrames = 0L
         val metrics = PipelineWindow("CarLife-video-callback")
+        fun phase(name: String) {
+            if (owner == null || sockets[CarLifeProtocol.PORT_VIDEO] === owner) {
+                videoReadPhase = VideoReadPhase(owner, name, android.os.SystemClock.uptimeMillis())
+            }
+        }
         try {
             while (running.get()) {
+                phase("header-read")
                 data.readFully(header)
                 val length = readU32(header, 0)
                 if (length < 0 || length > MAX_VIDEO_FRAME) {
@@ -978,6 +994,7 @@ class CarLifeHuClient(
                 // 按无符号读：若是 currentTimeMillis 量级，当 Int 读会变成负数。
                 val sourceTimestampMs = readU32(header, 4).toLong() and 0xFFFF_FFFFL
                 val payload = ByteArray(length)
+                phase("payload-read:$length")
                 if (length > 0) data.readFully(payload)
                 if (length <= 0) continue
                 videoFrameCount++
@@ -1012,6 +1029,7 @@ class CarLifeHuClient(
                     windowFrames = 0
                 }
                 val workStarted = System.nanoTime()
+                phase("source-callback")
                 onVideoFrame(payload, isKeyFrame(payload), sourceTimestampMs)
                 val done = System.nanoTime()
                 metrics.record(length, length + headerAllocation, done - workStarted, now = done)?.let(log)
@@ -1046,6 +1064,7 @@ class CarLifeHuClient(
      */
     private fun videoSupervisor() {
         var reconnects = 0
+        var reportAt = 0L
         while (running.get()) {
             Thread.sleep(1_000)
             if (!running.get()) return
@@ -1066,6 +1085,11 @@ class CarLifeHuClient(
             if (!versionMatched) continue
             val now = android.os.SystemClock.uptimeMillis()
             val idle = now - (if (lastFrameAt > 0) lastFrameAt else videoSessionStartedAt)
+            if (now - reportAt >= 5_000) {
+                val phase = videoReadPhase?.takeIf { it.owner === socket }
+                log("CARLIFE-DIAG: video frames=$videoFrameCount lastFrameAgeMs=$idle phase=${phase?.name ?: "not-current"} phaseAgeMs=${phase?.let { now - it.at } ?: -1}")
+                reportAt = now
+            }
             if (requestZeroFrameRecovery(idle, lastFrameAt > 0, reinitCount)) {
                 log("CARLIFE: 握手后 ${idle / 1000}s 仍零真实帧，初始化重试 $reinitCount 次无效——限次重建 CarLife 会话（保持 CarPlay）")
                 stop()
@@ -1740,6 +1764,7 @@ class CarLifeHuClient(
         } catch (error: Exception) {
             log("CARLIFE: 发送 0x%X 失败 - %s".format(serviceType, error.message))
             log("HUD-DIAG: control-write failed; frame boundary uncertain, retiring HU instead of retrying a partial command")
+            controlEndReason.compareAndSet(null, "control-write:${error.javaClass.simpleName}")
             stop()
             false
         }

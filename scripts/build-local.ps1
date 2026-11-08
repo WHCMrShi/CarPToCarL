@@ -100,7 +100,13 @@ $previousJava = $env:JAVA_HOME
 $previousSdk = $env:ANDROID_HOME
 $previousAndroidUser = $env:ANDROID_USER_HOME
 $previousGradle = $env:GRADLE_USER_HOME
+$previousRevision = $env:CARP_BUILD_REVISION
 try {
+    $revision = & git -C $projectRoot rev-parse --short=12 HEAD
+    if ($LASTEXITCODE -ne 0) { throw '无法确定构建代码的 Git 提交' }
+    $changes = @(& git -C $projectRoot status --porcelain)
+    if ($LASTEXITCODE -ne 0) { throw '无法确定构建工作区状态' }
+    $env:CARP_BUILD_REVISION = "$revision" + $(if ($changes.Count -gt 0) { '-dirty' } else { '' })
     $env:JAVA_HOME = $jdk.FullName
     $env:ANDROID_HOME = $sdk
     $env:ANDROID_USER_HOME = Join-Path $toolsDir 'android-user-home'
@@ -112,6 +118,7 @@ try {
     Write-Host "Gradle : $gradle"
     Write-Host "缓存   : $gradleHome"
     Write-Host "任务   : $($invokeTasks -join ' ')"
+    Write-Host "代码   : $env:CARP_BUILD_REVISION"
     Write-Host ''
 
     Push-Location $projectRoot
@@ -135,4 +142,5 @@ try {
     $env:ANDROID_HOME = $previousSdk
     $env:ANDROID_USER_HOME = $previousAndroidUser
     $env:GRADLE_USER_HOME = $previousGradle
+    $env:CARP_BUILD_REVISION = $previousRevision
 }

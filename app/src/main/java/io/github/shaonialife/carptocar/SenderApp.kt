@@ -26,7 +26,7 @@ class SenderApp : Application() {
         // 之后的部分。必须在这里写（Application 是进程最早入口），晚于任何业务日志
         // 都会让它被算进「历史」。
         DebugFileLog.markSessionStart(this)
-        DebugFileLog.append(this, "CONNECT-DIAG: schema=20261108-v5 version=${BuildConfig.VERSION_NAME} sdk=${android.os.Build.VERSION.SDK_INT}; export includes bounded early/recent diagnostics")
+        DebugFileLog.append(this, "CONNECT-DIAG: schema=20261108-v6 revision=${BuildConfig.SOURCE_REVISION} version=${BuildConfig.VERSION_NAME} sdk=${android.os.Build.VERSION.SDK_INT}; export includes bounded early/recent diagnostics")
         // VideoConfig 画布声明模式（车机画布 / 码流尺寸）——会话建立时读一次
         VideoCanvasMode.load(this)
         // 首帧策略（缓存关键帧立即起播 / 等引擎当期 IDR）——attach 时读一次

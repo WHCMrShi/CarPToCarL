@@ -19,4 +19,8 @@ internal class WriteDeadline<T>(private val timeoutMs: Long = 4_000) {
         expired = true
         return lease
     }
+
+    @Synchronized fun describe(now: Long): String = active?.let {
+        "${it.kind}:${now - it.startedAt}ms:expired=$expired"
+    } ?: "idle"
 }

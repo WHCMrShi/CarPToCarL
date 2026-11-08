@@ -44,4 +44,23 @@ class DiagnosticLogArchiveTest {
         assertFalse(DiagnosticLogArchive.isDiagnostic("RAW rx: binary payload"))
         assertTrue(DiagnosticLogArchive.isDiagnostic("HUD-DIAG: NEXT_TURN action=1"))
     }
+
+    @Test fun blockedVideoAndHandshakeEvidenceSurvivesMainLogRotation() {
+        val main = temp.newFile()
+        val writer = SessionLogFile(main, "marker", maxBytes = 30)
+        val evidence = listOf(
+            "VIDEO-WRITE: timeout kind=frame elapsedMs=4000",
+            "VIDEO-QUEUE: dropped=32 waitingIdr=true",
+            "VIDEO-PATH: wireFrames=150 write=frame:4000ms",
+            "CARLIFE-DIAG: phase=header-read phaseAgeMs=9000",
+            "CARLIFE: 控制通道断开 - Connection reset",
+            "CARLIFE: 版本握手失败 reason=control-read elapsedMs=2100",
+            "EVENT-DIAG: changeModes request={resources=[]}",
+        )
+        writer.write(evidence.map { "$it\n" }, 0)
+        repeat(10) { writer.write(listOf("ordinary line ${"x".repeat(100)}\n"), 0) }
+        val exported = DiagnosticLogArchive.read(main)
+        evidence.forEach { assertTrue(it, exported.contains(it)) }
+        assertFalse(DiagnosticLogArchive.isDiagnostic("VIDEO-PATH: RAW rx: binary payload"))
+    }
 }
