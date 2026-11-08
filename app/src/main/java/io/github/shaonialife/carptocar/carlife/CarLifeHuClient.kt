@@ -83,6 +83,8 @@ class CarLifeHuClient(
      * 重连，白白打断引擎的音频管道。默认 false = 永不因沉默重连（只有断链才重连）。
      */
     private val audioExpected: () -> Boolean = { false },
+    /** 上层持有跨 HU 会话的限次预算；默认不升级为整轮重建。 */
+    private val requestZeroFrameRecovery: (Long, Boolean, Int) -> Boolean = { _, _, _ -> false },
     /** 收到手机推送的媒体信息（歌名/歌手/封面，0x10035）。 */
     private val onMediaInfo: (info: CarLifeMediaInfo) -> Unit = {},
     private val connectTimeoutMs: Int = 3_000,
@@ -223,6 +225,8 @@ class CarLifeHuClient(
     /** 最近一次收到视频帧的时刻（elapsedRealtime）。 */
     @Volatile
     private var lastFrameAt = 0L
+    private var videoSessionStartedAt = 0L
+    private var lastVideoRetryAt = 0L
 
     /**
      * 音频通道（9240 媒体 / 9241 TTS）的运行状态。
@@ -480,7 +484,9 @@ class CarLifeHuClient(
         touchOut = sockets[CarLifeProtocol.PORT_TOUCH]?.getOutputStream()
         running.set(true)
         if (!keepStarting()) { stop(); return false }
-        lastFrameAt = android.os.SystemClock.uptimeMillis()
+        videoSessionStartedAt = android.os.SystemClock.uptimeMillis()
+        lastFrameAt = 0L
+        lastVideoRetryAt = videoSessionStartedAt
         // 首轮有序初始化的闸门：每条新会话都要从「98386 还没确认、首条 98311 还没发」开始。
         firstInitSent = false
         featureConfigAcked = false
@@ -1007,7 +1013,8 @@ class CarLifeHuClient(
      *
      * 两条互斥的处理路径：
      *  - **socket 真的死了**（被引擎 reset / 关掉）→ 重连 9242 并重走 98386+98311；
-     *  - **socket 还活着只是不出帧** → **只重发 98311，绝不换连接**。
+     *  - **曾经出帧后暂时停摆** → 只重发初始化，不主动拆整轮会话。
+     *  - **从未出过帧** → 初始化仍无效且 CarPlay 已就绪时，按上层预算限次重建。
      *
      * 第二条是实测教训：早先「重发 2 次无效就换连接」，结果是 App 退后台再回来、
      * 或引擎编码器暂时卡住时，控制握手被整条丢掉，画面从「卡一下」变成「黑屏 +
@@ -1034,17 +1041,23 @@ class CarLifeHuClient(
                 continue
             }
             if (!versionMatched) continue
-            val idle = android.os.SystemClock.uptimeMillis() - lastFrameAt
+            val now = android.os.SystemClock.uptimeMillis()
+            val idle = now - (if (lastFrameAt > 0) lastFrameAt else videoSessionStartedAt)
+            if (requestZeroFrameRecovery(idle, lastFrameAt > 0, reinitCount)) {
+                log("CARLIFE: 握手后 ${idle / 1000}s 仍零真实帧，初始化重试 $reinitCount 次无效——限次重建 CarLife 会话（保持 CarPlay）")
+                stop()
+                return
+            }
             // 重发次数越多间隔越长（10s → 20s → 30s … 封顶 60s）：引擎卡住时
             // 高频重发只会自己也变成负担，而间隔内一旦来帧 reinitCount 会被清零。
             val need = (NO_FRAME_REINIT_MS * (1 + reinitCount / 3)).coerceAtMost(MAX_REINIT_INTERVAL_MS)
-            if (idle < need) continue
+            if (idle < need || now - lastVideoRetryAt < need) continue
             reinitCount = (reinitCount + 1).coerceAtMost(1_000)
             log(
                 "CARLIFE: ${idle / 1000}s 无视频帧——第 $reinitCount 次重发 98311" +
                     "（socket 存活，保持连接不重建）",
             )
-            lastFrameAt = android.os.SystemClock.uptimeMillis()
+            lastVideoRetryAt = now
             resendEncInit()
         }
     }
@@ -1065,7 +1078,7 @@ class CarLifeHuClient(
             }
             sockets[CarLifeProtocol.PORT_VIDEO] = socket
             videoDead = false
-            lastFrameAt = android.os.SystemClock.uptimeMillis()
+            lastVideoRetryAt = android.os.SystemClock.uptimeMillis()
             reinitCount = 0
             startReader("carlife-video") { videoReader(socket.getInputStream(), socket) }
             true
@@ -1535,7 +1548,7 @@ class CarLifeHuClient(
         if (now - channel.openedAt < SILENT_GRACE_MS) return
         // 画面还在出帧 = 引擎活着，问题只在这条音频流上。视频也停了说明整条链路有事，
         // 那是会话冻结/断链恢复的活，这里跟着重连只会把水搅浑。
-        if (now - lastFrameAt > VIDEO_ALIVE_MS) return
+        if (lastFrameAt == 0L || now - lastFrameAt > VIDEO_ALIVE_MS) return
         // 「确实该有声音」：引擎刚发过 0x30002，或上层确认音乐会话正在播放。
         if (!engineAudioActive && !audioExpected()) return
         if (now < channel.nextSilentAt) return

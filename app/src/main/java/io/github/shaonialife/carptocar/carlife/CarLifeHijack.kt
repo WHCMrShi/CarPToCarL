@@ -161,6 +161,7 @@ object CarLifeHijack {
     /** 当前会话的视频通道；为 null 时收到的帧只进 GOP 缓存。 */
     @Volatile
     private var sender: VideoSender? = null
+    private val zeroFrameRecovery = ZeroFrameRecoveryBudget()
 
     /**
      * 「当期首帧已送达 → 需要补一次 RECORD」的一次性标记。
@@ -483,6 +484,7 @@ object CarLifeHijack {
         log: (String) -> Unit,
     ): Boolean {
         if (running.get()) return true
+        zeroFrameRecovery.reset()
         running.set(true)
         val scope = ConnectionResources()
         warmScope = scope
@@ -739,7 +741,10 @@ object CarLifeHijack {
                 // routeAudio → sink.write → feedPcm 返回前已消费或复制；GOP 视频仍独立持有数组。
                 borrowPcmInput = true,
                 log = { line -> logSink?.invoke(line) },
-                onVideoFrame = { data, key, ts -> if (!scope.isClosed) onFrame(data, key, ts) },
+                onVideoFrame = { data, key, ts -> if (!scope.isClosed) { zeroFrameRecovery.reset(); onFrame(data, key, ts) } },
+                requestZeroFrameRecovery = { idle, hasFrame, retries ->
+                    !scope.isClosed && running.get() && zeroFrameRecovery.acquire(idle, hasFrame, retries, sender != null)
+                },
                 onVideoParams = { w, h, f -> if (!scope.isClosed) logSink?.invoke("CARLIFE: 手机编码参数 ${w}x$h@$f") },
                 // SPS 是码流的真相：确认后立刻告诉上层（界面显示、落盘快照都跟着它）。
                 onStreamSize = { w, h -> if (!scope.isClosed) onActualStreamSize?.invoke(w, h) },
