@@ -388,7 +388,7 @@ class Iap2LinkEngine(
 
     val supportsArtworkTransfer: Boolean get() {
         val setupSize = fileTransferSessionVersion?.let(Iap2FileTransferFormat::setupSize) ?: return false
-        return fileTransferSessionId != null && declaredMaxOutgoing >= 2 &&
+        return fileTransferSessionId != null && declaredMaxOutgoing >= 1 && (peerSynchronization?.maxOutgoing ?: 0) >= 1 &&
             (peerSynchronization?.maxLength ?: 0) >= HEADER_BYTES + 1 + setupSize
     }
 
@@ -397,11 +397,11 @@ class Iap2LinkEngine(
         val reason = when {
             sync == null -> "no-peer-SYN"
             fileTransferSessionId == null -> "no-unique-supported-file-session"
-            declaredMaxOutgoing < 2 -> "window-too-small"
+            declaredMaxOutgoing < 1 || sync.maxOutgoing < 1 -> "invalid-window"
             !supportsArtworkTransfer -> "payload-too-small"
             else -> "enabled"
         }
-        return "gate=$reason fileSession=$fileTransferSessionId version=$fileTransferSessionVersion window=$declaredMaxOutgoing maxLength=${sync?.maxLength} " +
+        return "gate=$reason fileSession=$fileTransferSessionId version=$fileTransferSessionVersion window=$declaredMaxOutgoing peerWindow=${sync?.maxOutgoing} fileInFlightLimit=1 maxLength=${sync?.maxLength} " +
             "sessions=${sync?.sessions?.joinToString { "${it.id}/k${it.kind}/v${it.version}" }}"
     }
     internal var onFileDiagnostic: ((String) -> Unit)? = null
@@ -413,12 +413,10 @@ class Iap2LinkEngine(
         val limit = peer.maxLength - HEADER_BYTES - 1
         if (state != State.NORMAL || bytes.isEmpty() || bytes.size > limit || sendBacklog.isNotEmpty()) return false
         val outstanding = lastSentAcknowledged?.let { sequenceDistance(sentSequence, it) } ?: 0
-        // 有界流水发送，仍给控制消息留一格，不把图片排入无界积压队列。
+        // 保守 stop-and-wait：仅一片文件在途，窗口 1 不强占不存在的控制预留格。
         val window = minOf(declaredMaxOutgoing, peer.maxOutgoing)
-        if (window < 2) return false
-        val fileWindow = minOf(4, (window - 1).coerceAtLeast(1))
-        if (unacknowledged.count { it.sessionId == sessionId } >= fileWindow ||
-            outstanding >= (window - 1).coerceAtLeast(1)) return false
+        if (window < 1 || lastFileSequence != null ||
+            outstanding >= (if (window == 1) 1 else window - 1)) return false
         sentSequence = nextSequence(sentSequence)
         if (bytes.size >= 2 && (bytes[1].toInt() == 4 || bytes[1].toInt() and 0x40 != 0)) {
             onFileDiagnostic?.invoke("file-link-send session=$sessionId seq=$sentSequence bytes=${bytes.size} outstanding=$outstanding")

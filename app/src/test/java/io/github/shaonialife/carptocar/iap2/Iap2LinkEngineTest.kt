@@ -7,6 +7,23 @@ import org.junit.Test
 
 /** 两个链路引擎通过直接交换输出字节完成握手与数据往返（无线程、无 I/O）。 */
 class Iap2LinkEngineTest {
+    @Test fun peerWindowOneCanSendFilesAndZeroIsDiagnosedAsInvalid() {
+        for (window in listOf(0, 1)) {
+            val phone = Iap2LinkEngine()
+            val car = Iap2LinkEngine(maxOutgoing = window)
+            phone.start(0); car.start(0); exchangeUntilNormal(phone, car)
+            if (window == 0) {
+                assertTrue(!phone.supportsArtworkTransfer)
+                assertTrue(phone.artworkDiagnostics().contains("invalid-window"))
+            } else {
+                phone.sendControl(Iap2Csm.encode(0x5001), 10)
+                repeat(5) { exchange(phone, car); phone.advanceTime(2000L + it * 100); car.advanceTime(2000L + it * 100) }
+                assertTrue(phone.artworkDiagnostics().contains("peerWindow=1"))
+                assertTrue(phone.sendFileTransfer(byteArrayOf(129.toByte(), 4), 3000))
+                assertTrue(!phone.sendFileTransfer(byteArrayOf(129.toByte(), 4), 3001))
+            }
+        }
+    }
     @Test
     fun handshakeReachesNormalOnBothSides() {
         val phone = Iap2LinkEngine()
@@ -150,7 +167,7 @@ class Iap2LinkEngineTest {
         assertTrue(phone.sendFileTransfer(file, 10))
         var fileCount = 1
         while (fileCount < 8 && phone.sendFileTransfer(file, 11)) fileCount++
-        assertTrue(fileCount in 2..4)
+        assertEquals(1, fileCount)
         assertTrue(!phone.sendFileTransfer(file, 11)) // bounded pipeline leaves one control slot
         val control = Iap2Csm.encode(0x5001)
         assertTrue(phone.sendControl(control, 12)) // reserved capacity remains available

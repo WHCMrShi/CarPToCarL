@@ -466,12 +466,11 @@ class VirtualIap2Link(
         checkMfiTimeoutLocked()
         if ((artworkField != null || artworkSender.hasCancellation()) && engine.supportsArtworkTransfer && !closed) {
             val limit = (engine.peerSynchronization?.maxLength ?: 0) - Iap2LinkEngine.HEADER_BYTES - 1
-            // 每轮最多四片；ACK/窗口/控制积压仍由 engine 裁决，失败立即结束本轮。
-            for (i in 0 until 4) {
-                val plan = artworkSender.poll(limit, engine.fileTransferSessionVersion ?: 0) ?: break
+            // 每轮只提交一片，先消费接收端 PAUSE/START，再推进下一片。
+            val plan = artworkSender.poll(limit, engine.fileTransferSessionVersion ?: 0)
+            if (plan != null) {
                 val accepted = engine.sendFileTransfer(plan.bytes, nowMillis())
                 artworkSender.submitted(plan, accepted)
-                if (!accepted) break
             }
         }
         flushOutputLocked()
