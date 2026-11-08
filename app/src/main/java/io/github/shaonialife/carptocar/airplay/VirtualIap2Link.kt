@@ -465,8 +465,13 @@ class VirtualIap2Link(
         checkMfiTimeoutLocked()
         if ((artworkField != null || artworkSender.hasCancellation()) && engine.supportsArtworkTransfer && !closed) {
             val limit = (engine.peerSynchronization?.maxLength ?: 0) - Iap2LinkEngine.HEADER_BYTES - 1
-            val plan = artworkSender.poll(limit, engine.fileTransferSessionVersion ?: 0)
-            if (plan != null) artworkSender.submitted(plan, engine.sendFileTransfer(plan.bytes, nowMillis()))
+            // 每轮最多四片；ACK/窗口/控制积压仍由 engine 裁决，失败立即结束本轮。
+            for (i in 0 until 4) {
+                val plan = artworkSender.poll(limit, engine.fileTransferSessionVersion ?: 0) ?: break
+                val accepted = engine.sendFileTransfer(plan.bytes, nowMillis())
+                artworkSender.submitted(plan, accepted)
+                if (!accepted) break
+            }
         }
         flushOutputLocked()
     }
@@ -771,7 +776,7 @@ class VirtualIap2Link(
             Iap2MessageIds.START_NOW_PLAYING_UPDATES -> {
                 if (!mib3) return
                 artworkField = Iap2ArtworkSender.requestedField(frame.body)
-                artworkSender.reset()
+                artworkSender.subscribe(artworkField)
                 log("ARTWORK: WiFi subscription field=$artworkField ${engine.artworkDiagnostics()} bodyBytes=${frame.body.size}")
                 nowPlayingUpdates.subscribe()
                 val nowPlaying = nowPlayingProvider?.invoke()?.let { artworkSender.decorate(it, artworkField, engine.supportsArtworkTransfer) }

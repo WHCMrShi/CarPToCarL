@@ -9,7 +9,7 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 
-/** 只在封面工作线程调用。保持支持的原始 JPEG/PNG；否则最多缩到 1024 并一次无损 PNG 编码。 */
+/** 仪表封面只在工作线程缩略编码；同时限制尺寸和体积，避免大 PNG 长期占用控制通道。 */
 internal object ArtworkEncoder {
     fun load(metadata: MediaMetadata?, resolver: ContentResolver, control: ArtworkReadControl,
         cache: ArtworkEncodingCache, log: (String) -> Unit = {}): ByteArray? {
@@ -64,7 +64,7 @@ internal object ArtworkEncoder {
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         val native = bounds.outMimeType == "image/jpeg" || bounds.outMimeType == "image/png"
-        if (native && maxOf(bounds.outWidth, bounds.outHeight) <= MAX_SIDE) return bytes
+        if (native && maxOf(bounds.outWidth, bounds.outHeight) <= MAX_SIDE && bytes.size <= MAX_TRANSFER_BYTES) return bytes
         var sample = 1
         while (maxOf(bounds.outWidth, bounds.outHeight) / sample > MAX_SIDE * 2) sample *= 2
         val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
@@ -74,10 +74,7 @@ internal object ArtworkEncoder {
 
     private fun encode(bitmap: Bitmap): ByteArray? {
         if (bitmap.isRecycled || Thread.currentThread().isInterrupted) return null
-        val side = maxOf(bitmap.width, bitmap.height)
-        val scaled = if (side > MAX_SIDE) Bitmap.createScaledBitmap(bitmap,
-            (bitmap.width.toLong() * MAX_SIDE / side).toInt().coerceAtLeast(1),
-            (bitmap.height.toLong() * MAX_SIDE / side).toInt().coerceAtLeast(1), true) else bitmap
+        var targetSide = minOf(maxOf(bitmap.width, bitmap.height), MAX_SIDE)
         val output = object : ByteArrayOutputStream() {
             override fun write(bytes: ByteArray, offset: Int, length: Int) {
                 if (size() + length > EncodedArtwork.MAX_BYTES) throw IOException("artwork exceeds 1 MiB")
@@ -88,8 +85,22 @@ internal object ArtworkEncoder {
                 super.write(value)
             }
         }
-        return try { if (scaled.compress(Bitmap.CompressFormat.PNG, 100, output)) output.toByteArray() else null }
-            finally { if (scaled !== bitmap) scaled.recycle() }
+        while (targetSide > 0) {
+            val side = maxOf(bitmap.width, bitmap.height)
+            val scaled = if (side > targetSide) Bitmap.createScaledBitmap(bitmap,
+                (bitmap.width.toLong() * targetSide / side).toInt().coerceAtLeast(1),
+                (bitmap.height.toLong() * targetSide / side).toInt().coerceAtLeast(1), true) else bitmap
+            try {
+                for (quality in intArrayOf(85, 70, 55)) {
+                    output.reset()
+                    if (!scaled.compress(Bitmap.CompressFormat.JPEG, quality, output)) return null
+                    if (output.size() <= MAX_TRANSFER_BYTES) return output.toByteArray()
+                }
+            } finally { if (scaled !== bitmap) scaled.recycle() }
+            targetSide /= 2
+        }
+        return null
     }
-    private const val MAX_SIDE = 1024
+    private const val MAX_SIDE = 320
+    private const val MAX_TRANSFER_BYTES = 64 * 1024
 }

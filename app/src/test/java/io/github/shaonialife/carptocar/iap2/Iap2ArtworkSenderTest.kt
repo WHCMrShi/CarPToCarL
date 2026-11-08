@@ -202,7 +202,7 @@ class Iap2ArtworkSenderTest {
         }
     }
 
-    @Test fun pendingEncodingStillSchedulesRefreshAfterEmptyTransferCompletes() {
+    @Test fun pendingEncodingWaitsWithoutSendingAnEmptyTransfer() {
         ArtworkRepository().use { repo ->
             val release = CountDownLatch(1)
             val entered = CountDownLatch(1)
@@ -210,15 +210,15 @@ class Iap2ArtworkSenderTest {
             try {
                 val sender = Iap2ArtworkSender()
                 val value = song.copy(artworkSource = source)
-                val id = sender.decorate(value, 26, true).artworkTransferId!!
+                val id = sender.decorate(value, 26, true).artworkTransferId
                 assertTrue(entered.await(3, TimeUnit.SECONDS))
-                sender.metadataSent(id); send(sender)
-                sender.response(byteArrayOf(id.toByte(), 5))
+                assertNull(id)
+                assertNull(sender.poll(1024))
                 assertTrue(sender.pending())
                 release.countDown()
                 val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
                 while (!source.request().complete && System.nanoTime() < deadline) Thread.sleep(5)
-                assertNotEquals(id, sender.decorate(value, 26, true).artworkTransferId)
+                assertNotNull(sender.decorate(value, 26, true).artworkTransferId)
             } finally { release.countDown() }
         }
     }
@@ -229,6 +229,37 @@ class Iap2ArtworkSenderTest {
         sender.metadataSent(value.artworkTransferId)
         assertNull(sender.poll(11))
         assertFalse(sender.pending())
+    }
+
+    @Test fun repeatedSubscriptionPreservesTransferIdAndOffset() {
+        ArtworkRepository().use { repo ->
+            val sender = Iap2ArtworkSender()
+            sender.subscribe(26)
+            val value = loaded(repo)
+            val id = start(sender, value)
+            send(sender, 100)
+            sender.subscribe(26)
+            assertEquals(id, sender.decorate(value, 26, true).artworkTransferId)
+            assertFalse(sender.hasCancellation())
+            val next = send(sender, 100)
+            assertEquals(0, next[1].toInt())
+            assertArrayEquals(image(5000).sliceArray(98..195), next.drop(2).toByteArray())
+        }
+    }
+
+    @Test fun switchingToPendingTrackCancelsOldTransferWithoutPublishingEmptyFile() {
+        ArtworkRepository().use { repo ->
+            val sender = Iap2ArtworkSender()
+            val old = start(sender, loaded(repo))
+            val release = CountDownLatch(1)
+            try {
+                val value = song.copy(artworkSource = repo.source("new-track", 2) { release.await(3, TimeUnit.SECONDS); image(10) })
+                assertNull(sender.decorate(value, 26, true).artworkTransferId)
+                assertArrayEquals(byteArrayOf(old.toByte(), 2), send(sender))
+                assertNull(sender.poll(1024))
+                assertTrue(sender.needsRefresh())
+            } finally { release.countDown() }
+        }
     }
 
     @Test fun pauseResumesFromPreviousOffsetWithoutDuplicatingFirstChunk() {

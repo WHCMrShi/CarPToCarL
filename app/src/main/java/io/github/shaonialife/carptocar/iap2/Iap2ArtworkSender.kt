@@ -51,11 +51,15 @@ internal class Iap2ArtworkSender(
         val nextImage = result?.image
         awaitingImage = result != null && !result.complete
         diagnostic("prepare revision=${value.artworkSource?.revision} sourcePresent=${value.artworkSource != null} complete=${result?.complete} imageBytes=${nextImage?.size ?: 0}")
-        // 同曲新 metadata 仍在加载时保留已发布的封面；新曲来源必须先清旧图。
-        val pendingSameTrack = result != null && !result.complete && nextImage == null &&
-            value.artworkSource?.trackId == lastTrack && content != null
+        // 加载中不等于「无封面」；新曲先撤去引用，不发送空文件再撤销。
+        val pendingImage = result != null && !result.complete && nextImage == null
+        if (pendingImage && value.artworkSource?.trackId != lastTrack) {
+            if (phase in listOf(Phase.START, Phase.DATA, Phase.SUCCESS)) cancel = transferId
+            generation++; activePlan = null; phase = Phase.NONE; image = null; content = null
+            transferId = null; announced = false
+        }
         lastTrack = value.artworkSource?.trackId
-        if (!pendingSameTrack) {
+        if (!pendingImage) {
             val key = nextImage?.digest ?: "empty"
             if (key != content) {
                 if (phase in listOf(Phase.START, Phase.DATA, Phase.SUCCESS)) cancel = transferId
@@ -76,6 +80,12 @@ internal class Iap2ArtworkSender(
         return value.copy(artworkSource = null, artworkTransferId = transferId, artworkAttributeId = attribute ?: 26)
     }
     private var lastTrack: String? = null
+
+    /** 重复订阅只重申引用，不取消同一图片；字段改变才重建。 */
+    @Synchronized fun subscribe(field: Int?) {
+        if (attribute != field) reset()
+        attribute = field
+    }
 
     @Synchronized fun metadataSent(id: Int?) {
         if (id != null && id == transferId) {

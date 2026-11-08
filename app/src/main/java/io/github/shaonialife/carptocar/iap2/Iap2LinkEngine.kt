@@ -413,8 +413,12 @@ class Iap2LinkEngine(
         val limit = peer.maxLength - HEADER_BYTES - 1
         if (state != State.NORMAL || bytes.isEmpty() || bytes.size > limit || sendBacklog.isNotEmpty()) return false
         val outstanding = lastSentAcknowledged?.let { sequenceDistance(sentSequence, it) } ?: 0
-        // 给控制消息留一格窗口；封面最多一个未确认链路包，不压入无界积压队列。
-        if (lastFileSequence != null || outstanding >= (declaredMaxOutgoing - 1).coerceAtLeast(1)) return false
+        // 有界流水发送，仍给控制消息留一格，不把图片排入无界积压队列。
+        val window = minOf(declaredMaxOutgoing, peer.maxOutgoing)
+        if (window < 2) return false
+        val fileWindow = minOf(4, (window - 1).coerceAtLeast(1))
+        if (unacknowledged.count { it.sessionId == sessionId } >= fileWindow ||
+            outstanding >= (window - 1).coerceAtLeast(1)) return false
         sentSequence = nextSequence(sentSequence)
         if (bytes.size >= 2 && (bytes[1].toInt() == 4 || bytes[1].toInt() and 0x40 != 0)) {
             onFileDiagnostic?.invoke("file-link-send session=$sessionId seq=$sentSequence bytes=${bytes.size} outstanding=$outstanding")

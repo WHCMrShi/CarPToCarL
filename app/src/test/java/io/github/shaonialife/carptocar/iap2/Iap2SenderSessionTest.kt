@@ -376,6 +376,8 @@ class Iap2SenderSessionTest {
                         2 -> if ((bytes[0].toInt() and 255) == transferId.get()) cancelled.countDown()
                     }
                 }
+                // An actual STOP/START starts a fresh subscription; duplicate START is idempotent.
+                car.sendControl(Iap2Csm.encode(0x5002))
                 car.sendControl(Iap2Csm.encode(0x5000, Iap2Csm.group(0, Iap2Csm.param(26, ByteArray(0)))))
                 assertTrue(waiting.await(3, TimeUnit.SECONDS)) // transfer remains active: no START reply
                 car.sendControl(Iap2Csm.encode(0x5002))

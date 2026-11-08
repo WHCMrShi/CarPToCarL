@@ -148,12 +148,17 @@ class Iap2LinkEngineTest {
         assertNotNullFileSession(phone)
         val file = byteArrayOf(129.toByte(), 4, 0, 0)
         assertTrue(phone.sendFileTransfer(file, 10))
-        assertTrue(!phone.sendFileTransfer(file, 11)) // at most one unacknowledged artwork packet
+        var fileCount = 1
+        while (fileCount < 8 && phone.sendFileTransfer(file, 11)) fileCount++
+        assertTrue(fileCount in 2..4)
+        assertTrue(!phone.sendFileTransfer(file, 11)) // bounded pipeline leaves one control slot
         val control = Iap2Csm.encode(0x5001)
         assertTrue(phone.sendControl(control, 12)) // reserved capacity remains available
         exchange(phone, car)
         val events = generateSequence { car.pollEvent() }.toList()
-        assertArrayEquals(file, events.filterIsInstance<Iap2LinkEngine.Event.FileTransfer>().single().bytes)
+        val files = events.filterIsInstance<Iap2LinkEngine.Event.FileTransfer>()
+        assertEquals(fileCount, files.size)
+        files.forEach { assertArrayEquals(file, it.bytes) }
         assertArrayEquals(control, events.filterIsInstance<Iap2LinkEngine.Event.Control>().single().bytes)
         assertTrue(phone.sendFileTransfer(file, 13)) // cumulative ACK releases artwork slot
         exchange(phone, car)

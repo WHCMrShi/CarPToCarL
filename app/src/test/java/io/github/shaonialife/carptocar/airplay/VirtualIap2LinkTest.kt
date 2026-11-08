@@ -43,6 +43,10 @@ private fun splitLinkFrames(chunk: ByteArray): List<ByteArray> {
 }
 
 class VirtualIap2LinkTest {
+    @org.junit.Before fun resetSharedAccessoryDeclaration() {
+        io.github.shaonialife.carptocar.iap2.AccessoryDeclaration.reset()
+    }
+
     private class Harness(private val legacyFileSession: Boolean = false) {
         private var legacySynSent = false
         val controlSent = ArrayList<ByteArray>()

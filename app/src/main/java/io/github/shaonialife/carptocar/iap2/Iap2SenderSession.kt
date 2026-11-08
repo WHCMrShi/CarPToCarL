@@ -1079,7 +1079,7 @@ class Iap2SenderSession(
         when (frame.messageId) {
             Iap2MessageIds.START_NOW_PLAYING_UPDATES -> {
                 artworkField = Iap2ArtworkSender.requestedField(frame.body)
-                artworkSender.reset()
+                artworkSender.subscribe(artworkField)
                 log("ARTWORK: BT subscription field=$artworkField ${channel.artworkDiagnostics()} bodyBytes=${frame.body.size}")
                 nowPlayingSubscribed = true
                 // 不在握手中抢发媒体信息；保活起步会重推最终订阅状态。
