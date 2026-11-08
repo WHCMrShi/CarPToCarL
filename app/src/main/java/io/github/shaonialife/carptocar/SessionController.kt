@@ -1653,6 +1653,8 @@ object SessionController {
         val hadProjection = CarPlayService.mediaProjection != null
         // 用户终态：解冻恢复不得再自动把会话拉起来
         sessionWanted = false
+        // All terminal callers must cancel in-flight WiFi work, not only the UI cancel button.
+        connectCancelled = true
         pendingCtrlInvite.end()
         // 兼容模式的常开监听也一并停在这里；记下「用户叫停过」，
         // 否则看门狗 30 秒后又把监听挂回来（用户会以为断开没生效）
@@ -1689,6 +1691,7 @@ object SessionController {
         wifiConnector?.release()
         wifiWatchdog?.stop()
         boundCarSsid = null
+        sessionStarting.set(false)
         if (hadProjection) {
             // Android 14+：MediaProjection 与保活服务（mediaProjection FGS 类型）绑定，
             // 停服务会连带失效授权——下次连接需重新点「申请投屏权限」
@@ -1789,6 +1792,10 @@ object SessionController {
      * 因此这里必须：绑车机 WiFi → 广播 ctrl；晚于 0x4300 则双方互等死锁（Audi 实测）。
      */
     fun onWifiCredentials(wifi: Iap2SenderSession.WifiConfiguration) {
+        if (compatSuppressed) {
+            appendLog("CONNECT-DIAG: ignored late WiFi credentials after terminal disconnect")
+            return
+        }
         // 会话推流中收到的 0x5703 是冗余凭据（DiPlay 控制器周期重连会重发一轮
         // Phase 1，2026-10-15 实测「连上后自动断开」循环的推手之一）：此时再走绑定
         // 流程会 release+重绑进程网络（扰动正在推流的 socket）、force 重注册 ctrl
@@ -1919,6 +1926,11 @@ object SessionController {
         }
         phaseHint = "正在加入车机热点 ${wifi.ssid}…（不影响移动数据）"
         val result = joinCarWifiOnce(connector, wifi, force)
+        if (connectCancelled || compatSuppressed) {
+            connector.release()
+            appendLog("CONNECT-DIAG: retired WiFi join completion after cancellation")
+            return WifiCarPlayConnector.JoinResult.Unavailable
+        }
         if (result is WifiCarPlayConnector.JoinResult.Joined) {
             boundCarSsid = wifi.ssid
             if (wifiLinkLost) {
@@ -3862,6 +3874,10 @@ object SessionController {
     ) {
         val context = appContext ?: return
         val inviteGeneration = pendingCtrlInvite.currentGeneration()
+        if (compatSuppressed) {
+            appendLog("CONNECT-DIAG: ignored late endpoint after terminal disconnect source=$source")
+            return
+        }
         // 冗余端点防护：接收端控制器（DiPlay 实测）在我们配对推流后才完成既有的
         // RFCOMM 重连并重发 0x4301。此时重启配对会 retireSession 掉健康会话
         // （编码器 stop 竞态 = 「连上后自动断开」循环的根因）。推流中的端点一律忽略；
@@ -3970,6 +3986,10 @@ object SessionController {
         // 绑定完成后再并行做三件事：ctrl 广播针对新网络重注册、后台发现 _airplay._tcp、
         // 等车机 ctrl 邀请（车机已发现我们的权威信号）。
         val continueWithNetwork: (Boolean) -> Unit = proceed@{ bound ->
+            if (compatSuppressed || connectCancelled || pendingCtrlInvite.currentGeneration() != inviteGeneration) {
+                appendLog("CONNECT-DIAG: ignored stale network continuation source=$source inviteGeneration=$inviteGeneration")
+                return@proceed
+            }
             appendLog("CONNECT-DIAG: network-bound result=$bound source=$source inviteGeneration=$inviteGeneration")
             if (!bound) {
                 phaseHint = "手机不在车机热点——请到 WLAN 设置加入 ${endpoint.ssid}"

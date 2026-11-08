@@ -490,6 +490,7 @@ class WifiCarPlayConnector(
 
                 override fun onLost(network: Network) {
                     if (callback.get() === this && lease.lost(network) && boundNetwork.compareAndSet(network, null)) {
+                        result.compareAndSet(network, null)
                         connectivityManager.bindProcessToNetwork(null)
                         onNetworkLost?.invoke("")
                     }
