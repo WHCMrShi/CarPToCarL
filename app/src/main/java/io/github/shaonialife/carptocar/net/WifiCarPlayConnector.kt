@@ -187,12 +187,14 @@ class WifiCarPlayConnector(
                     val bound = connectivityManager.bindProcessToNetwork(network)
                     boundNetwork.set(network)
                     result.set(network)
+                    log("CONNECT-DIAG: specifier available request=${System.identityHashCode(this)} bound=$bound")
                     log("WiFi: 已加入应用专属网络 \"$ssid\"（$network bindProcessToNetwork=$bound）——不影响其它应用联网")
                     latch.countDown()
                 }
 
                 override fun onUnavailable() {
                     unavailable.set(true)
+                    log("CONNECT-DIAG: specifier unavailable request=${System.identityHashCode(this)}")
                     log("WiFi: 系统未允许加入 \"$ssid\"（用户拒绝或热点不在范围内）")
                     latch.countDown()
                 }
@@ -206,6 +208,7 @@ class WifiCarPlayConnector(
                 }
             }
         callback.set(newCallback)
+        log("CONNECT-DIAG: requesting system WiFi selection request=${System.identityHashCode(newCallback)}")
         val accepted =
             try {
                 connectivityManager.requestNetwork(request, newCallback)
@@ -218,7 +221,8 @@ class WifiCarPlayConnector(
             release()
             return JoinResult.Unavailable
         }
-        val deadline = SystemClock.uptimeMillis() + timeoutMillis
+        val startedAt = SystemClock.uptimeMillis()
+        val deadline = startedAt + timeoutMillis
         while (SystemClock.uptimeMillis() < deadline) {
             if (isCancelled()) {
                 release()
@@ -233,10 +237,7 @@ class WifiCarPlayConnector(
         }
         val network = result.get()
         if (network == null) {
-            log(
-                "WiFi: 等待加入 \"$ssid\" 超时（${timeoutMillis / 1000}s）" +
-                    if (unavailable.get()) "——系统已判定不可用" else "——系统确认框可能仍在前台",
-            )
+            log("CONNECT-DIAG: specifier incomplete request=${System.identityHashCode(newCallback)} elapsedMs=${SystemClock.uptimeMillis() - startedAt} reason=${if (unavailable.get()) "system-unavailable" else "deadline"}")
             release()
             return JoinResult.Unavailable
         }

@@ -1062,6 +1062,7 @@ class MainActivity : AppCompatActivity() {
         // （需要时可在代码里直接调用 provision()），界面不再暴露。
 
         findViewById<TextView>(R.id.btnWifi).setOnClickListener {
+            log("CONNECT-DIAG: opening WLAN settings from home WiFi button")
             val ssid = ssidInput.text.toString().trim()
             // 自动加入不可用时的手动兜底：密码先进剪贴板，系统 WLAN 页粘贴即可
             val psk = SessionController.lastWifiPsk
