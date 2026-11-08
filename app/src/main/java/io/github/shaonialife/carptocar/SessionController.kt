@@ -377,22 +377,20 @@ object SessionController {
      * 优先系统媒体会话（覆盖第三方播放器 + CarLife 内置播放器的绝大多数场景），
      * 读不到再退回 CarLife 0x10035 推来的媒体信息；两者皆无返回 null（不响应）。
      */
+    private val nowPlayingLog = io.github.shaonialife.carptocar.util.LogThrottle(10_000)
+
     private fun buildNowPlaying(): CarPlayNowPlaying? {
         val session = MediaSessionsState.nowPlaying
-        if (session != null && session.title != null) {
-            return session.toCarPlayNowPlaying(android.os.SystemClock.elapsedRealtime())
+        val system = session != null && session.title != null
+        val value = if (system) {
+            session!!.toCarPlayNowPlaying(android.os.SystemClock.elapsedRealtime())
+        } else {
+            CarLifeHijack.fallbackNowPlaying()
         }
-        val info = CarLifeHijack.latestMediaInfo ?: return null
-        return CarPlayNowPlaying(
-            title = info.song.takeIf { it.isNotBlank() },
-            artist = info.artist.takeIf { it.isNotBlank() },
-            album = info.album.takeIf { it.isNotBlank() },
-            durationMs = info.duration,
-            status = Iap2NowPlaying.STATUS_PLAYING, // CarLife 推歌名即视为播放中
-            elapsedMs = 0,
-            appName = info.source.takeIf { it.isNotBlank() },
-            artworkSource = CarLifeHijack.artworkFor(info),
-        )
+        if (value != null && nowPlayingLog.allow("source")) {
+            appendLog("NOWPLAYING-DIAG: source=${if (system) "MediaSession" else "CarLife"} durationMs=${value.durationMs} elapsedMs=${value.elapsedMs} status=${value.status}")
+        }
+        return value
     }
 
     /** 追加一行日志：logcat + 文件 + 进程级缓冲 + 挂屏渲染（增量行直送）。任意线程可调。 */

@@ -87,6 +87,7 @@ class CarLifeHuClient(
     private val requestZeroFrameRecovery: (Long, Boolean, Int) -> Boolean = { _, _, _ -> false },
     /** 收到手机推送的媒体信息（歌名/歌手/封面，0x10035）。 */
     private val onMediaInfo: (info: CarLifeMediaInfo) -> Unit = {},
+    private val onMediaProgress: (Int) -> Unit = {},
     private val connectTimeoutMs: Int = 3_000,
     /**
      * 向 CarLife 引擎申请的编码帧率（98311 的 fps 字段 + 98316 帧率变更）。
@@ -784,7 +785,7 @@ class CarLifeHuClient(
                     if (mediaTrack != key) { mediaTrack = key; playbackEvidence.reset() }
                     log(
                         "CARLIFE: 媒体信息 song=${info.song} artist=${info.artist} " +
-                            "album=${info.album} dur=${info.duration}ms mode=${info.mode} " +
+                            "album=${info.album} durationSeconds=${info.duration} mode=${info.mode} " +
                             "art=${info.albumArt?.size ?: 0}B",
                     )
                     onMediaInfo(info)
@@ -795,7 +796,10 @@ class CarLifeHuClient(
                 // 媒体进度条（u32 progressBar，单位 ms）。只做低频诊断：限流 10 秒，
                 // 否则冻结解冻一次就能把几百行灌进日志（见 progressLog 注释）。
                 val progress = CarLifeMediaProtocol.progress(payload)
-                if (progress != null) playbackEvidence.progress(android.os.SystemClock.uptimeMillis(), progress)
+                if (progress != null) {
+                    playbackEvidence.progress(android.os.SystemClock.uptimeMillis(), progress)
+                    onMediaProgress(progress)
+                }
                 if (progressLog.allow("media-progress")) {
                     log("CARLIFE: 媒体进度 ${progress?.let { "${it}ms" } ?: "invalid protobuf (${payload.size}B)"}（同类提示 10 秒最多一行）")
                 }

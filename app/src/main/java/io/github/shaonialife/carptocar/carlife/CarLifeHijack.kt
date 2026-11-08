@@ -210,6 +210,12 @@ object CarLifeHijack {
     @Volatile
     var latestMediaInfo: CarLifeMediaInfo? = null
         private set
+    @Volatile private var nowPlayingState: CarLifeNowPlayingState? = null
+
+    internal fun fallbackNowPlaying(): io.github.shaonialife.carptocar.iap2.CarPlayNowPlaying? {
+        val (info, value) = nowPlayingState?.snapshot() ?: return null
+        return value.copy(artworkSource = artworkFor(info))
+    }
 
     /** 媒体信息变化监听（歌名/歌手变化时触发）。 */
     private val mediaInfoListeners = java.util.concurrent.CopyOnWriteArrayList<(CarLifeMediaInfo) -> Unit>()
@@ -705,6 +711,8 @@ object CarLifeHijack {
         mediaArtworkEncodingCache = null
         mediaArtwork = null
         latestMediaInfo = null
+        nowPlayingState?.reset()
+        nowPlayingState = null
         MediaSessionsState.removeListener(mediaPlaybackListener)
         sender = null
         client?.stop()
@@ -755,6 +763,8 @@ object CarLifeHijack {
             // 读不到状态 = 不确定，宁可不截断（放行），交由引擎侧 STOP/DATA 自行决定。
             enginePlaybackAt = Long.MIN_VALUE
             sink.setPlaybackPaused(scopedPlaybackSnapshot()?.let { it.matchesTrack && it.playing == false } == true)
+            val mediaState = CarLifeNowPlayingState()
+            nowPlayingState = mediaState
             val hu = CarLifeHuClient(
                 host = "127.0.0.1",
                 // routeAudio → sink.write → feedPcm 返回前已消费或复制；GOP 视频仍独立持有数组。
@@ -772,11 +782,18 @@ object CarLifeHijack {
                 // 导航播报：TTS 通道独立格式、独立 sink，喂给同一个音频发送端
                 onTtsFormat = { rate, channels -> if (!scope.isClosed) naviSink.configure(rate, channels) },
                 onTtsPcm = { pcm, size -> if (!scope.isClosed) routeAudio(naviSink, pcm, size) },
-                onAudioGate = { active -> if (!scope.isClosed) onEngineAudioGate(active) },
+                onAudioGate = { active -> if (!scope.isClosed && nowPlayingState === mediaState) {
+                    mediaState.gate(active)
+                    onEngineAudioGate(active)
+                } },
                 // 音频沉默看门狗判据：音乐会话确实在播 = 此刻「应该」有声，
                 // 9240 却连续零 PCM 才是异常。读不到会话（null）时按「不确定」放行不重连。
                 audioExpected = ::scopedPlaybackSnapshot,
-                onMediaInfo = { info -> if (!scope.isClosed) onMediaInfo(info) },
+                onMediaInfo = { info -> if (!scope.isClosed && nowPlayingState === mediaState) {
+                    mediaState.media(info)
+                    onMediaInfo(info)
+                } },
+                onMediaProgress = { value -> if (!scope.isClosed && nowPlayingState === mediaState) mediaState.progress(value) },
                 requestedFps = requestedFps,
                 initialConnectType = connectType,
                 probeIds = probeIds,
@@ -840,6 +857,10 @@ object CarLifeHijack {
                 sleep(500)
             }
             hu.stop()
+            if (nowPlayingState === mediaState) {
+                nowPlayingState = null
+                mediaState.reset()
+            }
             scope.release(cleanup)
             synchronized(this) {
                 if (client === hu) {

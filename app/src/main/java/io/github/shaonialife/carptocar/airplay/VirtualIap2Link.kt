@@ -79,6 +79,13 @@ class VirtualIap2Link(
     private var frameCount = 0
     private var started = false
     private val nowPlayingUpdates = NowPlayingUpdates()
+    private val nowPlayingLog = io.github.shaonialife.carptocar.util.LogThrottle(10_000, nowMillis)
+
+    private fun noteNowPlayingAttempt(value: CarPlayNowPlaying, accepted: Boolean) {
+        if (nowPlayingLog.allow("tx")) {
+            log("NOWPLAYING-DIAG: link=WiFi txAccepted=$accepted durationMs=${value.durationMs} elapsedMs=${value.elapsedMs} status=${value.status}")
+        }
+    }
     private val artworkSender = Iap2ArtworkSender(clock = nowMillis, log = { log(it.replaceFirst("ARTWORK:", "ARTWORK: WiFi")) })
     private var artworkField: Int? = null
     private val nowPlayingPending = java.util.concurrent.atomic.AtomicBoolean()
@@ -256,6 +263,7 @@ class VirtualIap2Link(
         val value = nowPlayingProvider?.invoke()?.let { artworkSender.decorate(it, artworkField, engine.supportsArtworkTransfer) }
         nowPlayingUpdates.push(value) { current ->
             sendRawCsmLocked(buildNowPlayingUpdate(current)).also { accepted ->
+                noteNowPlayingAttempt(current, accepted)
                 if (accepted) artworkSender.metadataSent(current.artworkTransferId)
             }
         }
@@ -783,6 +791,7 @@ class VirtualIap2Link(
                 if (nowPlaying != null) {
                     nowPlayingUpdates.push(nowPlaying) { value ->
                         sendRawCsmLocked(buildNowPlayingUpdate(value)).also { accepted ->
+                            noteNowPlayingAttempt(value, accepted)
                             if (accepted) artworkSender.metadataSent(value.artworkTransferId)
                         }
                     }
