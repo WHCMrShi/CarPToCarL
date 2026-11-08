@@ -9,7 +9,7 @@ internal class AudioIngressQueue(
     private val maxDurationNs: Long = 200_000_000L,
     private val maxBytes: Int = 64 * 1024,
 ) : AutoCloseable {
-    private data class Block(val data: ByteArray, val rate: Int, val channels: Int, val at: Long, val duration: Long)
+    private data class Block(val data: ByteArray, val rate: Int, val channels: Int, val at: Long, val duration: Long, val speech: Boolean)
     private data class Delivery(val block: Block, val gap: Boolean)
     private val lock = Object()
     private val queue = ArrayDeque<Block>()
@@ -24,38 +24,41 @@ internal class AudioIngressQueue(
     private var lastReport = clock()
     private val worker = Thread({ run() }, "audio-pcm-send").apply { isDaemon = true; start() }
 
-    fun offer(data: ByteArray, size: Int, rate: Int, channels: Int): Boolean = synchronized(lock) {
-        if (closed || size <= 0 || size > data.size || rate <= 0 || channels !in 1..2) return false
-        val frameBytes = channels * 2
-        val durationLimit = maxDurationNs * rate * frameBytes / 1_000_000_000L
-        val limit = minOf(maxBytes.toLong(), durationLimit).toInt() / frameBytes * frameBytes
-        if (limit <= 0) return false
-        // TTS 可能一次提交超过 200ms：保留最新、采样帧对齐的尾部，不能整块拒绝而持续无声。
-        val skip = if (size > limit) ((size - limit + frameBytes - 1) / frameBytes) * frameBytes else 0
-        val retained = size - skip
-        if (retained <= 0) return false
-        if (skip > 0) { dropped++; gap = true }
-        val span = retained.toLong() * 1_000_000_000L / (rate.toLong() * frameBytes)
-        while (queue.isNotEmpty() && (bytes + retained > maxBytes || duration + span > maxDurationNs)) dropFirst()
-        queue += Block(data.copyOfRange(skip, size), rate, channels, clock(), span)
-        bytes += retained; duration += span
+    fun offer(data: ByteArray, size: Int, rate: Int, channels: Int, speech: Boolean = false): Boolean = synchronized(lock) {
+        if (closed || size <= 0 || size > data.size || size > 256 * 1024 || rate <= 0 || channels !in 1..2) return false
+        val span = size.toLong() * 1_000_000_000L / (rate.toLong() * channels * 2)
+        val byteBudget = if (speech) 512 * 1024 else maxBytes
+        val timeBudget = if (speech) 10_000_000_000L else maxDurationNs
+        // 单次合法大包不等于排队积压。完整接纳一块；只在确有旧待处理块时丢弃旧块。
+        while (true) {
+            val matching = queue.filter { it.speech == speech }
+            if (matching.isEmpty() ||
+                (matching.sumOf { it.data.size } + size <= byteBudget && matching.sumOf { it.duration } + span <= timeBudget)) break
+            drop(queue.indexOfFirst { it.speech == speech })
+        }
+        if (queue.size >= 128) {
+            val obsolete = queue.indexOfFirst { !it.speech }
+            if (obsolete >= 0) drop(obsolete)
+            else if (speech) drop(0) else return false
+        }
+        queue += Block(data.copyOf(size), rate, channels, clock(), span, speech)
+        bytes += size; duration += span
         lock.notifyAll()
         true
     }
 
-    private fun dropFirst() {
-        val old = queue.removeFirst()
+    private fun drop(index: Int) {
+        val old = queue.removeAt(index)
         bytes -= old.data.size; duration -= old.duration
         dropped++; gap = true
     }
-
     private fun take(): Delivery? {
         synchronized(lock) {
             while (true) {
                 while (!closed && queue.isEmpty()) lock.wait()
                 if (closed) return null
                 val age = clock() - queue.first().at
-                if (age > maxDurationNs) { dropFirst(); continue }
+                if (age > if (queue.first().speech) 10_000_000_000L else maxDurationNs) { drop(0); continue }
                 val block = queue.removeFirst()
                 bytes -= block.data.size; duration -= block.duration
                 maxAge = maxOf(maxAge, age)

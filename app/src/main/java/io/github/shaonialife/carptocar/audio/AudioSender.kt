@@ -540,12 +540,13 @@ class AudioSender(
         size: Int,
         srcRate: Int = 0,
         srcChannels: Int = 2,
+        speech: Boolean = false,
     ) {
         if (!running.get() || record != null) return // 采集模式在跑时不接受注入
         if (size <= 0 || size > srcPcm.size) return
-        lastRealFeedAt = android.os.SystemClock.uptimeMillis()
-        continuity.input(System.nanoTime())
-        ingress?.offer(srcPcm, size, if (srcRate > 0) srcRate else sampleRate, if (srcChannels == 1) 1 else 2)
+        val admitted = ingress?.offer(srcPcm, size, if (srcRate > 0) srcRate else sampleRate, if (srcChannels == 1) 1 else 2, speech) == true
+        if (admitted) lastRealFeedAt = android.os.SystemClock.uptimeMillis()
+        continuity.input(System.nanoTime(), admitted)
     }
 
     /** 唯一真实音频消费线程；与补静音共用帧/加密状态锁，读线程不等待此锁。 */

@@ -6,16 +6,18 @@ internal class AudioContinuityWindow {
     private var lastInput: Long? = null
     private var lastOutput: Long? = null
     private var feeds = 0L
+    private var accepted = 0L
     private var packets = 0L
     private var silence = 0L
     private var inputGap = 0L
     private var outputGap = 0L
     private var sendTime = 0L
 
-    @Synchronized fun input(now: Long) {
+    @Synchronized fun input(now: Long, admitted: Boolean = true) {
         if (started == null) started = now
         lastInput?.let { inputGap = maxOf(inputGap, now - it) }
         lastInput = now; feeds++
+        if (admitted) accepted++
     }
 
     @Synchronized fun silence() { silence++ }
@@ -29,9 +31,10 @@ internal class AudioContinuityWindow {
 
     @Synchronized fun summary(now: Long): String? {
         if (feeds == 0L && packets == 0L && silence == 0L) return null
-        val text = "AUDIO-DIAG: windowMs=${(now - (started ?: now)) / 1_000_000} realFeeds=$feeds udpPackets=$packets " +
+        val text = "AUDIO-DIAG: windowMs=${(now - (started ?: now)) / 1_000_000} realFeeds=$feeds admittedFeeds=$accepted rejectedFeeds=${feeds - accepted} udpPackets=$packets " +
             "inputGapMaxMs=${inputGap / 1_000_000} outputGapMaxMs=${outputGap / 1_000_000} sendMaxUs=${sendTime / 1_000} silenceSubmissions=$silence"
         feeds = 0; packets = 0; silence = 0; inputGap = 0; outputGap = 0; sendTime = 0
+        accepted = 0
         started = now
         return text
     }

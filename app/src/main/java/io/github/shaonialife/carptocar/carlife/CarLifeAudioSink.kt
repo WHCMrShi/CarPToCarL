@@ -152,7 +152,7 @@ internal class CarLifeAudioSink(
         val sender = io.github.shaonialife.carptocar.SessionController.audioSender
         if (sender == null || !sender.isRunning) return
         // 直通：交给 AudioSender 重采样 + 封包 + 发送
-        sender.feedPcm(pcm, size, srcRate, srcChannels)
+        sender.feedPcm(pcm, size, srcRate, srcChannels, speech = !dropWhenPaused)
         sampleLevel(pcm, size)
         packets++
         bytes += size

@@ -7,9 +7,10 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AudioIngressQueueTest {
-    @Test fun largeTtsBlockRetainsFrameAlignedTailInsteadOfBeingSilenced() {
+    @Test fun healthyLargeTtsBlocksPreserveEverySampleWithoutDiscontinuity() {
+        for (size in listOf(8192, 65536)) {
         val done = CountDownLatch(1)
-        val input = ByteArray(8192) { (it / 2).toByte() }
+        val input = ByteArray(size) { (it / 2).toByte() }
         var received: ByteArray? = null
         var discontinuity = false
         AudioIngressQueue(consume = { bytes, rate, channels, gap ->
@@ -17,10 +18,31 @@ class AudioIngressQueueTest {
             assertEquals(1, channels)
             received = bytes; discontinuity = gap; done.countDown()
         }, clock = { 0L }).use { queue ->
-            assertTrue(queue.offer(input, input.size, 16000, 1))
+            assertTrue(queue.offer(input, input.size, 16000, 1, speech = true))
             assertTrue(done.await(3, TimeUnit.SECONDS))
-            assertTrue(discontinuity)
-            assertArrayEquals(input.copyOfRange(1792, 8192), received)
+            assertFalse(discontinuity)
+            assertArrayEquals(input, received)
+        }
+        }
+    }
+
+    @Test fun speechSurvivesMediaAgeLimitWhileConsumerIsBusy() {
+        val clock = AtomicLong()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val done = CountDownLatch(1)
+        AudioIngressQueue(consume = { bytes, _, _, gap ->
+            if (bytes[0].toInt() == 1) { entered.countDown(); release.await(3, TimeUnit.SECONDS) }
+            else { assertFalse(gap); done.countDown() }
+        }, clock = clock::get).use { queue ->
+            try {
+                queue.offer(ByteArray(4) { 1 }, 4, 48000, 2)
+                assertTrue(entered.await(3, TimeUnit.SECONDS))
+                queue.offer(ByteArray(8192) { 2 }, 8192, 16000, 1, speech = true)
+                clock.set(500_000_000)
+                release.countDown()
+                assertTrue(done.await(3, TimeUnit.SECONDS))
+            } finally { release.countDown() }
         }
     }
 
