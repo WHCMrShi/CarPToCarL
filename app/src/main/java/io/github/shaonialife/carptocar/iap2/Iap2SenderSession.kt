@@ -1046,7 +1046,7 @@ class Iap2SenderSession(
 
     private var nowPlayingSubscribed = false
     private var nowPlayingPumpStarted = false
-    private val artworkSender = Iap2ArtworkSender(log = log)
+    private val artworkSender = Iap2ArtworkSender(log = { log(it.replaceFirst("ARTWORK:", "ARTWORK: BT")) })
     @Volatile private var artworkField: Int? = null
     private val nowPlayingDispatcher = NowPlayingDispatcher(
         alive = { channel.isAlive },
@@ -1080,7 +1080,7 @@ class Iap2SenderSession(
             Iap2MessageIds.START_NOW_PLAYING_UPDATES -> {
                 artworkField = Iap2ArtworkSender.requestedField(frame.body)
                 artworkSender.reset()
-                log("ARTWORK: 蓝牙订阅字段=$artworkField 文件会话=${channel.supportsFileTransfer()}")
+                log("ARTWORK: BT subscription field=$artworkField ${channel.artworkDiagnostics()} bodyBytes=${frame.body.size}")
                 nowPlayingSubscribed = true
                 // 不在握手中抢发媒体信息；保活起步会重推最终订阅状态。
                 if (nowPlayingPumpStarted) nowPlayingDispatcher.subscribe()

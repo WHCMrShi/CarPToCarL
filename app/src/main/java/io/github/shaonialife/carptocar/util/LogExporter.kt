@@ -98,9 +98,9 @@ object LogExporter {
             val fileLog = DebugFileLog.read(context, currentSessionOnly = scope == Scope.CURRENT_SESSION)
             if (!fileLog.isNullOrBlank()) {
                 if (scope == Scope.CURRENT_SESSION) {
-                    appendLine("（仅本次进程启动之后的日志；需要历史请点「导出全部」）")
+                    appendLine("（本进程：早期关键诊断 + 最近关键诊断 + 有限容量主日志；分段可能重复，中段可能已轮转）")
                 } else {
-                    appendLine("（全部文件日志；文件最多 2MB，超出时系统只保留最近一段）")
+                    appendLine("（本进程独立关键诊断 + 全部现存主日志；主日志约 2MB，超过容量会轮转）")
                 }
                 append(fileLog)
                 if (!fileLog.endsWith('\n')) appendLine()

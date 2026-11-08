@@ -1558,6 +1558,7 @@ object SessionController {
      * 幂等：已有会话时 BT 组件的 start() 自行短路，不会双开。
      */
     fun startConnection(context: Context) {
+        appendLog("CONNECT-DIAG: start requested running=${isSessionRunning()} phase=$phaseHint; default media=48k PCM")
         pendingCtrlInvite.begin()
         connectCancelled = false
         // 新一轮 = 新的一致性审计：清空上一轮的问题清单，并把输出口接到本控制器的
@@ -1624,6 +1625,7 @@ object SessionController {
 
     /** 「断开连接」（可在任意 Activity 实例上调用——操作的是真管线对象）。 */
     fun disconnect(context: Context) {
+        appendLog("CONNECT-DIAG: final-disconnect requested phase=$phaseHint; will stop CarLife and retire network resources")
         val hadProjection = CarPlayService.mediaProjection != null
         // 用户终态：解冻恢复不得再自动把会话拉起来
         sessionWanted = false
@@ -1696,6 +1698,7 @@ object SessionController {
 
     /** 会话结束/新周期开始前彻底退役上一代会话（旧管线泄漏会累积编码器/虚拟显示器，最终 dequeueBuffer -19）。 */
     fun retireSession() {
+        appendLog("CONNECT-DIAG: retire temporary media pipelines; clientPresent=${currentClient != null} videoPresent=${videoSender != null} audioPresent=${audioSender != null}")
         // 只断车机视频通道，不拆 CarLife 劫持本身：本方法在每轮配对起步也会执行，
         // 而 CarLife 连接与 GOP 缓存要跨会话保留（用户可以在会话中途才进「无线连接」）。
         CarLifeHijack.detach()
@@ -3900,6 +3903,7 @@ object SessionController {
         // 绑定完成后再并行做三件事：ctrl 广播针对新网络重注册、后台发现 _airplay._tcp、
         // 等车机 ctrl 邀请（车机已发现我们的权威信号）。
         val continueWithNetwork: (Boolean) -> Unit = proceed@{ bound ->
+            appendLog("CONNECT-DIAG: network-bound result=$bound source=$source inviteGeneration=$inviteGeneration")
             if (!bound) {
                 phaseHint = "手机不在车机热点——请到 WLAN 设置加入 ${endpoint.ssid}"
                 appendLog(">>> [$source] 手机当前不在该热点——请到 设置>WLAN 加入 \"${endpoint.ssid}\" 后断开重连")
@@ -3946,6 +3950,7 @@ object SessionController {
                     // 端点解析放在邀请之后：车机的 `_airplay._tcp` 常在受邀后才上线，
                     // 且这一步最长 3s——必须在后台线程做，不能占住网络回调线程。
                     var effectiveEndpoint = resolveEndpointHost(endpoint, source)
+                    appendLog("CONNECT-DIAG: endpoint resolved source=$source addressCount=${effectiveEndpoint.ipAddresses.size} port=${effectiveEndpoint.airPlayPort} cancelled=$connectCancelled")
                     // 交接流程起步期间车机补发的 0x4301（比 mDNS 合成更权威）在此并入。
                     pendingEndpointUpdate?.let { late ->
                         pendingEndpointUpdate = null

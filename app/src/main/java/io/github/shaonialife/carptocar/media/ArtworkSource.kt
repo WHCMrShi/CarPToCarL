@@ -97,6 +97,8 @@ internal class ArtworkRepository(
             }
             source.requested = true
             source.attempts++
+            val queuedAt = System.nanoTime() / 1_000_000
+            log("ARTWORK: load-queued revision=${source.revision} attempt=${source.attempts}")
             val control = ArtworkReadControl(readTimeoutMs, dispatchClose = { close ->
                 try { cleanup.execute(close) }
                 catch (_: java.util.concurrent.RejectedExecutionException) { close() }
@@ -104,14 +106,19 @@ internal class ArtworkRepository(
             val job = Job(control)
             jobs[source] = job
             job.future = executor.submit {
+                log("ARTWORK: load-start revision=${source.revision} queueMs=${System.nanoTime() / 1_000_000 - queuedAt}")
                 val result = try {
                     control.check()
-                    source.load(control)?.let { control.check(); EncodedArtwork.create(it) }
+                    val input = source.load(control)
+                    val encoded = input?.let { control.check(); EncodedArtwork.create(it) }
+                    log("ARTWORK: prepared-input revision=${source.revision} bytes=${input?.size ?: 0} accepted=${encoded != null} (JPEG/PNG, max 1MiB)")
+                    encoded
                 } catch (error: Exception) {
                     if (!control.cancelled && error !is InterruptedException) log("ARTWORK: 图片准备失败 - ${error.javaClass.simpleName}")
                     null
                 }
                 synchronized(lock) {
+                    log("ARTWORK: load-result revision=${source.revision} bytes=${result?.size ?: 0} cancelled=${control.cancelled} publish=${!closed && !control.cancelled && current?.trackId == source.trackId} elapsedMs=${System.nanoTime() / 1_000_000 - queuedAt}")
                     source.requested = false
                     source.completed = true
                     source.failedAt = System.nanoTime() / 1_000_000
@@ -124,6 +131,7 @@ internal class ArtworkRepository(
             job.timeout = cleanup.schedule({
                 synchronized(lock) {
                     if (jobs[source] === job) {
+                        log("ARTWORK: load-timeout revision=${source.revision} budgetMs=$readTimeoutMs")
                         cancelJob(job)
                         jobs.remove(source)
                         source.requested = false; source.completed = true

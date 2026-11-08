@@ -52,7 +52,9 @@ class Iap2LinkChannel(
         private set
 
     init {
+        engine.onFileDiagnostic = { log("ARTWORK: BT $it") }
         engine.onPeerSynchronizationAdopted = { sync ->
+            log("ARTWORK: BT peer-SYN maxLength=${sync.maxLength} maxOutgoing=${sync.maxOutgoing} retries=${sync.maxRetransmissions} sessions=${sync.sessions.joinToString { "${it.id}/k${it.kind}/v${it.version}" }}")
             log(
                 "LINK: 采纳对端会话表 maxOutgoing=${sync.maxOutgoing} maxLen=${sync.maxLength} " +
                     "sessions=" + sync.sessions.joinToString { "${it.id}/k${it.kind}/v${it.version}" },
@@ -115,6 +117,7 @@ class Iap2LinkChannel(
 
     @Volatile internal var onFileTransfer: ((ByteArray) -> Unit)? = null
     internal fun supportsFileTransfer(): Boolean = synchronized(lock) { engine.supportsArtworkTransfer }
+    internal fun artworkDiagnostics(): String = synchronized(lock) { engine.artworkDiagnostics() }
     internal fun fileTransferPayloadLimit(): Int = synchronized(lock) {
         (engine.peerSynchronization?.maxLength ?: 0) - Iap2LinkEngine.HEADER_BYTES - 1
     }

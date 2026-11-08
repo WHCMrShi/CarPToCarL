@@ -22,23 +22,35 @@ internal class Iap2ArtworkSender(
     private var activePlan: Plan? = null
     private var attribute: Int? = null
     private var awaitingImage = false
+    private val diagnosticStates = HashMap<String, String>()
+    private fun diagnostic(state: String) {
+        val category = state.substringBefore(' ')
+        if (diagnosticStates[category] == state) return
+        diagnosticStates[category] = state
+        log("ARTWORK: $state")
+    }
 
     class Plan internal constructor(val bytes: ByteArray, internal val generation: Long,
         internal val previousPhase: Int, internal val previousOffset: Int,
         internal val previousDeadline: Long, internal val cancelId: Int?)
 
     @Synchronized fun reset() {
+        diagnosticStates.clear()
         if (phase in listOf(Phase.START, Phase.DATA, Phase.SUCCESS)) cancel = transferId
         generation++; phase = Phase.NONE; content = null; image = null; transferId = null
         announced = false; activePlan = null; awaitingImage = false
     }
 
     @Synchronized fun decorate(value: CarPlayNowPlaying, requestedField: Int?, supported: Boolean): CarPlayNowPlaying {
-        if (!supported || requestedField == null) return value.copy(artworkSource = null, artworkTransferId = null)
+        if (!supported || requestedField == null) {
+            diagnostic("skip supported=$supported field=$requestedField sourcePresent=${value.artworkSource != null}")
+            return value.copy(artworkSource = null, artworkTransferId = null)
+        }
         attribute = requestedField
         val result = value.artworkSource?.request()
         val nextImage = result?.image
         awaitingImage = result != null && !result.complete
+        diagnostic("prepare revision=${value.artworkSource?.revision} sourcePresent=${value.artworkSource != null} complete=${result?.complete} imageBytes=${nextImage?.size ?: 0}")
         // 同曲新 metadata 仍在加载时保留已发布的封面；新曲来源必须先清旧图。
         val pendingSameTrack = result != null && !result.complete && nextImage == null &&
             value.artworkSource?.trackId == lastTrack && content != null
@@ -58,16 +70,26 @@ internal class Iap2ArtworkSender(
                     image = null
                 }
                 offset = 0; announced = false; phase = Phase.SETUP
+                log("ARTWORK: selected id=$transferId field=$attribute bytes=${image?.size ?: 0} empty=${image == null}")
             }
         }
         return value.copy(artworkSource = null, artworkTransferId = transferId, artworkAttributeId = attribute ?: 26)
     }
     private var lastTrack: String? = null
 
-    @Synchronized fun metadataSent(id: Int?) { if (id != null && id == transferId) announced = true }
+    @Synchronized fun metadataSent(id: Int?) {
+        if (id != null && id == transferId) {
+            if (!announced) log("ARTWORK: reference-queued id=$id field=$attribute (link queue accepted, not receiver display confirmation)")
+            announced = true
+        }
+    }
 
     @Synchronized fun response(bytes: ByteArray) {
-        if (bytes.size != 2 || (bytes[0].toInt() and 255) != transferId) return
+        if (bytes.size != 2 || (bytes[0].toInt() and 255) != transferId) {
+            diagnostic("ignored-response bytes=${bytes.size} id=${bytes.firstOrNull()?.toInt()?.and(255)} expected=$transferId")
+            return
+        }
+        diagnostic("response id=$transferId status=${bytes[1].toInt() and 255} phase=$phase sent=$offset/${image?.size ?: 0}")
         when (bytes[1].toInt() and 255) {
             1 -> if (phase == Phase.START) { phase = Phase.DATA; deadline = clock() + 30_000 }
             5, 6, 2 -> {
@@ -82,7 +104,7 @@ internal class Iap2ArtworkSender(
         if (activePlan != null) return null
         if (maxPayload < 12) { phase = Phase.DONE; image = null; cancel = null; awaitingImage = false; return null }
         if (phase in listOf(Phase.START, Phase.DATA, Phase.SUCCESS) && clock() >= deadline) {
-            log("ARTWORK: 封面传输超时，取消文件传输")
+            log("ARTWORK: 封面传输超时 id=$transferId phase=$phase sent=$offset/${image?.size ?: 0}，取消文件传输")
             cancel = transferId; phase = Phase.DONE; image = null
         }
         val oldPhase = phase; val oldOffset = offset; val oldDeadline = deadline
@@ -121,7 +143,12 @@ internal class Iap2ArtworkSender(
     @Synchronized fun submitted(plan: Plan, accepted: Boolean) {
         if (activePlan !== plan || generation != plan.generation) return
         activePlan = null
+        val type = plan.bytes[1].toInt() and 255
+        if (accepted && (type == 4 || type == 2 || type and 0x40 != 0)) {
+            log("ARTWORK: file-queued id=${plan.bytes[0].toInt() and 255} type=$type phase=$phase sent=$offset/${image?.size ?: 0} (await receiver response)")
+        }
         if (!accepted) {
+            diagnostic("file-backpressure id=$transferId phase=$phase; retry pending")
             if (plan.cancelId != null) cancel = plan.cancelId
             else { phase = Phase.entries[plan.previousPhase]; offset = plan.previousOffset; deadline = plan.previousDeadline }
         }

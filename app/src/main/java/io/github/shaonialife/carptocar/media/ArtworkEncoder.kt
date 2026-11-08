@@ -12,20 +12,23 @@ import java.net.HttpURLConnection
 /** 只在封面工作线程调用。保持支持的原始 JPEG/PNG；否则最多缩到 1024 并一次无损 PNG 编码。 */
 internal object ArtworkEncoder {
     fun load(metadata: MediaMetadata?, resolver: ContentResolver, control: ArtworkReadControl,
-        cache: ArtworkEncodingCache): ByteArray? {
+        cache: ArtworkEncodingCache, log: (String) -> Unit = {}): ByteArray? {
         control.check()
-        if (metadata == null) return null
+        if (metadata == null) { log("ARTWORK: source=none metadata-missing"); return null }
         val direct = metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_ART)
         if (direct != null) {
-            if (direct.isRecycled) return null
+            if (direct.isRecycled) { log("ARTWORK: source=bitmap rejected=recycled"); return null }
+            log("ARTWORK: source=bitmap width=${direct.width} height=${direct.height}")
             return cache.bitmap(direct, direct.generationId, sameContent = { previous, generation ->
                 val old = previous as? Bitmap
                 old != null && !old.isRecycled && old.generationId == generation && direct.sameAs(old)
             }) { control.check(); encode(direct) }
         }
         val uri = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI)
-            ?: metadata.getString(MediaMetadata.METADATA_KEY_ART_URI) ?: return null
+            ?: metadata.getString(MediaMetadata.METADATA_KEY_ART_URI)
+            ?: run { log("ARTWORK: source=none no-bitmap-or-uri"); return null }
+        log("ARTWORK: source=uri scheme=${Uri.parse(uri).scheme} (URI value omitted)")
         val connection = if (uri.startsWith("https://") || uri.startsWith("http://"))
             (java.net.URL(uri).openConnection() as HttpURLConnection).apply { connectTimeout = 3000; readTimeout = 3000 }
             else null

@@ -56,8 +56,12 @@ object DebugFileLog {
     ): String? =
         runCatching {
             if (!writer.flush()) return@runCatching null
-            val text = File(context.filesDir, "main_debug.log").readText(Charsets.UTF_8)
-            if (currentSessionOnly) currentSessionSlice(text) else text
+            val file = File(context.filesDir, "main_debug.log")
+            val text = file.readText(Charsets.UTF_8)
+            val main = if (currentSessionOnly) currentSessionSlice(text) else text
+            val diagnostics = runCatching { DiagnosticLogArchive.read(file) }
+                .getOrElse { "\nLOG: 独立诊断读取失败 ${it.javaClass.simpleName}\n" }
+            diagnostics + "\n===== 主日志（容量有限，前部可能已轮转）=====\n" + main
         }.getOrNull()
 
     /**

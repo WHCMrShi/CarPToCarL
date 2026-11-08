@@ -7,6 +7,28 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class Iap2ArtworkSenderTest {
+    @Test fun diagnosticsDistinguishGateFromTransferAndDoNotRepeatEveryTick() {
+        val logs = mutableListOf<String>()
+        val sender = Iap2ArtworkSender(log = { logs += it })
+        repeat(100) { sender.decorate(song, 26, false) }
+        assertEquals(1, logs.size)
+        assertTrue(logs.single().contains("skip supported=false"))
+        ArtworkRepository().use { repo ->
+            val value = loaded(repo)
+            val id = start(sender, value)
+            while (sender.pending()) {
+                val plan = sender.poll(1024) ?: break
+                sender.submitted(plan, true)
+                if (plan.bytes[1].toInt() and 0x40 != 0) break
+            }
+            sender.response(byteArrayOf(id.toByte(), 5))
+            assertTrue(logs.any { it.contains("reference-queued") })
+            assertTrue(logs.any { it.contains("file-queued") && it.contains("type=4") })
+            assertTrue(logs.any { it.contains("status=1") })
+            assertTrue(logs.any { it.contains("status=5") })
+            assertFalse(sender.pending())
+        }
+    }
     private val song = CarPlayNowPlaying("song", "artist", "album", 180000, 1, 1000, appName = "player")
     private fun image(size: Int) = ByteArray(size) { it.toByte() }.also {
         it[0] = 0xff.toByte(); it[1] = 0xd8.toByte(); it[2] = 0xff.toByte()

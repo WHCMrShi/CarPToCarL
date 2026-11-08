@@ -320,10 +320,15 @@ class AirPlayClient(
     }
 
     fun runPairing(windowMillis: Long = PAIRING_WINDOW_MILLIS): PairVerifyClient.ControlKeys? {
+        val started = SystemClock.elapsedRealtime()
+        log("CONNECT-DIAG: client=${System.identityHashCode(this)} pairing-start budgetMs=$windowMillis addressCount=${endpoint.ipAddresses.size} port=${endpoint.airPlayPort}")
         pairingInProgress = true
         try {
-            return runPairingLoop(windowMillis)
+            val result = runPairingLoop(windowMillis)
+            log("CONNECT-DIAG: client=${System.identityHashCode(this)} pairing-result keysPresent=${result != null} unsupported=$pairingUnsupported")
+            return result
         } finally {
+            log("CONNECT-DIAG: client=${System.identityHashCode(this)} pairing-exit elapsedMs=${SystemClock.elapsedRealtime() - started} cancelled=$cancelled unsupported=$pairingUnsupported")
             pairingInProgress = false
         }
     }
@@ -763,6 +768,7 @@ class AirPlayClient(
     private fun isSessionAlive(): Boolean = socket?.isClosed == false
 
     fun close() = synchronized(closeLock) {
+        log("CONNECT-DIAG: client=${System.identityHashCode(this)} close pairing=$pairingInProgress disposed=$disposed cancelled=$cancelled pending=${pendingResponses.size} eventSocket=${eventCommandSocket != null} iapLinkPresent=${iapLink != null}")
         val inFlight = pendingResponses.isNotEmpty()
         val closing = synchronized(connectionLock) {
             lifecycleGeneration++
@@ -1004,6 +1010,7 @@ class AirPlayClient(
      * 清单对照 catplay（真车验证的发送端，含 viewAreas/uiContext 等视频必需项）。
      */
     fun runSetup(): SetupInfo? {
+        log("CONNECT-DIAG: client=${System.identityHashCode(this)} setup-start encrypted=${cipher != null} cancelled=$cancelled disposed=$disposed")
         // 计时端口：catplay 真车实现始终绑定真实 UDP timing server 通告给车机
         // （媒体时钟同步源）；timingPort=0 曾是我们的屏幕流 400 头号嫌疑。
         val timingPort = synchronized(connectionLock) {

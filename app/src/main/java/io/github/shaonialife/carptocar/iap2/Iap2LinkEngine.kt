@@ -386,6 +386,20 @@ class Iap2LinkEngine(
     val supportsArtworkTransfer: Boolean get() = fileTransferSessionId != null && declaredMaxOutgoing >= 2 &&
         (peerSynchronization?.maxLength ?: 0) >= HEADER_BYTES + 1 + 12
 
+    internal fun artworkDiagnostics(): String {
+        val sync = peerSynchronization
+        val reason = when {
+            sync == null -> "no-peer-SYN"
+            fileTransferSessionId == null -> "no-unique-kind1-v2-session"
+            declaredMaxOutgoing < 2 -> "window-too-small"
+            sync.maxLength < HEADER_BYTES + 1 + 12 -> "payload-too-small"
+            else -> "enabled"
+        }
+        return "gate=$reason fileSession=$fileTransferSessionId window=$declaredMaxOutgoing maxLength=${sync?.maxLength} " +
+            "sessions=${sync?.sessions?.joinToString { "${it.id}/k${it.kind}/v${it.version}" }}"
+    }
+    internal var onFileDiagnostic: ((String) -> Unit)? = null
+
     fun sendFileTransfer(bytes: ByteArray, nowMillis: Long): Boolean {
         if (!supportsArtworkTransfer) return false
         val sessionId = fileTransferSessionId ?: return false
@@ -396,6 +410,9 @@ class Iap2LinkEngine(
         // 给控制消息留一格窗口；封面最多一个未确认链路包，不压入无界积压队列。
         if (lastFileSequence != null || outstanding >= (declaredMaxOutgoing - 1).coerceAtLeast(1)) return false
         sentSequence = nextSequence(sentSequence)
+        if (bytes.size >= 2 && (bytes[1].toInt() == 4 || bytes[1].toInt() and 0x40 != 0)) {
+            onFileDiagnostic?.invoke("file-link-send session=$sessionId seq=$sentSequence bytes=${bytes.size} outstanding=$outstanding")
+        }
         writePacket(bytes, sentSequence, CONTROL_ACKNOWLEDGEMENT, sessionId)
         if (peer.maxRetransmissions > 0) {
             lastFileSequence = sentSequence
@@ -647,6 +664,7 @@ class Iap2LinkEngine(
                 ?: unacknowledged.minByOrNull { sequenceDistance(it.sequence, acknowledgement) }
                 ?: return
         target.retransmissions += 1
+        if (target.sessionId != null) onFileDiagnostic?.invoke("file-link-EAK session=${target.sessionId} seq=${target.sequence} retry=${target.retransmissions}")
         if (target.retransmissions > maxRetransmissions) {
             die("packet ${target.sequence} not acknowledged")
             return
@@ -661,7 +679,16 @@ class Iap2LinkEngine(
         nowMillis: Long,
     ) {
         completeNegotiationIfPending(nowMillis)
-        lastFileSequence?.let { if (sequenceDistance(it, acknowledgement) !in 1..declaredMaxOutgoing) lastFileSequence = null }
+        lastFileSequence?.let { sequence ->
+            if (sequenceDistance(sequence, acknowledgement) !in 1..declaredMaxOutgoing) {
+                val packet = unacknowledged.firstOrNull { it.sequence == sequence }
+                if (packet != null && packet.payload.size >= 2 &&
+                    (packet.payload[1].toInt() == 4 || packet.payload[1].toInt() and 0x40 != 0)) {
+                    onFileDiagnostic?.invoke("file-link-ack seq=$sequence ack=$acknowledgement (not file SUCCESS)")
+                }
+                lastFileSequence = null
+            }
+        }
         lastSentAcknowledged = acknowledgement
         val window = (peerSynchronization?.maxOutgoing ?: maxOutgoing) + ACK_SLACK
         unacknowledged.removeAll { sequenceDistance(it.sequence, acknowledgement) !in 1..window }
@@ -726,6 +753,7 @@ class Iap2LinkEngine(
         val next = unacknowledged.minByOrNull { it.deadlineMillis } ?: return
         next.deadlineMillis = nowMillis + retransmissionDelayMillis()
         next.retransmissions += 1
+        if (next.sessionId != null) onFileDiagnostic?.invoke("file-link-RTO session=${next.sessionId} seq=${next.sequence} retry=${next.retransmissions}")
         if (next.retransmissions > effectiveMaxRetransmissions()) {
             die("packet ${next.sequence} not acknowledged")
             return

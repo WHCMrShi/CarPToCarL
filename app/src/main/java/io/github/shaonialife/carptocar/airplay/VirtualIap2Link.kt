@@ -79,7 +79,7 @@ class VirtualIap2Link(
     private var frameCount = 0
     private var started = false
     private val nowPlayingUpdates = NowPlayingUpdates()
-    private val artworkSender = Iap2ArtworkSender(clock = nowMillis, log = log)
+    private val artworkSender = Iap2ArtworkSender(clock = nowMillis, log = { log(it.replaceFirst("ARTWORK:", "ARTWORK: WiFi")) })
     private var artworkField: Int? = null
     private val nowPlayingPending = java.util.concurrent.atomic.AtomicBoolean()
     private var lastNowPlayingPollMs: Long? = null
@@ -174,6 +174,13 @@ class VirtualIap2Link(
         get() = synchronized(lock) { !closed && engine.state == Iap2LinkEngine.State.NORMAL && mfiFinished }
 
     init {
+        engine.onFileDiagnostic = { log("ARTWORK: WiFi $it") }
+        engine.onPeerSynchronizationAdopted = { sync ->
+            log("ARTWORK: WiFi peer-SYN maxLength=${sync.maxLength} maxOutgoing=${sync.maxOutgoing} retries=${sync.maxRetransmissions} sessions=${sync.sessions.joinToString { "${it.id}/k${it.kind}/v${it.version}" }}")
+        }
+        engine.onUnknownSessionData = { session, size ->
+            log("ARTWORK: WiFi unknown-session id=$session bytes=$size (engine samples first 5)")
+        }
         engine.onSynchronizationEchoSent = { pendingEchoFlush = true }
         pacer = Thread(
             {
@@ -765,7 +772,7 @@ class VirtualIap2Link(
                 if (!mib3) return
                 artworkField = Iap2ArtworkSender.requestedField(frame.body)
                 artworkSender.reset()
-                log("ARTWORK: WiFi 订阅字段=$artworkField 文件会话=${engine.fileTransferSessionId}")
+                log("ARTWORK: WiFi subscription field=$artworkField ${engine.artworkDiagnostics()} bodyBytes=${frame.body.size}")
                 nowPlayingUpdates.subscribe()
                 val nowPlaying = nowPlayingProvider?.invoke()?.let { artworkSender.decorate(it, artworkField, engine.supportsArtworkTransfer) }
                 if (nowPlaying != null) {

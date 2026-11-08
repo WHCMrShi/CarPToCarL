@@ -105,6 +105,7 @@ class MediaListenerService : NotificationListenerService() {
     /** 封面位图缓存（键不变时复用同一实例，保证 NowPlaying 的 equals 判稳）。 */
     private var cachedArt: android.graphics.Bitmap? = null
     private val artworkRepository = ArtworkRepository { line -> VirtualLauncher.logSink?.invoke(line) }
+    private var lastArtworkDiagnostic: String? = null
     private val artworkEncodingCache = ArtworkEncodingCache()
     private var artworkRevision = 0L
     private var artworkTrack = ""
@@ -177,6 +178,10 @@ class MediaListenerService : NotificationListenerService() {
         // 保存活跃会话控制器：供车机媒体键直投（transportControls）使用，
         // 不依赖 AudioManager 焦点路由（避免被 CarPToCarL 自身 AudioTrack 抢占）。
         MediaSessionsState.activeController = picked
+        if (picked == null && lastArtworkDiagnostic != "no-active-controller") {
+            lastArtworkDiagnostic = "no-active-controller"
+            VirtualLauncher.logSink?.invoke("ARTWORK: metadata no-active-controller")
+        }
         val now =
             picked?.let { controller ->
                 val meta = controller.metadata
@@ -195,10 +200,16 @@ class MediaListenerService : NotificationListenerService() {
                 if (stableTrack != artworkTrack) { artworkIncarnation++; artworkTrack = stableTrack; artworkRevision++ }
                 if (uri != artworkUri) { artworkUri = uri; artworkRevision++ }
                 val trackId = "$artworkIncarnation:$stableTrack"
+                val diagnostic = "track=$artworkIncarnation revision=$artworkRevision pkg=${controller.packageName} " +
+                    "albumArt=${meta?.containsKey(MediaMetadata.METADATA_KEY_ALBUM_ART)} art=${meta?.containsKey(MediaMetadata.METADATA_KEY_ART)} uriPresent=${!uri.isNullOrBlank()}"
+                if (diagnostic != lastArtworkDiagnostic) {
+                    lastArtworkDiagnostic = diagnostic
+                    VirtualLauncher.logSink?.invoke("ARTWORK: metadata $diagnostic")
+                }
                 // 元数据快照/应用 Context 可安全供后台读取，不捕获 Service 供任务长期持有。
                 val resolver = applicationContext.contentResolver
                 val artworkSource = artworkRepository.cancellableSource(trackId, artworkRevision, resourceKey = uri) { control ->
-                    ArtworkEncoder.load(meta, resolver, control, artworkEncodingCache)
+                    ArtworkEncoder.load(meta, resolver, control, artworkEncodingCache) { line -> VirtualLauncher.logSink?.invoke(line) }
                 }
                 MediaSessionsState.NowPlaying(
                     title = title,
