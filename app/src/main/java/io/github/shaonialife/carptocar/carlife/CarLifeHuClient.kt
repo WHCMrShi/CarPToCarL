@@ -460,10 +460,13 @@ class CarLifeHuClient(
     /** 连接并开始握手。阻塞不超过 [connectTimeoutMs] × 端口数，需在后台线程调用。 */
     fun start(): Boolean = start { true }
 
-    internal fun start(keepStarting: () -> Boolean): Boolean {
+    @Volatile internal var controlConnected = false
+        private set
+
+    internal fun start(quietWhenUnavailable: Boolean = false, keepStarting: () -> Boolean): Boolean {
         if (!keepStarting()) return false
         if (running.get()) return true
-        log("CARLIFE: 连接本机车机端口 $host …")
+        controlConnected = false
         for (port in PORTS) {
             if (!keepStarting()) { closeAll(); return false }
             val socket = Socket()
@@ -471,11 +474,18 @@ class CarLifeHuClient(
             try {
                 socket.tcpNoDelay = true
                 socket.connect(InetSocketAddress(host, port), connectTimeoutMs)
+                if (port == CarLifeProtocol.PORT_CMD) {
+                    controlConnected = true
+                    log("CARLIFE: 控制端口已连接，直接用于版本握手（无探测连接）")
+                }
                 if (!keepStarting()) { closeAll(); return false }
             } catch (error: Exception) {
                 sockets.remove(port, socket)
-                log("CARLIFE: 端口 $port 连接失败 - ${error.message}")
+                if (port != CarLifeProtocol.PORT_CMD || !quietWhenUnavailable) {
+                    log("CARLIFE: 端口 $port 连接失败 - ${error.message}")
+                }
                 runCatching { socket.close() }
+                if (port == CarLifeProtocol.PORT_CMD) { closeAll(); return false }
             }
         }
         val cmd = sockets[CarLifeProtocol.PORT_CMD]
@@ -586,9 +596,10 @@ class CarLifeHuClient(
     // ---- 握手 ----
 
     private fun sendVersionNegotiation(): Boolean {
-        val deadline = System.currentTimeMillis() + 15_000
-        while (running.get() && !versionMatched && System.currentTimeMillis() < deadline) {
-            send(CarLifeProtocol.HU_PROTOCOL_VERSION, CarLifeProtocol.protocolVersion())
+        val startedAt = android.os.SystemClock.uptimeMillis()
+        val deadline = startedAt + 15_000
+        while (running.get() && !versionMatched && android.os.SystemClock.uptimeMillis() < deadline) {
+            if (!send(CarLifeProtocol.HU_PROTOCOL_VERSION, CarLifeProtocol.protocolVersion())) break
             var waited = 0
             while (waited < 1500 && !versionMatched && running.get()) {
                 Thread.sleep(100)
@@ -596,7 +607,9 @@ class CarLifeHuClient(
             }
         }
         if (!versionMatched) {
-            log("CARLIFE: 15s 内未收到版本匹配，放弃本次连接")
+            val elapsed = android.os.SystemClock.uptimeMillis() - startedAt
+            val reason = if (running.get()) "version-timeout" else "channel-closed-or-cancelled"
+            log("CARLIFE: 版本握手失败 reason=$reason elapsedMs=$elapsed；参见此前通道关闭日志")
             stop()
             return false
         }

@@ -744,25 +744,12 @@ object CarLifeHijack {
     private fun workerLoop(scope: ConnectionResources) {
         var announcedWait = false
         while (running.get() && !scope.isClosed) {
-            // 2026-10-25 回滚：**不再自动拉起** CarLife 引擎。
-            // 自动拉起（bindService / startForegroundService / CarlifeActivity）实测能让
-            // 引擎起来并监听 7240，但拿不到荣耀的画面源——引擎只会把「荣耀车联 Powered by
-            // MagicOS」欢迎页反复编码送过来（恒定 ~10KB 静止帧），车机侧表现为
-            // 「连接成功但长时间没画面」。真实画面必须由荣耀车联自己创建虚拟屏后才有，
-            // 所以改回：用户手动打开 CarLife+ 点「无线连接」，本线程只负责守候并接管。
-            if (!portListening(CarLifeProtocol.PORT_CMD)) {
-                hasVideo = false
-                if (!announcedWait) {
-                    announcedWait = true
-                    logSink?.invoke(
-                        "CARLIFE: 7240 未监听，等待本机 CarLife 引擎启动" +
-                            "（请在手机端打开 CarLife+ 并点「无线连接」，端口一开立即接管）",
-                    )
-                }
-                sleep(1500)
-                continue
+            // A successful control connection is the real session, never a throwaway probe.
+            // Engine launch still requires the user to enter CarLife+ wireless connection.
+            if (!announcedWait) {
+                announcedWait = true
+                logSink?.invoke("CARLIFE: 等待本机引擎；请打开 CarLife+ 的无线连接（接管线程不会主动启动应用）")
             }
-            announcedWait = false
             val sink: CarLifeAudioSink
             val naviSink: CarLifeAudioSink
             synchronized(this) {
@@ -825,7 +812,7 @@ object CarLifeHijack {
             )
             val cleanup = AutoCloseable { hu.stop() }
             val connected = try {
-                scope.own(cleanup) && hu.start { running.get() && !scope.isClosed }
+                scope.own(cleanup) && hu.start(quietWhenUnavailable = true) { running.get() && !scope.isClosed }
             } catch (error: Exception) {
                 hu.stop()
                 if (error is InterruptedException) Thread.currentThread().interrupt()
@@ -837,6 +824,7 @@ object CarLifeHijack {
                 else { resetTouchState(); client = hu; true }
             }
             if (adopted) {
+                announcedWait = false
                 // SETUP 先于 client 创建的边界（requestedW/H 已缓存车机画布）：把它回放为
                 // 「申请值」，让引擎尝试按车机画布编码；确认值（videoWidth）仍由引擎回显，
                 // 不受影响。
@@ -855,8 +843,8 @@ object CarLifeHijack {
                     startSourceRestartWatchdog(hu)
                 }
                 logSink?.invoke("CARLIFE: 劫持成功，已接管本机 CarLife 码流（等待连接车机）")
-            } else if (!scope.isClosed) {
-                logSink?.invoke("CARLIFE: 握手失败，2 秒后重试（确认 CarLife 停在「正在连接」）")
+            } else if (!scope.isClosed && hu.controlConnected) {
+                logSink?.invoke("CARLIFE: 握手失败，1500ms 后重试（确认 CarLife 停在「正在连接」）")
             }
             // 保持连接直到断开或停止
             while (running.get() && !scope.isClosed && hu.isRunning) {
@@ -1449,15 +1437,6 @@ object CarLifeHijack {
 
     /** 「音频被丢弃」提示的限频（毫秒）。 */
     private const val AUDIO_DROP_LOG_MS = 10_000L
-
-    private fun portListening(port: Int): Boolean = try {
-        Socket().use { socket ->
-            socket.connect(InetSocketAddress("127.0.0.1", port), 800)
-            true
-        }
-    } catch (error: Exception) {
-        false
-    }
 
     private fun sleep(ms: Long) {
         try {
