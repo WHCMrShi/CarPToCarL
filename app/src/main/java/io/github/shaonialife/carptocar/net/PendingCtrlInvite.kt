@@ -35,6 +35,12 @@ internal class PendingCtrlInvite(
         return true
     }
 
+    @Synchronized fun invalidate(expectedGeneration: Long): Boolean {
+        if (!active || generation != expectedGeneration) return false
+        invitedAt = null
+        return true
+    }
+
     /** 返回本轮有效邀请的年龄；无邀请、过期和旧轮次均返回 null。 */
     @Synchronized
     fun consume(expectedGeneration: Long): Long? {

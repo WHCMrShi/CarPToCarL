@@ -1246,6 +1246,11 @@ object SessionController {
             onCtrlInviteWhileStreaming(receiverId)
             return
         }
+        if (sessionStarting.get() && currentClient?.controlConnectionAlive == true) {
+            pendingCtrlInvite.invalidate(inviteGeneration)
+            appendLog("CONNECT-DIAG: fresh ctrl invite delivered to live attempt; not cached for a later retry")
+            return
+        }
         // 所有非推流态邀请统一记账，等待窗口不再依赖无有效期的累计计数。
         if (!pendingCtrlInvite.record(inviteGeneration)) return
         val endpoint = lastGoodEndpoint
@@ -1510,6 +1515,10 @@ object SessionController {
                 CarPlayServiceBrowser(
                     context,
                     log = { line -> appendLog(line) },
+                    onEndpointLost = {
+                        pendingCtrlInvite.currentGeneration()?.let { pendingCtrlInvite.invalidate(it) }
+                        appendLog("CONNECT-DIAG: receiver service lost; cached endpoint and pending invitation invalidated; live stream unchanged")
+                    },
                     accept = { info ->
                         // 手机双归属（连车机热点 + 自己开热点共享给电脑）时 mDNS 会跨网
                         // 发现电脑的 AirPlay 接收器（macOS 自带）——2026-10-11 实测把

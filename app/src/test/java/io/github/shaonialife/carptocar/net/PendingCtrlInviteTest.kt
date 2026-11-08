@@ -10,6 +10,26 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 class PendingCtrlInviteTest {
+    @Test fun lostServiceInvalidatesOldInviteButKeepsNewInvitationUsable() {
+        val invite = PendingCtrlInvite({ 100L })
+        invite.begin()
+        val current = invite.currentGeneration()!!
+        invite.record(current)
+        assertTrue(invite.invalidate(current))
+        assertNull(invite.consume(current))
+        invite.record(current)
+        assertEquals(0L, invite.consume(current))
+    }
+    @Test fun oldUserGenerationCannotInvalidateNewUsersInvite() {
+        val invite = PendingCtrlInvite({ 100L })
+        invite.begin()
+        val old = invite.currentGeneration()!!
+        invite.end(); invite.begin()
+        val current = invite.currentGeneration()!!
+        invite.record(current)
+        assertFalse(invite.invalidate(old))
+        assertEquals(0L, invite.consume(current))
+    }
     @Test fun earlyInviteSurvivesEndpointHandoffAndIsConsumedOnlyOnce() {
         val now = AtomicLong(0)
         val invite = PendingCtrlInvite(now::get)

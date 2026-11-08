@@ -16,6 +16,7 @@ class CarPlayServiceBrowser(
     /** 结果验收：只缓存/上报真正的车机端点（手机双归属时 mDNS 会混入其它 AirPlay 设备）。 */
     private val accept: (NsdServiceInfo) -> Boolean = { true },
     private val onEndpoint: (NsdServiceInfo) -> Unit = {},
+    private val onEndpointLost: () -> Unit = {},
 ) {
     companion object {
         const val AIRPLAY_TYPE = "_airplay._tcp"
@@ -43,9 +44,11 @@ class CarPlayServiceBrowser(
      */
     @Volatile
     private var resolved: NsdServiceInfo? = null
+    private val epochs = DiscoveryEpoch()
 
     /** 新会话开始时清掉上一轮缓存（车机可能换了地址/端口）。 */
     fun resetCache() {
+        epochs.reset()
         resolved = null
     }
 
@@ -127,12 +130,21 @@ class CarPlayServiceBrowser(
 
             override fun onServiceLost(serviceInfo: NsdServiceInfo) {
                 log("$TAG: 服务消失 ${serviceInfo.serviceName}")
+                // Serialize cache removal with resolve publication.
+                synchronized(epochs) {
+                    epochs.lost(serviceInfo.serviceName)
+                    if (resolved?.serviceName == serviceInfo.serviceName) {
+                        resolved = null
+                        onEndpointLost()
+                    }
+                }
             }
         }
 
     private fun resolveWithRetry(
         serviceInfo: NsdServiceInfo,
         attempts: Int,
+        lease: DiscoveryEpoch.Lease = epochs.found(serviceInfo.serviceName),
     ) {
         val listener =
             object : NsdManager.ResolveListener {
@@ -143,7 +155,7 @@ class CarPlayServiceBrowser(
                     if (errorCode == NsdManager.FAILURE_ALREADY_ACTIVE && attempts > 1) {
                         Thread {
                             Thread.sleep(200)
-                            resolveWithRetry(info, attempts - 1)
+                            resolveWithRetry(info, attempts - 1, lease)
                         }.start()
                     } else {
                         log("$TAG: 解析失败 ${info.serviceName} code=$errorCode")
@@ -165,7 +177,12 @@ class CarPlayServiceBrowser(
                     val accepted = accept(info)
                     log("$TAG: OK ${info.serviceName} -> $host:${info.port}${if (accepted) "" else "（非车机，忽略）"}")
                     if (txt.isNotEmpty()) log("$TAG: TXT $txt")
-                    if (accepted) resolved = info
+                    if (!epochs.publish(lease) {
+                        if (accepted) resolved = info
+                    }) {
+                        log("$TAG: ignored stale resolve ${info.serviceName}")
+                        return
+                    }
                     onEndpoint(info)
                 }
             }
