@@ -726,7 +726,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 var answered = false
                 // 取消（返回键/点外部/被 cancelConnecting 联动关闭）= null，流程据此中止；
-                // 「打开 WLAN」除了回调 false，还要把用户送到系统 WLAN 页手动连。
+                // Navigation belongs to the caller: negative may mean cancel/keep/wait.
                 val dialog =
                     DarkMessageDialog.show(
                         activity = this,
@@ -736,11 +736,7 @@ class MainActivity : AppCompatActivity() {
                             listOf(
                                 DarkMessageDialog.Action(spec.negative) {
                                     answered = true
-                                    runCatching {
-                                        startActivity(
-                                            android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS),
-                                        )
-                                    }
+                                    log("CONNECT-DIAG: wifi-dialog choice=negative title=${spec.title}")
                                     onChoice(false)
                                 },
                                 DarkMessageDialog.Action(
@@ -748,6 +744,7 @@ class MainActivity : AppCompatActivity() {
                                     DarkMessageDialog.Emphasis.PRIMARY,
                                 ) {
                                     answered = true
+                                    log("CONNECT-DIAG: wifi-dialog choice=positive title=${spec.title}")
                                     onChoice(true)
                                 },
                             ),
