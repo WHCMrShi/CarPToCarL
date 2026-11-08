@@ -2549,7 +2549,7 @@ object SessionController {
     ): Boolean {
         val connector = wifiConnector ?: return false
         appendLog("PROBE #$attempt: 在 \"$ssid\" 里找车机 _airplay._tcp（最多等 ${PROBE_TIMEOUT_MS / 1000}s）")
-        val bound = connector.bindCurrentWifiBlocking(4_000L) { connectCancelled }
+        val bound = connector.bindCurrentWifiBlocking(4_000L, ssid) { connectCancelled }
         if (bound == null) {
             appendLog("PROBE #$attempt: 绑定当前 WiFi 失败——跳过本轮探测（蓝牙保活不受影响）")
             return false
@@ -5069,7 +5069,7 @@ object SessionController {
                             // 这里再给建议通道一个短窗口：真连上了就直接绑，省掉弹窗。
                             val bySuggestion =
                                 if (connector != null && !connectCancelled) {
-                                    connector.bindCurrentWifiBlocking(SUGGESTION_JOIN_WAIT_MS) { connectCancelled }
+                                    connector.bindCurrentWifiBlocking(SUGGESTION_JOIN_WAIT_MS, wifiConfig.ssid) { connectCancelled }
                                 } else {
                                     null
                                 }

@@ -452,6 +452,7 @@ class WifiCarPlayConnector(
      */
     fun bindCurrentWifiBlocking(
         timeoutMillis: Long,
+        expectedSsid: String? = null,
         isCancelled: () -> Boolean = { false },
     ): Network? {
         release()
@@ -463,18 +464,32 @@ class WifiCarPlayConnector(
                 .build()
         val latch = CountDownLatch(1)
         val result = AtomicReference<Network?>(null)
+        val lease = WifiNetworkLease<Network>()
         val newCallback =
             object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
+                    if (callback.get() !== this) return
+                    val observedSsid = networkSsid(network)
+                    if (expectedSsid != null && observedSsid != null && expectedSsid != observedSsid) {
+                        log("WIFI: fallback rejected network=$network reason=ssid-mismatch")
+                        return
+                    }
+                    if (!lease.accept(network)) {
+                        log("WIFI: fallback ignored replacement network=$network; requires a new vehicle request")
+                        return
+                    }
                     val bound = connectivityManager.bindProcessToNetwork(network)
-                    boundNetwork.set(network)
-                    result.set(network)
+                    if (bound) {
+                        boundNetwork.set(network)
+                        result.set(network)
+                    }
+                    log("WIFI: fallback selected network=$network identity=${if (observedSsid != null) "ssid-visible" else "ssid-unavailable"} bound=$bound; lease pinned")
                     log("WiFi: 建议网络已生效——绑定当前 WiFi（$network bindProcessToNetwork=$bound）")
                     latch.countDown()
                 }
 
                 override fun onLost(network: Network) {
-                    if (boundNetwork.compareAndSet(network, null)) {
+                    if (callback.get() === this && lease.lost(network) && boundNetwork.compareAndSet(network, null)) {
                         connectivityManager.bindProcessToNetwork(null)
                         onNetworkLost?.invoke("")
                     }
@@ -556,6 +571,20 @@ class WifiCarPlayConnector(
         return if (plain.isEmpty() || plain == UNKNOWN_SSID) null else plain
     }
 
+    private fun networkSsid(network: Network): String? {
+        val info = runCatching { connectivityManager.getNetworkCapabilities(network)?.transportInfo as? WifiInfo }.getOrNull()
+        plainSsid(info?.ssid)?.let { return it }
+        // Legacy connectionInfo can only identify this callback when there is a single WiFi.
+        val wifiNetworks = runCatching {
+            connectivityManager.allNetworks.filter {
+                connectivityManager.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+            }
+        }.getOrDefault(emptyList())
+        if (wifiNetworks != listOf(network)) return null
+        @Suppress("DEPRECATION")
+        return plainSsid(runCatching { wifiManager?.connectionInfo?.ssid }.getOrNull())
+    }
+
     /**
      * 目标热点已经在系统里连着时，**直接把它绑到本进程**——不发 specifier、不弹确认框。
      *
@@ -575,7 +604,7 @@ class WifiCarPlayConnector(
     ): Network? {
         if (!isAssociatedTo(ssid)) return null
         log("WiFi: 系统已连在 \"$ssid\" 上——直接复用，不再发 specifier（不弹确认框）")
-        return bindCurrentWifiBlocking(timeoutMillis, isCancelled)
+        return bindCurrentWifiBlocking(timeoutMillis, ssid, isCancelled)
     }
 
     fun release() {
