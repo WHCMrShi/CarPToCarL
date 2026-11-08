@@ -176,6 +176,7 @@ class VirtualIap2Link(
     init {
         engine.onFileDiagnostic = { log("ARTWORK: WiFi $it") }
         engine.onPeerSynchronizationAdopted = { sync ->
+            artworkSender.newLink()
             log("ARTWORK: WiFi peer-SYN maxLength=${sync.maxLength} maxOutgoing=${sync.maxOutgoing} retries=${sync.maxRetransmissions} sessions=${sync.sessions.joinToString { "${it.id}/k${it.kind}/v${it.version}" }}")
         }
         engine.onUnknownSessionData = { session, size ->

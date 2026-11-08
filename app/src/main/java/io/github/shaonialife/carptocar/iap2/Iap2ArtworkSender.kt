@@ -22,6 +22,9 @@ internal class Iap2ArtworkSender(
     private var activePlan: Plan? = null
     private var attribute: Int? = null
     private var awaitingImage = false
+    private var failed = false
+    private var retryCount = 0
+    private var retryContent: String? = null
     private val diagnosticStates = HashMap<String, String>()
     private fun diagnostic(state: String) {
         val category = state.substringBefore(' ')
@@ -34,11 +37,18 @@ internal class Iap2ArtworkSender(
         internal val previousPhase: Int, internal val previousOffset: Int,
         internal val previousDeadline: Long, internal val cancelId: Int?)
 
-    @Synchronized fun reset() {
+    @Synchronized fun reset(resetBudget: Boolean = true) {
         diagnosticStates.clear()
         if (phase in listOf(Phase.START, Phase.DATA, Phase.SUCCESS)) cancel = transferId
         generation++; phase = Phase.NONE; content = null; image = null; transferId = null
         announced = false; activePlan = null; awaitingImage = false
+        failed = false
+        if (resetBudget) { retryCount = 0; retryContent = null }
+    }
+
+    @Synchronized fun newLink() {
+        reset(); cancel = null; attribute = null; lastTrack = null
+        nextId = 129; allocated = 0
     }
 
     @Synchronized fun decorate(value: CarPlayNowPlaying, requestedField: Int?, supported: Boolean): CarPlayNowPlaying {
@@ -62,6 +72,8 @@ internal class Iap2ArtworkSender(
         if (!pendingImage) {
             val key = nextImage?.digest ?: "empty"
             if (key != content) {
+                if (retryContent != key) { retryCount = 0; retryContent = key }
+                failed = false
                 if (phase in listOf(Phase.START, Phase.DATA, Phase.SUCCESS)) cancel = transferId
                 generation++; activePlan = null; image = nextImage; content = key
                 // 0x80 始终代表空图；其余 ID 在本连接不复用，防接收端缓存旧图。
@@ -77,13 +89,20 @@ internal class Iap2ArtworkSender(
                 log("ARTWORK: selected id=$transferId field=$attribute bytes=${image?.size ?: 0} empty=${image == null}")
             }
         }
-        return value.copy(artworkSource = null, artworkTransferId = transferId, artworkAttributeId = attribute ?: 26)
+        return value.copy(artworkSource = null, artworkTransferId = transferId.takeUnless { failed && phase == Phase.DONE }, artworkAttributeId = attribute ?: 26)
     }
     private var lastTrack: String? = null
 
     /** 重复订阅只重申引用，不取消同一图片；字段改变才重建。 */
     @Synchronized fun subscribe(field: Int?) {
         if (attribute != field) reset()
+        else if (phase == Phase.DONE && failed) {
+            if (retryCount < 2) {
+                retryCount++
+                log("ARTWORK: retry-on-subscribe attempt=$retryCount previousId=$transferId")
+                reset(resetBudget = false)
+            } else diagnostic("retry-exhausted id=$transferId attempts=$retryCount")
+        }
         attribute = field
     }
 
@@ -103,6 +122,7 @@ internal class Iap2ArtworkSender(
         when (bytes[1].toInt() and 255) {
             1 -> if (phase == Phase.START) { phase = Phase.DATA; deadline = clock() + 30_000 }
             5, 6, 2 -> {
+                failed = bytes[1].toInt() != 5
                 if (bytes[1].toInt() != 5) log("ARTWORK: 接收端终止封面，状态=${bytes[1].toInt() and 255}")
                 phase = Phase.DONE; image = null
             }
@@ -117,6 +137,7 @@ internal class Iap2ArtworkSender(
         if (phase in listOf(Phase.START, Phase.DATA, Phase.SUCCESS) && clock() >= deadline) {
             log("ARTWORK: 封面传输超时 id=$transferId phase=$phase sent=$offset/${image?.size ?: 0}，取消文件传输")
             cancel = transferId; phase = Phase.DONE; image = null
+            failed = true
         }
         val oldPhase = phase; val oldOffset = offset; val oldDeadline = deadline
         val id = transferId

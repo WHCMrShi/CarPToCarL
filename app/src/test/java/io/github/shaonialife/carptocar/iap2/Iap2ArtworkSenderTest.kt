@@ -7,6 +7,46 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class Iap2ArtworkSenderTest {
+    @Test fun failedSameTrackCanRetryTwiceButSuccessDoesNotRetransmit() {
+        ArtworkRepository().use { repo ->
+            val sender = Iap2ArtworkSender()
+            val value = loaded(repo)
+            sender.subscribe(26)
+            var id = start(sender, value)
+            repeat(2) {
+                sender.response(byteArrayOf(id.toByte(), 6))
+                sender.subscribe(26)
+                val next = sender.decorate(value, 26, true).artworkTransferId!!
+                assertNotEquals(id, next)
+                sender.metadataSent(next); send(sender); id = next
+            }
+            sender.response(byteArrayOf(id.toByte(), 6))
+            sender.subscribe(26)
+            assertNull(sender.decorate(value, 26, true).artworkTransferId)
+            assertNull(sender.poll(1024))
+            sender.newLink(); sender.subscribe(26)
+            val fresh = start(sender, value)
+            sender.response(byteArrayOf(fresh.toByte(), 5))
+            sender.subscribe(26)
+            assertEquals(fresh, sender.decorate(value, 26, true).artworkTransferId)
+            assertNull(sender.poll(1024))
+        }
+    }
+
+    @Test fun timeoutRequiresExplicitSubscriptionAndAllocatesNewId() {
+        ArtworkRepository().use { repo ->
+            var now = 0L
+            val sender = Iap2ArtworkSender(clock = { now })
+            val value = loaded(repo)
+            sender.subscribe(26)
+            val id = start(sender, value)
+            now = 30001
+            assertArrayEquals(byteArrayOf(id.toByte(), 2), send(sender))
+            assertNull(sender.decorate(value, 26, true).artworkTransferId)
+            sender.subscribe(26)
+            assertNotEquals(id, sender.decorate(value, 26, true).artworkTransferId)
+        }
+    }
     @Test fun legacyReceiverGetsTenByteSetupAndExactImageBeforeSuccess() {
         ArtworkRepository().use { repo ->
             val value = loaded(repo)
