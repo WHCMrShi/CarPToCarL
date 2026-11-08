@@ -1140,8 +1140,9 @@ object SessionController {
                     BtProfiles.guardAudioProfiles(
                         appCtx,
                         addressProvider = {
-                            BtSessionGate.activePeerAddress
-                                ?: TargetDevicePrefs.get(appCtx)?.address
+                            io.github.shaonialife.carptocar.bt.BtDialPolicy.profileTarget(
+                                TargetDevicePrefs.get(appCtx)?.address, BtSessionGate.activePeerAddress,
+                            )
                         },
                         shouldStop = {
                             !sessionWanted ||
@@ -1686,6 +1687,7 @@ object SessionController {
             .stop(context)
         bluetoothServer?.stop()
         bluetoothClient?.stop()
+        BtSessionGate.activePeerAddress = null
         ctrlAdvertiser?.stop()
         endpointBrowser?.stop()
         wifiConnector?.release()
