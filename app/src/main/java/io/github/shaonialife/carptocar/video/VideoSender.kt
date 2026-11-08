@@ -102,6 +102,7 @@ class VideoSender(
     private val submissionLock = Any()
     private val realSourceSeen = AtomicBoolean(false)
     private val writeDeadline = WriteDeadline<Socket>()
+    @Volatile private var sourceQueue: VideoIngressQueue? = null
 
     private fun writeStream(kind: String, output: java.io.OutputStream, body: () -> Unit) {
         val waitingAt = System.nanoTime() / 1_000_000
@@ -303,6 +304,7 @@ class VideoSender(
         if (!recoveryOwner.compareAndSet(false, true)) return true
         reconnecting = true
         try {
+            sourceQueue?.reset()
             runCatching { socket?.close() }
             socket = null
             synchronized(writeLock) {
@@ -466,6 +468,8 @@ class VideoSender(
 
     fun stop() {
         running.set(false)
+        sourceQueue?.close()
+        sourceQueue = null
         passthrough = false
         runCatching { encoder?.stop() }
         runCatching { encoder?.release() }
@@ -514,6 +518,16 @@ class VideoSender(
         // 而 7 次「首帧 NAL=7,8,5」全部活过 7 秒，无一例外。
         // 预置 csd 仍然有用：它让首个 IDR 一到就能立刻发 config，只是不许放行 P 帧。
         beginAwaitingKeyFrame()
+        val queue = VideoIngressQueue(consume = { frame ->
+            synchronized(submissionLock) {
+                val current = sourceQueue
+                if (running.get() && current?.isCurrent(frame) == true &&
+                    submitH264Locked(frame.data, frame.idr, frame.timestamp)) {
+                    sourceDelivered?.invoke(frame.data.size)
+                }
+            }
+        }, log = log)
+        sourceQueue = queue
         log("VIDEO: 直通模式启动（外部 H.264，跳过重编码）${width}x$height")
         startWriteWatchdog()
         Thread({ passthroughKeepAliveLoop() }, "video-passthrough-ka").apply {
@@ -598,15 +612,18 @@ class VideoSender(
      * 计数器归零 = ChaCha/AES 的 nonce 复用，车机侧 AEAD 校验必然失败，
      * 表现就是「重连后一帧都过不去」。只有换整轮会话（新 SETUP）才允许归零。
      */
-    fun onSourceRestart(reason: String) = synchronized(submissionLock) {
-        if (!running.get()) return
-        configSent = false
-        beginAwaitingKeyFrame()
+    fun onSourceRestart(reason: String) {
+        sourceQueue?.reset()
+        synchronized(submissionLock) {
+            if (!running.get()) return
+            configSent = false
+            beginAwaitingKeyFrame()
         // 不在这里清 lastIdrNals：源重启到新源出首帧之间可能有几秒空窗，
         // 旧 IDR 还能继续喂保活，避免车机因「视频静默」拆掉整轮会话。
         // 一旦真的发出新 config，sendConfigFromNals 会立刻把它作废。
         lastFrameAtMs = android.os.SystemClock.uptimeMillis()
         log("VIDEO: 检测到 CarLife 源重启（$reason）——重置配置、等待新 IDR（帧计数保持，nonce 不复用）")
+        }
     }
 
     /**
@@ -667,6 +684,17 @@ class VideoSender(
     fun submitSourceH264(data: ByteArray, keyFrame: Boolean, sourceTimestampMs: Long? = null): Boolean {
         realSourceSeen.set(true)
         return submitH264(data, keyFrame, sourceTimestampMs)
+    }
+
+    @Volatile private var sourceDelivered: ((Int) -> Unit)? = null
+
+    /** True means admitted, never proof of delivery. Completion is reported by the sender worker. */
+    fun enqueueSourceH264(data: ByteArray, sourceTimestampMs: Long, delivered: (Int) -> Unit): Boolean {
+        if (!running.get()) return false
+        realSourceSeen.set(true)
+        sourceDelivered = delivered
+        val idr = splitAnnexB(data).any { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 5 }
+        return sourceQueue?.offer(data, idr, sourceTimestampMs) == true
     }
 
     private fun submitH264Locked(

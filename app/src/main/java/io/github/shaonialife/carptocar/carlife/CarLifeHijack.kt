@@ -1000,9 +1000,11 @@ object CarLifeHijack {
         val frame = ensureSpsPps(data)
         val target = sender
         if (target != null) {
-            if (target.submitSourceH264(frame, keyFrame, sourceTimestampMs)) {
-                noteDelivered(frame.size)
-                maybeReactivateScreen()
+            target.enqueueSourceH264(frame, sourceTimestampMs) { size ->
+                if (sender === target && running.get()) {
+                    noteDelivered(size)
+                    maybeReactivateScreen()
+                }
             }
             return
         }
