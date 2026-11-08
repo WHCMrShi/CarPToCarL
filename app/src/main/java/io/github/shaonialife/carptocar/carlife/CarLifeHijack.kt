@@ -615,7 +615,7 @@ object CarLifeHijack {
             var pushed = 0
             for ((frame, keyFrame) in pending) {
                 // 缓存帧本来就是旧的，不传 sourceTimestamp（避免被算成排队延迟）
-                if (videoSender.submitH264(frame, keyFrame)) {
+                if (videoSender.submitSourceH264(frame, keyFrame)) {
                     pushed++
                     noteDelivered(frame.size)
                 } else break
@@ -1000,7 +1000,7 @@ object CarLifeHijack {
         val frame = ensureSpsPps(data)
         val target = sender
         if (target != null) {
-            if (target.submitH264(frame, keyFrame, sourceTimestampMs)) {
+            if (target.submitSourceH264(frame, keyFrame, sourceTimestampMs)) {
                 noteDelivered(frame.size)
                 maybeReactivateScreen()
             }

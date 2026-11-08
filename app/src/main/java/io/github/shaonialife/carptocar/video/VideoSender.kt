@@ -51,26 +51,9 @@ class VideoSender(
      * RECORD 后 10.2s 整轮被 reset，视频/feedback/事件通道全都健康）。
      */
     private val keepAliveWithStats: Boolean = false,
-    /**
-     * **车机画布**（`/info displays[0].widthPixels×heightPixels`），VideoConfig 头声明的契约值。
-     *
-     * 真车（Audi/DELPHI、BMW/Cinemo 同款行为）按这个声明的尺寸建解码器与 surface，
-     * 与车机实际画布不符就解不出画面——会话、触摸、心跳全正常，日志一个错都没有。
-     * 所以它优先于任何「码流侧」的尺寸（引擎码流、SPS）。
-     *
-     * 不能省：直通模式下码流尺寸由 CarLife 引擎决定，引擎白名单会降档
-     * （申请 1412×654 实编 1280×720，2026-11-04 奥迪 3810 实测），
-     * 此时若照码流声明，车机拿到的是 720p 画布（≠ 1412×654）→ 整屏黑。
-     */
+    /** Display canvas fallback; decoder dimensions come from the current SPS. */
     private val canvasSize: (() -> Pair<Int, Int>)? = null,
-    /**
-     * 直通模式下**实时**取「引擎实际编码分辨率」的回调（返回 98311 上报的宽高）。
-     *
-     * 只在**没有画布信息**时兜底（`canvasSize` 为空/0）。含义是「码流实际多少」，
-     * 用来跟随引擎中途重建编码器；它不是画布契约——把它当声明值用，就会在
-     * 「画布 ≠ 码流」的车机上黑屏（2026-11-04 奥迪 3810 实测）。
-     * 每次发 config 都现取，就永远跟得上。
-     */
+    /** Negotiated source dimensions, used only when SPS parsing is unavailable. */
     private val liveSize: (() -> Pair<Int, Int>)? = null,
     /**
      * **显示视口**（VideoConfig 头 `params[3]` / `params[4]`，偏移 32/36 与 40/44）。
@@ -116,6 +99,8 @@ class VideoSender(
      * 只锁写字节仍会让加密时的计数器与落地顺序错位，接收端按到达顺序解密同样失败。
      */
     private val writeLock = Any()
+    private val submissionLock = Any()
+    private val realSourceSeen = AtomicBoolean(false)
     private var encoder: MediaCodec? = null
     private var inputSurface: Surface? = null
     private val running = AtomicBoolean(false)
@@ -476,6 +461,7 @@ class VideoSender(
         if (running.get()) return true
         if (!openDataPort()) return false
         passthrough = true
+        realSourceSeen.set(false)
         ended.set(false)
         running.set(true)
         lastKeepAliveAt = android.os.SystemClock.uptimeMillis()
@@ -510,8 +496,10 @@ class VideoSender(
                 if (reconnecting) { Thread.sleep(100); continue }
                 val output = socket?.getOutputStream()
                 if (output == null) { Thread.sleep(200); continue }
-                maybeSendKeepAlive(output)
-                maybeResendIdleFrame(output)
+                synchronized(submissionLock) {
+                    maybeSendKeepAlive(output)
+                    maybeResendIdleFrame(output)
+                }
                 Thread.sleep(200)
             } catch (_: InterruptedException) {
                 return
@@ -577,7 +565,7 @@ class VideoSender(
      * 计数器归零 = ChaCha/AES 的 nonce 复用，车机侧 AEAD 校验必然失败，
      * 表现就是「重连后一帧都过不去」。只有换整轮会话（新 SETUP）才允许归零。
      */
-    fun onSourceRestart(reason: String) {
+    fun onSourceRestart(reason: String) = synchronized(submissionLock) {
         if (!running.get()) return
         configSent = false
         beginAwaitingKeyFrame()
@@ -639,6 +627,19 @@ class VideoSender(
         data: ByteArray,
         keyFrame: Boolean,
         sourceTimestampMs: Long? = null,
+    ): Boolean = synchronized(submissionLock) {
+        submitH264Locked(data, keyFrame, sourceTimestampMs)
+    }
+
+    fun submitSourceH264(data: ByteArray, keyFrame: Boolean, sourceTimestampMs: Long? = null): Boolean {
+        realSourceSeen.set(true)
+        return submitH264(data, keyFrame, sourceTimestampMs)
+    }
+
+    private fun submitH264Locked(
+        data: ByteArray,
+        keyFrame: Boolean,
+        sourceTimestampMs: Long?,
     ): Boolean {
         if (!running.get()) return false
         val output = try {
@@ -761,7 +762,7 @@ class VideoSender(
      * 编码失败一律返回 false，调用方保留「仅日志」兜底即可。
      */
     fun pushNotice(lines: List<String>): Boolean {
-        if (!running.get() || !passthrough) return false
+        if (!running.get() || !passthrough || realSourceSeen.get()) return false
         val frame = runCatching { NoticeFrameEncoder.encodeNotice(width, height, lines) }
             .getOrElse { error ->
                 // 带异常类型与调用栈：MediaCodec 的厂商异常 message 经常语焉不详（如"10 > -2145395697"），
@@ -777,7 +778,9 @@ class VideoSender(
             }
         // SPS/PPS + IDR 拼成一段 AnnexB 一次提交：submitH264 会先发 VideoConfig 再发帧，
         // 并把这一帧记成 lastIdrNals，空闲保活会持续重发维持显示，直到 CarLife 接管。
-        val sent = submitH264(frame.csd + frame.idr, true)
+        val sent = synchronized(submissionLock) {
+            if (realSourceSeen.get()) false else submitH264Locked(frame.csd + frame.idr, true, null)
+        }
         if (sent) {
             log("VIDEO: 已向车机推送提示帧（${lines.firstOrNull() ?: ""}）")
         } else {
@@ -908,26 +911,7 @@ class VideoSender(
             log("VIDEO: csd 缺少 SPS/PPS（${nalUnits.size} 个 NAL），跳过 config")
             return
         }
-        // 记住这份 csd：源重启后新 IDR 若不带 SPS/PPS，靠它兜底重发 config。
-        cachedCsd = listOf(NalSlice(sps, 0, sps.size), NalSlice(pps, 0, pps.size))
-        sentSps = sps.copyOf()
-        // 换参数后旧 IDR 与新车机 avcC 不再匹配，不能再用它做空闲重发。
-        lastIdrNals = null
-        // 关键：VideoConfig 头部声明的宽高**必须与车机解码器画布一致**，否则真车
-        // （Audi/DELPHI）按声明画布建解码器后解不出画面（概率性黑屏，2026-10-19 实测）。
-        //
-        // 取值优先级：
-        //  **车机画布（[canvasSize]）> 引擎码流（[liveSize]）> 构造值 > SPS**，SPS 仅作诊断。
-        //
-        //  2026-10-25 曾改成「SPS 优先」（理由：声明应等于码流真实尺寸，否则拉伸），
-        //  真机复测出问题已回滚。原因：车机是**按 1412×654 建解码器与 surface** 的，
-        //  声明改成 SPS 的 1920×1080 后，车机侧画布/纹理对不上 → 画面异常。
-        //  结论：这条链路里「车机画布」才是契约，不能让码流尺寸反过来改写声明。
-        //
-        //  2026-11-04 奥迪 3810（1412×654 画布）黑屏复盘：直通模式把优先级做成
-        //  「引擎码流优先」，引擎白名单把 1412×654@60 降档成 1280×720@20，于是
-        //  声明变成 720p ≠ 画布 → 车机建了 720p 解码器 → 整屏黑；而会话、送帧、
-        //  写入耗时全部正常，测试台（WinPlay/DiPlay 不校验这几个头字段）照样有画面。
+        // Decode size and display viewport are independent.
         val canvas = canvasSize?.invoke()
         val live = liveSize?.invoke()
         val parsed = parseSpsDimensions(sps)
@@ -942,13 +926,10 @@ class VideoSender(
             describeSpsConfig(parsed, cfgWidth to cfgHeight, csdSource, spsSane) +
                 "\n  ↳ SPS ${sps.size}B=" + sps.joinToString(" ") { "%02x".format(it) },
         )
-        val streamSize = live?.takeIf { it.first > 0 && it.second > 0 } ?: (width to height)
-        if (!canvasMismatchLogged && (streamSize.first != cfgWidth || streamSize.second != cfgHeight)) {
+        if (!canvasMismatchLogged && canvas != null && canvas != (cfgWidth to cfgHeight)) {
             canvasMismatchLogged = true
             log(
-                "VIDEO: ⚠ 声明的画布 ${cfgWidth}x$cfgHeight 与码流 ${streamSize.first}x${streamSize.second} 不一致" +
-                    "——车机按画布建解码器，画面由车机侧缩放；若仍黑屏，说明这台车要求码流尺寸本身等于画布" +
-                    "（需让 CarLife 引擎按 ${cfgWidth}x$cfgHeight 编码）",
+                "VIDEO: decoder=${cfgWidth}x$cfgHeight viewport=${canvas.first}x${canvas.second}; independent fields",
             )
         }
         val avcc = ByteArrayOutputStream(8 + sps.size + pps.size)
@@ -974,7 +955,7 @@ class VideoSender(
         //  - params[0] 归零（catplay 的 config 不带 PTS；只有 VideoFrame 才写 params[0]）
         // 旧实现三项都没写——DiPlay/WinPlay 只读 body、不校验头，所以测试台一直正常，
         // 真车（Audi 4851）却黑屏（2026-10-19 用户日志）。
-        val viewArea = viewAreaSize?.invoke()?.takeIf { it.first > 0 && it.second > 0 }
+        val viewArea = (viewAreaSize?.invoke() ?: canvas)?.takeIf { it.first > 0 && it.second > 0 }
         val header = buildVideoConfigHeader(body.size, cfgWidth, cfgHeight, viewArea)
         synchronized(writeLock) {
             // config 帧是明文，但同样不能插在别的帧中间（否则接收端按半帧解析）。
@@ -1055,6 +1036,7 @@ class VideoSender(
             val profileIdc = readBits(8)
             readBits(8) // constraint_set0..5 + reserved
             readBits(8) // level_idc
+
             readUe() // seq_parameter_set_id
 
             // High 系列 profile 才有 chroma_format_idc / scaling matrix 扩展
@@ -1352,10 +1334,11 @@ class VideoSender(
             fallbackHeight: Int,
             sps: Pair<Int, Int>?,
         ): Pair<Int, Int> {
-            canvas?.let { if (it.first > 0 && it.second > 0) return it }
+            // Decoder dimensions describe this access unit, never the display canvas.
+            sps?.let { if (it.first in 320..4096 && it.second in 180..2304) return it }
             live?.let { if (it.first > 0 && it.second > 0) return it }
             if (fallbackWidth > 0 && fallbackHeight > 0) return fallbackWidth to fallbackHeight
-            sps?.let { if (it.first > 0 && it.second > 0) return it }
+            canvas?.let { if (it.first > 0 && it.second > 0) return it }
             return fallbackWidth to fallbackHeight
         }
 
