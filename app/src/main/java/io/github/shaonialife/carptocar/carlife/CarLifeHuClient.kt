@@ -82,7 +82,7 @@ class CarLifeHuClient(
      * 「用户确实在放东西」才值得重连——否则人只是停在桌面没开音乐，也会被当成故障反复
      * 重连，白白打断引擎的音频管道。默认 false = 永不因沉默重连（只有断链才重连）。
      */
-    private val audioExpected: () -> Boolean? = { null },
+    private val audioExpected: () -> CarLifePlaybackSnapshot? = { null },
     /** 上层持有跨 HU 会话的限次预算；默认不升级为整轮重建。 */
     private val requestZeroFrameRecovery: (Long, Boolean, Int) -> Boolean = { _, _, _ -> false },
     /** 收到手机推送的媒体信息（歌名/歌手/封面，0x10035）。 */
@@ -1475,12 +1475,14 @@ class CarLifeHuClient(
                         CarLifeProtocol.MUSIC_PKG_START -> {
                             log("CARLIFE: $label 引擎音频开始（0x30002）")
                             engineAudioActive = true
+                            playbackEvidence.engine(android.os.SystemClock.uptimeMillis(), true)
                             onAudioGate(true)
                         }
 
                         CarLifeProtocol.MUSIC_PKG_STOP -> {
                             log("CARLIFE: $label 引擎音频停止（0x30003）——来电或音频路由被切走")
                             engineAudioActive = false
+                            playbackEvidence.engine(android.os.SystemClock.uptimeMillis(), false)
                             onAudioGate(false)
                         }
 
@@ -1539,7 +1541,7 @@ class CarLifeHuClient(
     private fun superviseAudio(channel: AudioChannel) {
         val now = android.os.SystemClock.uptimeMillis()
         val external = audioExpected()
-        val expected = playbackEvidence.expected(now, external, engineAudioActive)
+        val expected = playbackEvidence.expected(now, external)
         channel.expectation.observe(now, expected)
         val socket = sockets[channel.port]
         if (socket == null || socket.isClosed || channel.dead) {

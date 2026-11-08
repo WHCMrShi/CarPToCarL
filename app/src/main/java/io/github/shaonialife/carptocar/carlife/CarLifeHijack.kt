@@ -234,10 +234,31 @@ object CarLifeHijack {
         val sink = audioSink
         if (sink != null) {
             // 明确 PAUSED 才截断；读不到会话（null）不截断——避免误丢引擎 PCM（本地模拟无声的坑）
-            val paused = MediaSessionsState.nowPlaying?.playing == false
+            val paused = scopedPlaybackSnapshot()?.let { it.matchesTrack && it.playing == false && it.changedAt > enginePlaybackAt } == true
             sink.setPlaybackPaused(paused)
         }
     }
+
+    @Volatile private var enginePlaybackAt = Long.MIN_VALUE
+
+    private fun scopedPlaybackSnapshot(): CarLifePlaybackSnapshot? = runCatching {
+        if (!MediaSessionsState.accessGranted || sender?.isRunning != true) return null
+        val controller = MediaSessionsState.activeController ?: return null
+        val info = latestMediaInfo
+        val title = controller.metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
+        val matches = info != null && info.song.isNotBlank() && info.song.trim().equals(title?.trim(), ignoreCase = true)
+        val state = controller.playbackState
+        val playing = when (state?.state) {
+            android.media.session.PlaybackState.STATE_PLAYING -> true
+            android.media.session.PlaybackState.STATE_PAUSED, android.media.session.PlaybackState.STATE_STOPPED -> false
+            else -> null
+        }
+        val now = android.os.SystemClock.uptimeMillis()
+        val changed = state?.lastPositionUpdateTime?.takeIf { it > 0 }?.let {
+            now - (android.os.SystemClock.elapsedRealtime() - it).coerceAtLeast(0)
+        } ?: Long.MIN_VALUE
+        CarLifePlaybackSnapshot(playing, now, changed, matches, controller.packageName)
+    }.getOrNull()
 
     /** 会话日志出口（prewarm 时注入）。 */
     @Volatile
@@ -756,7 +777,8 @@ object CarLifeHijack {
             // 注意：nowPlaying == null（读不到媒体会话：未授权通知使用权 / 本地模拟无会话）
             // 时**不能**当作「暂停」来截断——那会误丢引擎仍在推的 PCM，导致本地模拟无声。
             // 读不到状态 = 不确定，宁可不截断（放行），交由引擎侧 STOP/DATA 自行决定。
-            sink.setPlaybackPaused(MediaSessionsState.nowPlaying?.playing == false)
+            enginePlaybackAt = Long.MIN_VALUE
+            sink.setPlaybackPaused(scopedPlaybackSnapshot()?.let { it.matchesTrack && it.playing == false } == true)
             val hu = CarLifeHuClient(
                 host = "127.0.0.1",
                 // routeAudio → sink.write → feedPcm 返回前已消费或复制；GOP 视频仍独立持有数组。
@@ -777,12 +799,7 @@ object CarLifeHijack {
                 onAudioGate = { active -> if (!scope.isClosed) onEngineAudioGate(active) },
                 // 音频沉默看门狗判据：音乐会话确实在播 = 此刻「应该」有声，
                 // 9240 却连续零 PCM 才是异常。读不到会话（null）时按「不确定」放行不重连。
-                audioExpected = {
-                    val systemMusic = runCatching {
-                        appContext?.getSystemService(android.media.AudioManager::class.java)?.isMusicActive == true
-                    }.getOrDefault(false)
-                    CarLifePlaybackEvidence.external(MediaSessionsState.nowPlaying?.playing, systemMusic)
-                },
+                audioExpected = ::scopedPlaybackSnapshot,
                 onMediaInfo = { info -> if (!scope.isClosed) onMediaInfo(info) },
                 requestedFps = requestedFps,
                 initialConnectType = connectType,
@@ -893,10 +910,12 @@ object CarLifeHijack {
      * 万一信号语义判断有误，音频照常转发，不会因为猜错把声音弄没。
      */
     private fun onEngineAudioGate(active: Boolean) {
+        enginePlaybackAt = android.os.SystemClock.uptimeMillis()
         if (!active) {
             logSink?.invoke("CARLIFE: 引擎音频已停（来电 / 音频路由被切走）——车机侧这一段会静音")
             return
         }
+        audioSink?.setPlaybackPaused(false)
         val audio = io.github.shaonialife.carptocar.SessionController.audioSender
         if (audio != null && audio.isRunning) {
             audio.resyncAnchor("引擎音频恢复")
