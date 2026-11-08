@@ -1581,6 +1581,7 @@ object SessionController {
      * 幂等：已有会话时 BT 组件的 start() 自行短路，不会双开。
      */
     fun startConnection(context: Context) {
+        io.github.shaonialife.carptocar.bt.CarIdleGuard.beginStartup(context)
         appendLog("CONNECT-DIAG: start requested running=${isSessionRunning()} phase=$phaseHint; default media=48k PCM")
         pendingCtrlInvite.begin()
         connectCancelled = false
@@ -1647,7 +1648,7 @@ object SessionController {
     }
 
     /** 「断开连接」（可在任意 Activity 实例上调用——操作的是真管线对象）。 */
-    fun disconnect(context: Context) {
+    fun disconnect(context: Context, manual: Boolean = true) {
         appendLog("CONNECT-DIAG: final-disconnect requested phase=$phaseHint; will stop CarLife and retire network resources")
         val hadProjection = CarPlayService.mediaProjection != null
         // 用户终态：解冻恢复不得再自动把会话拉起来
@@ -1661,7 +1662,7 @@ object SessionController {
         // 「已移除」之前它只重开旧会话、不启动 AirPlay。出站循环据此强制冷却
         // （见 BtSessionGate.REACTIVATE_COOLDOWN_MILLIS）——否则用户断开后立刻
         // 再点「启动连接」，就会稳稳落在「给热点凭据但不开 7000 端口」的那条路上。
-        BtSessionGate.noteManualStop()
+        if (manual) BtSessionGate.noteManualStop()
         // 用户终态同样作废排队中的自动重试——它醒来第一件事就是检查 sessionWanted，
         // 但先让令牌变一次，日志就能明确写出「用户已断开，本次重试作废」
         synchronized(connectRetryLock) {
@@ -1669,7 +1670,7 @@ object SessionController {
             connectRetryScheduled = false
             connectRetryAttempt = 0
         }
-        SessionTrace.sessionEnd("用户手动断开")
+        SessionTrace.sessionEnd(if (manual) "用户手动断开" else "离车或启动空等预算到期")
         pendingEndpointUpdate = null
         retireSession()
         CarLifeHijack.stop()
@@ -1691,9 +1692,9 @@ object SessionController {
         if (hadProjection) {
             // Android 14+：MediaProjection 与保活服务（mediaProjection FGS 类型）绑定，
             // 停服务会连带失效授权——下次连接需重新点「申请投屏权限」
-            appendLog("已手动断开并停止保活服务（常亮已恢复）；投屏授权已随服务停止失效，下次连接如需声音请重新申请")
+            appendLog("已断开并停止保活服务（常亮已恢复）；投屏授权已随服务停止失效，下次连接如需声音请重新申请")
         } else {
-            appendLog("已手动断开并停止保活服务（常亮已恢复）")
+            appendLog("已断开并停止保活服务（常亮已恢复）")
         }
     }
 

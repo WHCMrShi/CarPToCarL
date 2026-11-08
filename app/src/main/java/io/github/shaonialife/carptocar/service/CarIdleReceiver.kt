@@ -21,7 +21,7 @@ class CarIdleReceiver : BroadcastReceiver() {
         intent: Intent,
     ) {
         if (intent.action != CarIdleGuard.ACTION_IDLE_TIMEOUT) return
-        DebugFileLog.append(context, "IDLE: 30 秒计时到点，开始判定是否收摊")
+        DebugFileLog.append(context, "IDLE: 收到非精确闹钟，按实际截止时间判定是否收尾")
         CarIdleGuard.onTimeout(context)
     }
 }

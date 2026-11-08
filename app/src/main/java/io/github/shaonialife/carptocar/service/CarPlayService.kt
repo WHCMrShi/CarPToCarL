@@ -43,6 +43,7 @@ class CarPlayService : Service() {
     private val stateTick =
         object : Runnable {
             override fun run() {
+                if (CarIdleGuard.check(this@CarPlayService)) return
                 refreshNotification()
                 uiHandler.postDelayed(this, STATE_TICK_MS)
             }

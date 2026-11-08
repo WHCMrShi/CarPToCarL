@@ -90,7 +90,7 @@ class CarApproachReceiver : BroadcastReceiver() {
         CarIdleGuard.schedule(context)
         DebugFileLog.append(
             context,
-            "APPROACH: 车机蓝牙链路断开——30 秒内未回连将结束会话并退出进程（静默检测保留，下次靠近仍会拉起）",
+            "APPROACH: 目标车机蓝牙断开——30 秒内未回连且无画面将停止重试、释放保活资源（保留界面与静默检测）",
         )
     }
 

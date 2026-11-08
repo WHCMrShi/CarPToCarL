@@ -35,6 +35,9 @@ object CarIdlePolicy {
         UI_VISIBLE,
     }
 
+    /** 界面可见只保护界面，不应保护已经无用的重试与唤醒锁。 */
+    fun shouldStopConnections(verdict: Verdict): Boolean = verdict == Verdict.CLOSE || verdict == Verdict.UI_VISIBLE
+
     /**
      * @param aclConnected 目标车机的 ACL 链路当前是否连着（由广播维护，跨进程存活）
      * @param streaming 画面是否真的在往车机送

@@ -12,6 +12,16 @@ import org.junit.Test
  * 3. 用户正开着界面看 → 还是不退（人还在用，掐掉等于闪退）。
  */
 class CarIdlePolicyTest {
+    @Test
+    fun `界面可见仍停止连接而有蓝牙或画面时保留连接`() {
+        for (acl in listOf(false, true)) {
+            for (stream in listOf(false, true)) {
+                for (visible in listOf(false, true)) {
+                    assertEquals(!acl && !stream, CarIdlePolicy.shouldStopConnections(verdict(acl, stream, visible)))
+                }
+            }
+        }
+    }
     private fun verdict(
         aclConnected: Boolean = false,
         streaming: Boolean = false,
