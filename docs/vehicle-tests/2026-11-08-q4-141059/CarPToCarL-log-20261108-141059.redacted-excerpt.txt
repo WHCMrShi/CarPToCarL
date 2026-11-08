@@ -1,0 +1,191 @@
+2026-11-08 Q4 vehicle log: selected diagnostic evidence, NOT a full log
+Source filename: CarPToCarL-log-20261108-141059.txt
+Source SHA-256: 382D06343C9D2C519D7A92E82ACADCC1BE3BA6192796B7461946B6F4CCA7EEFC
+Build: schema=20261108-v3, before review-followup fixes
+Exact-line duplicates removed; timestamp order and original tie order retained.
+Only timing, protocol IDs, sizes, module state and selected connection outcomes retained.
+No raw payloads, credentials, addresses, SSIDs, device names, route names or media titles retained.
+Not suitable for byte-level replay.
+
+[14:00:35.908] CONNECT-DIAG: schema=20261108-v3 version=1.2.30-q4-debug sdk=36; export includes bounded early/recent diagnostics
+[14:00:40.231] CARLIFE: 媒体 音频通道断开 - Connection reset（看门狗会自动重连）
+[14:00:41.118] ARTWORK: BT peer-SYN maxLength=2048 maxOutgoing=5 retries=30 sessions=1/k0/v1, 2/k2/v1
+[14:00:41.242] HUD-DIAG: SUBSCRIBE id=0x18043 modules=[0,1] sent=true (TBT=0, assistant=1)
+[14:00:41.243] CARLIFE: 媒体 音频通道已重连（第 1 次断链重连）
+[14:00:41.269] HUD-DIAG: SUBSCRIBE_DONE id=0x10044 bytes=14 modules=[(0, 1), (1, 0)] parseError=none
+[14:00:41.922] HUD-DIAG: moduleStatus=[(2, 0), (8, 0)] (status namespace NAVI=2/EDOG=8)
+[14:00:42.246] HUD-DIAG: START id=0x18045 modules=[0] sent=true confirmed=true; no-reply fallback is attempted once only
+[14:00:44.242] MEDIA: 通知监听器未被系统绑定——已请求重绑（系统 API，无需 shell；同类提示 5 分钟一行）
+[14:01:00.377] MEDIA: ⚠ 通知使用权已授权但系统始终没绑定监听器——请到「设置 → 通知使用权」把本应用关掉再打开一次（车机歌名依赖它）
+[14:01:10.531] ARTWORK: BT peer-SYN maxLength=2048 maxOutgoing=5 retries=30 sessions=1/k0/v1, 2/k2/v1
+[14:01:11.514] HUD-DIAG: summary elapsedMs=30280 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:01:41.590] HUD-DIAG: summary elapsedMs=60352 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:01:45.757] ARTWORK: WiFi peer-SYN maxLength=2048 maxOutgoing=5 retries=30 sessions=1/k0/v2, 2/k1/v1, 3/k2/v1
+[14:02:11.787] HUD-DIAG: summary elapsedMs=90536 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:02:17.301] AUDIO-DIAG: windowMs=30084 realFeeds=0 udpPackets=2354 inputGapMaxMs=0 outputGapMaxMs=1411 sendMaxUs=968754 silenceSubmissions=2354 codec=PCM nextSeq=2354 nextSample=828608
+[14:02:41.867] HUD-DIAG: summary elapsedMs=120634 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:02:47.343] AUDIO-DIAG: windowMs=30042 realFeeds=0 udpPackets=3084 inputGapMaxMs=0 outputGapMaxMs=275 sendMaxUs=110352 silenceSubmissions=3084 codec=PCM nextSeq=5438 nextSample=1914176
+[14:03:03.775] CARLIFE: 控制通道断开 - Connection reset
+[14:03:10.509] HUD-DIAG: moduleStatus=[(2, 0), (8, 0)] (status namespace NAVI=2/EDOG=8)
+[14:03:10.916] HUD-DIAG: SUBSCRIBE id=0x18043 modules=[0,1] sent=true (TBT=0, assistant=1)
+[14:03:10.920] HUD-DIAG: SUBSCRIBE_DONE id=0x10044 bytes=14 modules=[(0, 1), (1, 0)] parseError=none
+[14:03:11.927] HUD-DIAG: START id=0x18045 modules=[0] sent=true confirmed=true; no-reply fallback is attempted once only
+[14:03:17.432] AUDIO-DIAG: windowMs=30081 realFeeds=0 udpPackets=2892 inputGapMaxMs=0 outputGapMaxMs=369 sendMaxUs=135539 silenceSubmissions=2892 codec=PCM nextSeq=8330 nextSample=2932160
+[14:03:20.059] CARLIFE: 媒体 音频格式宣告 48000Hz 2ch 16bit（channelConfig=2）
+[14:03:20.060] CARLIFE: 媒体 引擎音频开始（0x30002）
+[14:03:20.060] CARLIFE: 媒体 音频格式宣告 48000Hz 2ch 16bit（channelConfig=2）
+[14:03:25.150] CARLIFE: 音频直通 235 包 / 940KB / 1515kbps · 电平 96%（非零 98%）
+[14:03:30.180] CARLIFE: 音频直通 250 包 / 1000KB / 1628kbps · 电平 95%（非零 99%）
+[14:03:35.215] CARLIFE: 音频直通 236 包 / 944KB / 1535kbps · 电平 97%（非零 99%）
+[14:03:40.247] CARLIFE: 音频直通 236 包 / 944KB / 1536kbps · 电平 96%（非零 99%）
+[14:03:41.034] HUD-DIAG: summary elapsedMs=30120 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:03:45.287] CARLIFE: 音频直通 236 包 / 944KB / 1534kbps · 电平 89%（非零 99%）
+[14:03:47.127] ARTWORK: WiFi response id=128 status=1 phase=START sent=0/0
+[14:03:47.190] ARTWORK: prepared-input revision=2 bytes=329946 accepted=true (JPEG/PNG, max 1MiB)
+[14:03:47.190] ARTWORK: load-result revision=2 bytes=329946 cancelled=false publish=true elapsedMs=188
+[14:03:47.460] AUDIO-DIAG: windowMs=30035 realFeeds=1295 udpPackets=3872 inputGapMaxMs=298 outputGapMaxMs=585 sendMaxUs=585005 silenceSubmissions=107 codec=PCM nextSeq=12202 nextSample=4295104
+[14:03:47.631] ARTWORK: WiFi response id=129 status=1 phase=START sent=0/329946
+[14:03:50.303] CARLIFE: 音频直通 226 包 / 904KB / 1478kbps · 电平 81%（非零 99%）
+[14:03:55.309] CARLIFE: 音频直通 244 包 / 976KB / 1594kbps · 电平 85%（非零 99%）
+[14:04:00.345] CARLIFE: 音频直通 236 包 / 944KB / 1535kbps · 电平 71%（非零 99%）
+[14:04:05.290] CARLIFE: 控制通道断开 - Connection reset
+[14:04:05.290] CARLIFE: 媒体 音频通道断开 - Connection reset（看门狗会自动重连）
+[14:04:07.979] AUDIO-DIAG: windowMs=20518 realFeeds=835 udpPackets=2660 inputGapMaxMs=243 outputGapMaxMs=390 sendMaxUs=241274 silenceSubmissions=229 final=true codec=PCM
+[14:04:14.880] CARLIFE: 媒体 音频通道断开 - Connection reset（看门狗会自动重连）
+[14:04:15.886] HUD-DIAG: SUBSCRIBE id=0x18043 modules=[0,1] sent=true (TBT=0, assistant=1)
+[14:04:15.892] CARLIFE: 媒体 音频通道已重连（第 1 次断链重连）
+[14:04:15.893] HUD-DIAG: SUBSCRIBE_DONE id=0x10044 bytes=14 modules=[(0, 1), (1, 0)] parseError=none
+[14:04:16.895] HUD-DIAG: START id=0x18045 modules=[0] sent=true confirmed=true; no-reply fallback is attempted once only
+[14:04:22.338] CARLIFE: 媒体 音频格式宣告 48000Hz 2ch 16bit（channelConfig=2）
+[14:04:22.351] CARLIFE: 媒体 引擎音频开始（0x30002）
+[14:04:22.374] CARLIFE: 媒体 音频格式宣告 48000Hz 2ch 16bit（channelConfig=2）
+[14:04:31.183] ARTWORK: BT peer-SYN maxLength=2048 maxOutgoing=5 retries=30 sessions=1/k0/v1, 2/k2/v1
+[14:04:39.200] ARTWORK: WiFi peer-SYN maxLength=2048 maxOutgoing=5 retries=30 sessions=1/k0/v2, 2/k1/v1, 3/k2/v1
+[14:04:40.268] ARTWORK: WiFi response id=130 status=1 phase=START sent=0/329946
+[14:04:40.540] ARTWORK: WiFi response id=131 status=1 phase=START sent=0/329946
+[14:04:45.251] CARLIFE: 音频直通 237 包 / 948KB / 1542kbps · 电平 92%（非零 99%）
+[14:04:46.356] HUD-DIAG: summary elapsedMs=30470 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:04:50.287] CARLIFE: 音频直通 236 包 / 944KB / 1535kbps · 电平 90%（非零 99%）
+[14:04:55.289] CARLIFE: 音频直通 235 包 / 940KB / 1539kbps · 电平 92%（非零 99%）
+[14:05:00.312] CARLIFE: 音频直通 235 包 / 940KB / 1533kbps · 电平 91%（非零 99%）
+[14:05:05.312] CARLIFE: 音频直通 235 包 / 940KB / 1539kbps · 电平 95%（非零 99%）
+[14:05:10.252] AUDIO-DIAG: windowMs=30038 realFeeds=1409 udpPackets=4097 inputGapMaxMs=51 outputGapMaxMs=51 sendMaxUs=6853 silenceSubmissions=0 codec=PCM nextSeq=4097 nextSample=1442144
+[14:05:10.315] CARLIFE: 音频直通 234 包 / 936KB / 1532kbps · 电平 97%（非零 99%）
+[14:05:15.330] CARLIFE: 音频直通 235 包 / 940KB / 1535kbps · 电平 84%（非零 99%）
+[14:05:16.502] HUD-DIAG: summary elapsedMs=60620 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:05:20.365] CARLIFE: 音频直通 236 包 / 944KB / 1535kbps · 电平 91%（非零 99%）
+[14:05:25.475] CARLIFE: 音频直通 225 包 / 900KB / 1443kbps · 电平 77%（非零 99%）
+[14:05:30.486] CARLIFE: 音频直通 249 包 / 996KB / 1628kbps · 电平 83%（非零 99%）
+[14:05:35.513] CARLIFE: 音频直通 236 包 / 944KB / 1538kbps · 电平 91%（非零 99%）
+[14:05:37.589] ARTWORK: WiFi response id=131 status=5 phase=SUCCESS sent=329946/329946
+[14:05:40.253] AUDIO-DIAG: windowMs=30000 realFeeds=1407 udpPackets=4093 inputGapMaxMs=166 outputGapMaxMs=163 sendMaxUs=124823 silenceSubmissions=0 codec=PCM nextSeq=8190 nextSample=2882880
+[14:05:40.558] CARLIFE: 音频直通 236 包 / 944KB / 1533kbps · 电平 91%（非零 99%）
+[14:05:45.584] CARLIFE: 音频直通 236 包 / 944KB / 1538kbps · 电平 97%（非零 99%）
+[14:05:46.582] HUD-DIAG: summary elapsedMs=90700 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:05:50.585] CARLIFE: 音频直通 235 包 / 940KB / 1539kbps · 电平 80%（非零 99%）
+[14:05:53.535] ARTWORK: WiFi response id=128 status=1 phase=START sent=0/0
+[14:05:53.585] ARTWORK: prepared-input revision=4 bytes=466167 accepted=true (JPEG/PNG, max 1MiB)
+[14:05:53.586] ARTWORK: load-result revision=4 bytes=466167 cancelled=false publish=true elapsedMs=175
+[14:05:53.810] ARTWORK: WiFi response id=132 status=1 phase=START sent=0/466167
+[14:05:55.610] CARLIFE: 音频直通 235 包 / 940KB / 1532kbps · 电平 70%（非零 67%）
+[14:06:00.647] CARLIFE: 音频直通 236 包 / 944KB / 1535kbps · 电平 18%（非零 45%）
+[14:06:05.682] CARLIFE: 音频直通 236 包 / 944KB / 1535kbps · 电平 51%（非零 98%）
+[14:06:10.255] AUDIO-DIAG: windowMs=30002 realFeeds=1405 udpPackets=4088 inputGapMaxMs=58 outputGapMaxMs=71 sendMaxUs=7823 silenceSubmissions=0 codec=PCM nextSeq=12278 nextSample=4321856
+[14:06:10.711] CARLIFE: 音频直通 232 包 / 928KB / 1511kbps · 电平 49%（非零 99%）
+[14:06:15.747] CARLIFE: 音频直通 240 包 / 960KB / 1561kbps · 电平 50%（非零 99%）
+[14:06:16.676] HUD-DIAG: summary elapsedMs=120792 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:06:20.813] CARLIFE: 音频直通 213 包 / 852KB / 1378kbps · 电平 78%（非零 98%）
+[14:06:25.838] CARLIFE: 音频直通 259 包 / 1036KB / 1688kbps · 电平 75%（非零 99%）
+[14:06:30.852] CARLIFE: 音频直通 236 包 / 944KB / 1543kbps · 电平 100%（非零 98%）
+[14:06:35.885] CARLIFE: 音频直通 236 包 / 944KB / 1535kbps · 电平 51%（非零 99%）
+[14:06:40.282] AUDIO-DIAG: windowMs=30025 realFeeds=1408 udpPackets=4096 inputGapMaxMs=936 outputGapMaxMs=603 sendMaxUs=438086 silenceSubmissions=1 codec=PCM nextSeq=16374 nextSample=5763648
+[14:06:40.924] CARLIFE: 音频直通 236 包 / 944KB / 1534kbps · 电平 50%（非零 99%）
+[14:06:45.959] CARLIFE: 音频直通 236 包 / 944KB / 1535kbps · 电平 50%（非零 99%）
+[14:06:46.810] HUD-DIAG: summary elapsedMs=150929 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:06:50.958] CARLIFE: 音频直通 221 包 / 884KB / 1448kbps · 电平 50%（非零 99%）
+[14:06:55.986] CARLIFE: 音频直通 249 包 / 996KB / 1622kbps · 电平 100%（非零 98%）
+[14:06:59.412] ARTWORK: WiFi response id=128 status=1 phase=START sent=0/0
+[14:06:59.428] ARTWORK: prepared-input revision=6 bytes=596387 accepted=true (JPEG/PNG, max 1MiB)
+[14:06:59.429] ARTWORK: load-result revision=6 bytes=596387 cancelled=false publish=true elapsedMs=666
+[14:06:59.779] ARTWORK: WiFi response id=133 status=1 phase=START sent=0/596387
+[14:07:01.016] CARLIFE: 音频直通 236 包 / 944KB / 1537kbps · 电平 50%（非零 87%）
+[14:07:06.068] CARLIFE: 音频直通 236 包 / 944KB / 1531kbps · 电平 77%（非零 99%）
+[14:07:10.281] AUDIO-DIAG: windowMs=30000 realFeeds=1406 udpPackets=4090 inputGapMaxMs=280 outputGapMaxMs=262 sendMaxUs=256446 silenceSubmissions=0 codec=PCM nextSeq=20464 nextSample=7203328
+[14:07:11.068] CARLIFE: 音频直通 234 包 / 936KB / 1533kbps · 电平 100%（非零 99%）
+[14:07:16.077] CARLIFE: 音频直通 236 包 / 944KB / 1543kbps · 电平 79%（非零 99%）
+[14:07:16.939] HUD-DIAG: summary elapsedMs=181057 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:07:21.117] CARLIFE: 音频直通 236 包 / 944KB / 1534kbps · 电平 82%（非零 99%）
+[14:07:26.150] CARLIFE: 音频直通 236 包 / 944KB / 1536kbps · 电平 77%（非零 99%）
+[14:07:31.181] CARLIFE: 音频直通 236 包 / 944KB / 1537kbps · 电平 100%（非零 99%）
+[14:07:36.215] CARLIFE: 音频直通 236 包 / 944KB / 1535kbps · 电平 100%（非零 99%）
+[14:07:40.312] AUDIO-DIAG: windowMs=30031 realFeeds=1408 udpPackets=4096 inputGapMaxMs=134 outputGapMaxMs=134 sendMaxUs=13595 silenceSubmissions=0 codec=PCM nextSeq=24560 nextSample=8645120
+[14:07:41.216] CARLIFE: 音频直通 234 包 / 936KB / 1533kbps · 电平 90%（非零 99%）
+[14:07:46.245] CARLIFE: 音频直通 236 包 / 944KB / 1537kbps · 电平 54%（非零 99%）
+[14:07:47.010] HUD-DIAG: summary elapsedMs=211129 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:07:51.256] CARLIFE: 音频直通 234 包 / 936KB / 1530kbps · 电平 50%（非零 99%）
+[14:07:56.559] CARLIFE: 音频直通 215 包 / 860KB / 1351kbps · 电平 76%（非零 99%）
+[14:08:01.476] CARLIFE: 音频直通 265 包 / 1060KB / 1733kbps · 电平 75%（非零 72%）
+[14:08:03.765] CARLIFE: 媒体 引擎音频停止（0x30003）——来电或音频路由被切走
+[14:08:06.681] ARTWORK: WiFi response id=128 status=1 phase=START sent=0/0
+[14:08:06.775] ARTWORK: WiFi response id=128 status=5 phase=SUCCESS sent=0/0
+[14:08:06.891] ARTWORK: prepared-input revision=10 bytes=596387 accepted=true (JPEG/PNG, max 1MiB)
+[14:08:06.893] ARTWORK: load-result revision=10 bytes=596387 cancelled=false publish=true elapsedMs=732
+[14:08:07.138] ARTWORK: WiFi response id=134 status=1 phase=START sent=0/596387
+[14:08:07.805] CARLIFE: 媒体 音频格式宣告 48000Hz 2ch 16bit（channelConfig=2）
+[14:08:07.821] CARLIFE: 媒体 引擎音频开始（0x30002）
+[14:08:07.822] CARLIFE: 媒体 音频格式宣告 48000Hz 2ch 16bit（channelConfig=2）
+[14:08:08.144] CARLIFE: 音频直通 74 包 / 296KB / 363kbps · 电平 14%（非零 1%）
+[14:08:10.355] AUDIO-DIAG: windowMs=30042 realFeeds=1168 udpPackets=3890 inputGapMaxMs=5112 outputGapMaxMs=456 sendMaxUs=455682 silenceSubmissions=492 codec=PCM nextSeq=28450 nextSample=10014400
+[14:08:11.367] ARTWORK: prepared-input revision=12 bytes=635087 accepted=true (JPEG/PNG, max 1MiB)
+[14:08:11.367] ARTWORK: load-result revision=12 bytes=635087 cancelled=false publish=true elapsedMs=223
+[14:08:11.780] ARTWORK: WiFi response id=135 status=1 phase=START sent=0/635087
+[14:08:13.336] CARLIFE: 音频直通 208 包 / 832KB / 1314kbps · 电平 39%（非零 95%）
+[14:08:17.263] HUD-DIAG: summary elapsedMs=241383 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:08:18.337] CARLIFE: 音频直通 270 包 / 1080KB / 1766kbps · 电平 32%（非零 99%）
+[14:08:23.365] CARLIFE: 音频直通 236 包 / 944KB / 1538kbps · 电平 29%（非零 99%）
+[14:08:28.399] CARLIFE: 音频直通 236 包 / 944KB / 1536kbps · 电平 37%（非零 99%）
+[14:08:33.399] CARLIFE: 音频直通 234 包 / 936KB / 1533kbps · 电平 44%（非零 99%）
+[14:08:38.428] CARLIFE: 音频直通 236 包 / 944KB / 1538kbps · 电平 37%（非零 99%）
+[14:08:40.392] AUDIO-DIAG: windowMs=30036 realFeeds=1410 udpPackets=4108 inputGapMaxMs=1450 outputGapMaxMs=530 sendMaxUs=168325 silenceSubmissions=6 codec=PCM nextSeq=32558 nextSample=11460416
+[14:08:43.466] CARLIFE: 音频直通 236 包 / 944KB / 1535kbps · 电平 49%（非零 99%）
+[14:08:47.357] HUD-DIAG: summary elapsedMs=271476 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:08:48.497] CARLIFE: 音频直通 236 包 / 944KB / 1536kbps · 电平 50%（非零 99%）
+[14:08:53.537] CARLIFE: 音频直通 236 包 / 944KB / 1534kbps · 电平 50%（非零 99%）
+[14:08:58.567] CARLIFE: 音频直通 236 包 / 944KB / 1536kbps · 电平 48%（非零 99%）
+[14:09:03.600] CARLIFE: 音频直通 236 包 / 944KB / 1536kbps · 电平 50%（非零 99%）
+[14:09:08.643] CARLIFE: 音频直通 236 包 / 944KB / 1533kbps · 电平 50%（非零 99%）
+[14:09:10.392] AUDIO-DIAG: windowMs=30000 realFeeds=1406 udpPackets=4092 inputGapMaxMs=82 outputGapMaxMs=60 sendMaxUs=39172 silenceSubmissions=0 codec=PCM nextSeq=36650 nextSample=12900800
+[14:09:13.675] CARLIFE: 音频直通 236 包 / 944KB / 1536kbps · 电平 51%（非零 99%）
+[14:09:17.417] HUD-DIAG: summary elapsedMs=301536 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:09:18.704] CARLIFE: 音频直通 236 包 / 944KB / 1537kbps · 电平 52%（非零 99%）
+[14:09:23.739] CARLIFE: 音频直通 236 包 / 944KB / 1535kbps · 电平 51%（非零 97%）
+[14:09:24.827] ARTWORK: WiFi response id=128 status=1 phase=START sent=0/0
+[14:09:24.941] ARTWORK: WiFi response id=128 status=5 phase=SUCCESS sent=0/0
+[14:09:24.945] ARTWORK: prepared-input revision=14 bytes=385941 accepted=true (JPEG/PNG, max 1MiB)
+[14:09:24.947] ARTWORK: load-result revision=14 bytes=385941 cancelled=false publish=true elapsedMs=713
+[14:09:25.118] ARTWORK: WiFi response id=136 status=1 phase=START sent=0/385941
+[14:09:28.771] CARLIFE: 音频直通 236 包 / 944KB / 1536kbps · 电平 65%（非零 84%）
+[14:09:33.771] CARLIFE: 音频直通 235 包 / 940KB / 1540kbps · 电平 65%（非零 99%）
+[14:09:38.400] CARLIFE: 媒体 引擎音频停止（0x30003）——来电或音频路由被切走
+[14:09:40.460] AUDIO-DIAG: windowMs=30069 realFeeds=1165 udpPackets=3883 inputGapMaxMs=72 outputGapMaxMs=393 sendMaxUs=91440 silenceSubmissions=494 codec=PCM nextSeq=40533 nextSample=14267616
+[14:09:43.101] AUDIO-DIAG: windowMs=2641 realFeeds=0 udpPackets=248 inputGapMaxMs=0 outputGapMaxMs=174 sendMaxUs=58611 silenceSubmissions=249 final=true codec=PCM
+[14:09:43.125] VIDEO: 直通 keepAlive 中止 - Broken pipe
+[14:09:43.172] VIDEO: 直通送帧失败 - Connection reset
+[14:09:43.361] AIRPLAY: 控制通道关闭——唤醒 1 个待响应请求
+[14:09:43.901] CARLIFE: 实测帧率 26.5fps（5s 内 133 帧，声明 60）
+[14:09:47.540] HUD-DIAG: summary elapsedMs=331658 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:09:48.942] CARLIFE: 实测帧率 24.6fps（5s 内 124 帧，声明 60）
+[14:09:53.969] CARLIFE: 实测帧率 25.7fps（5s 内 129 帧，声明 60）
+[14:09:59.005] CARLIFE: 实测帧率 25.2fps（5s 内 127 帧，声明 60）
+[14:10:04.083] CARLIFE: 实测帧率 24.6fps（5s 内 125 帧，声明 60）
+[14:10:09.100] CARLIFE: 实测帧率 22.3fps（5s 内 112 帧，声明 60）
+[14:10:14.152] CARLIFE: 实测帧率 20.4fps（5s 内 103 帧，声明 60）
+[14:10:17.637] HUD-DIAG: summary elapsedMs=361755 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:10:19.251] CARLIFE: 实测帧率 25.5fps（5s 内 130 帧，声明 60）
+[14:10:24.314] CARLIFE: 实测帧率 23.6fps（5s 内 119 帧，声明 60）
+[14:10:29.371] CARLIFE: 实测帧率 23.6fps（5s 内 120 帧，声明 60）
+[14:10:34.449] CARLIFE: 实测帧率 14.4fps（5s 内 73 帧，声明 60）
+[14:10:39.472] CARLIFE: 实测帧率 27.7fps（5s 内 139 帧，声明 60）
+[14:10:44.505] CARLIFE: 实测帧率 26.6fps（5s 内 134 帧，声明 60）
+[14:10:48.128] HUD-DIAG: summary elapsedMs=392247 reply=true startAttempted=true nextTurnRx=0 assistantRx=0; zero packets does not prove lack of navigation support
+[14:10:49.556] CARLIFE: 实测帧率 14.9fps（5s 内 75 帧，声明 60）
