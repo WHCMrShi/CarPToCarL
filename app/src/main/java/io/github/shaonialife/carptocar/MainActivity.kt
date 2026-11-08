@@ -33,6 +33,7 @@ import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.DrawableCompat
 import io.github.shaonialife.carptocar.bt.AppUiPresence
+import io.github.shaonialife.carptocar.bt.BtCompatPrefs
 import io.github.shaonialife.carptocar.bt.BtProfiles
 import io.github.shaonialife.carptocar.bt.CarApproachPrefs
 import io.github.shaonialife.carptocar.bt.CarApproachReceiver
@@ -48,8 +49,6 @@ import io.github.shaonialife.carptocar.launcher.settings.DisplayPrefs
 import io.github.shaonialife.carptocar.legal.DisclaimerDialog
 import io.github.shaonialife.carptocar.legal.DisclaimerPrefs
 import io.github.shaonialife.carptocar.legal.needsDisclaimerAtLaunch
-import io.github.shaonialife.carptocar.mib3.Mib3ControlLink
-import io.github.shaonialife.carptocar.mib3.Mib3ControlPanel
 import io.github.shaonialife.carptocar.ui.DarkMessageDialog
 import io.github.shaonialife.carptocar.ui.PanelWindow
 import io.github.shaonialife.carptocar.ui.ScreenDimmer
@@ -171,7 +170,6 @@ class MainActivity : AppCompatActivity() {
     private var wifiJoinDialog: androidx.appcompat.app.AlertDialog? = null
 
     /** MIB3 控制链路的首页监听（onDestroy 摘掉，避免单例持有 Activity）。 */
-    private var mib3LinkListener: (() -> Unit)? = null
 
     private val consoleLock = Any()
     private val pendingConsole = io.github.shaonialife.carptocar.util.ConsoleLogBuffer()
@@ -981,6 +979,47 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // 兼容「只认苹果设备」的车机（默认关，2026-11-07）：宝马 iD6 在蓝牙设备列表里
+        // 直接给本机打「设备不支持 Apple CarPlay」，那句判定发生在 iAP2 之前——改报文没用，
+        // 它看的是发现层（EIR 里的 iPhone CarPlay UUID / SDP 服务），而 Android 应用层
+        // 写不了 EIR。这里能做的是多注册两条占位 SDP 记录，并让监听常开
+        // （先配对、后开 App 的那一瞥也能看到服务）。见 BtCompatPrefs。
+        val switchBtCompat =
+            findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.switchBtCompat)
+        val btCompatNote = findViewById<TextView>(R.id.btCompatNote)
+        fun renderBtCompatNote(checked: Boolean) {
+            btCompatNote.text =
+                if (checked) {
+                    "已开启：多声明两条 CarPlay 服务 + 蓝牙监听常开（对照日志 BT-PROBE 看车机有没有连占位记录）"
+                } else {
+                    "默认关闭。开启后多声明两条 CarPlay 服务，并让蓝牙监听常开（界面显示「不支持 Apple CarPlay」的车机可试）"
+                }
+        }
+        switchBtCompat.isChecked = BtCompatPrefs.enabled(this)
+        renderBtCompatNote(switchBtCompat.isChecked)
+        switchBtCompat.setOnCheckedChangeListener { _, checked ->
+            BtCompatPrefs.setEnabled(this, checked)
+            renderBtCompatNote(checked)
+            SessionController.applyBtCompat(checked, fromUser = true)
+            log(
+                "BT-PROBE: 兼容模式已${if (checked) "开启" else "关闭"}" +
+                    if (checked) {
+                        "——额外注册 CarPlay 占位 SDP 记录并保持监听常开"
+                    } else {
+                        "——占位记录已撤下（不影响已建立的控制链路）"
+                    },
+            )
+            if (checked &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                // 这里只申请权限，**不能**走 ensureBluetoothReady：它授权成功后会直接
+                // 发起整轮连接（pendingStartAfterBtPermission），而用户只是想开个开关。
+                // 授权后由兼容模式看门狗在 30 秒内把占位记录挂上。
+                permissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+        }
+
         // 本机蓝牙地址：Honor/MagicOS 等机型把 MAC 全面脱敏（连 adb shell 都读不到），
         // 而 WinPlay 系接收端按它做设备过滤——手填是唯一可行来源，存进 settings 偏好，
         // DeviceIdentity 会优先采用（影响 0x4300/0x4E0E、AirPlay SETUP 与 ctrl 广播 id）。
@@ -1094,8 +1133,6 @@ class MainActivity : AppCompatActivity() {
 
         // ---- 显示设置（原「显示」面板迁移至首页，2026-10-24） ----
         bindDisplayCard()
-        // ---- MIB3 车机控制入口（面板在弹窗里，见 mib3/Mib3ControlPanel） ----
-        bindMib3Card()
 
         // 常亮+暗幕：界面开关已移除，行为固定为「默认开启」，由会话起停驱动
         // （ScreenDimmer 由 VirtualLauncher.attach 在会话启动时挂载）。
@@ -1122,7 +1159,7 @@ class MainActivity : AppCompatActivity() {
 
         // 版本号走运行时读取：BuildConfig.VERSION_NAME 会被 Kotlin 折叠成字面量，
         // 改版本号后增量编译不重编本类时，日志会印上一版的号（1.2.13 踩过一次）。
-        log("CarPToCarL ${AppVersion.name(this)}（画面=本地劫持 CarLife · 音频=PCM 直通）就绪")
+        log("CarPToCarL ${AppVersion.nameWithTag(this)}（画面=本地劫持 CarLife · 音频=PCM 直通）就绪")
         log("真车：与车机蓝牙配对 + 手机加入车机热点 -> 点「启动连接」（自动主动连入车机）")
         log("测试台：两台手机蓝牙配对 -> 备用机跑 xcertplay 无线模式 -> 点「启动连接」等待回连")
         // 接收端（WinPlay 等）按真实蓝牙地址过滤设备：解析不到就等于注定 SETUP 403，
@@ -1594,37 +1631,6 @@ class MainActivity : AppCompatActivity() {
                 }
             },
         )
-    }
-
-    /**
-     * 「MIB3 车机控制」入口：一张只显示状态的卡 + 一个打开面板的按钮。
-     *
-     * 卡片不列任何控制按钮——那些写操作要「允许写入 + 逐个确认」，平铺在首页迟早
-     * 被误触（ACL 里 `/door`、`/window` 都是真能动的）。真正的界面在
-     * [Mib3ControlPanel]。
-     */
-    private fun bindMib3Card() {
-        val note = findViewById<TextView>(R.id.mib3Note)
-        val button = findViewById<TextView>(R.id.btnMib3Control)
-        fun render() {
-            val status = Mib3ControlLink.status()
-            note.text =
-                when (status.phase) {
-                    Mib3ControlLink.Phase.READY -> "EA 隧道已建立 · 可读写（接口未实车验证）"
-                    Mib3ControlLink.Phase.WAITING_STATUS -> "已发 0xEA00 · 等车机回 0xEA03（写动作禁用）"
-                    Mib3ControlLink.Phase.NO_PROTOCOL -> "车机未声明 EA 协议 · 本机不支持车机控制"
-                    Mib3ControlLink.Phase.NO_SESSION -> "未连接车机 · 连接后从这里打开控制面板"
-                }
-        }
-        // 监听器存字段：Activity 销毁时要摘掉，单例里攥着一个 Activity 的 lambda 会泄漏
-        val listener: () -> Unit = { runOnUiThread { render() } }
-        mib3LinkListener?.let { Mib3ControlLink.removeListener(it) }
-        mib3LinkListener = listener
-        Mib3ControlLink.addListener(listener)
-        button.setOnClickListener {
-            Mib3ControlPanel.show(this) { line -> log(line) }
-        }
-        render()
     }
 
     private fun updateAudioTag() {
@@ -2219,15 +2225,7 @@ class MainActivity : AppCompatActivity() {
         }
 
     /** 设备营销名（ro.product.marketname），取不到时退回 Build.MODEL。 */
-    private fun deviceName(): String =
-        try {
-            val sp = Class.forName("android.os.SystemProperties")
-            val get = sp.getMethod("get", String::class.java)
-            (get.invoke(null, "ro.product.marketname") as? String)
-                ?.takeIf { it.isNotBlank() } ?: Build.MODEL
-        } catch (_: Exception) {
-            Build.MODEL
-        }
+    private fun deviceName(): String = DeviceIdentity.marketingName() ?: Build.MODEL
 
     /** 副标题只显示设备名（原来的 Shizuku 状态已随依赖移除）。 */
     private fun updateDeviceSubtitle() {
@@ -2812,8 +2810,6 @@ class MainActivity : AppCompatActivity() {
         // 蓝牙扫描/配对监听随界面销毁收尾：Activity 退出后不再需要（也避免广播泄漏）
         runCatching { stopTargetScan() }
         targetPicker = null
-        mib3LinkListener?.let { Mib3ControlLink.removeListener(it) }
-        mib3LinkListener = null
         // 只解绑"挂屏"，不动会话——连接由前台服务保活、对象归 SessionController 持有；
         // 显式断开请用「断开连接」按钮（任意实例都能断到真管线）。
         if (SessionController.logListener === logListener) SessionController.logListener = null

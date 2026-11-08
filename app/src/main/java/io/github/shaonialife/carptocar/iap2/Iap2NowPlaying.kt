@@ -37,6 +37,20 @@ object Iap2NowPlaying {
     const val STATUS_PLAYING = 1
     const val STATUS_PAUSED = 2
 
+    // ---- media item 组字段 ID（勿凭记忆改，见类注释）----
+    internal const val MEDIA_TITLE = 0x0001
+    internal const val MEDIA_DURATION = 0x0004
+    internal const val MEDIA_ALBUM = 0x0006
+    internal const val MEDIA_ARTIST = 0x000C
+    internal const val MEDIA_ARTWORK_ID = 0x001A
+
+    // ---- playback 组字段 ID ----
+    internal const val PLAYBACK_STATUS = 0x0000
+    internal const val PLAYBACK_ELAPSED = 0x0001
+    internal const val PLAYBACK_SHUFFLE = 0x0005
+    internal const val PLAYBACK_REPEAT = 0x0006
+    internal const val PLAYBACK_APP_NAME = 0x0007
+
     /**
      * 构造 0x5001 NowPlayingUpdate 完整帧（带真实歌名/歌手/专辑/播放状态）。
      * 空字符串字段仍给一个空串 param，保持结构与空态常量同构。
@@ -53,17 +67,29 @@ object Iap2NowPlaying {
      */
     fun body(np: CarPlayNowPlaying): ByteArray {
         val mediaItem =
-            Iap2Csm.string(0x0001, np.title.orEmpty()) +
-                Iap2Csm.u32(0x0004, np.durationMs.toLong()) +
-                Iap2Csm.string(0x000C, np.artist.orEmpty()) +
-                Iap2Csm.string(0x0006, np.album.orEmpty()) +
+            Iap2Csm.string(MEDIA_TITLE, np.title.orEmpty()) +
+                Iap2Csm.u32(MEDIA_DURATION, np.durationMs.toLong()) +
+                Iap2Csm.string(MEDIA_ARTIST, np.artist.orEmpty()) +
+                Iap2Csm.string(MEDIA_ALBUM, np.album.orEmpty()) +
                 (np.artworkTransferId?.let { Iap2Csm.u8(np.artworkAttributeId, it) } ?: ByteArray(0))
         val playback =
-            Iap2Csm.u8(0x0000, np.status) +
-                Iap2Csm.u32(0x0001, np.elapsedMs.toLong()) +
-                Iap2Csm.u8(0x0005, np.shuffleMode) +
-                Iap2Csm.u8(0x0006, np.repeatMode) +
-                Iap2Csm.string(0x0007, np.appName.orEmpty())
+            Iap2Csm.u8(PLAYBACK_STATUS, np.status) +
+                Iap2Csm.u32(PLAYBACK_ELAPSED, np.elapsedMs.toLong()) +
+                Iap2Csm.u8(PLAYBACK_SHUFFLE, np.shuffleMode) +
+                Iap2Csm.u8(PLAYBACK_REPEAT, np.repeatMode) +
+                Iap2Csm.string(PLAYBACK_APP_NAME, np.appName.orEmpty())
         return Iap2Csm.param(0x0000, mediaItem) + Iap2Csm.param(0x0001, playback)
     }
+
+    /** 诊断用：这一帧实际带了哪些字段（日志里一眼看出专辑有没有发出去）。 */
+    fun describe(np: CarPlayNowPlaying): String =
+        buildList {
+            add("title")
+            add("album@0x0006")
+            add("artist")
+            add("duration")
+            add("elapsed")
+            add("status")
+            if (np.artworkTransferId != null) add("artwork@${np.artworkAttributeId}")
+        }.joinToString(",")
 }

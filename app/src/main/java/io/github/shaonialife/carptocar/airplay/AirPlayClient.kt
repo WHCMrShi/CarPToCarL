@@ -13,6 +13,7 @@ import io.github.shaonialife.carptocar.iap2.Iap2MessageIds
 import io.github.shaonialife.carptocar.iap2.Iap2SenderSession
 import io.github.shaonialife.carptocar.net.EndpointHosts
 import io.github.shaonialife.carptocar.util.ConnectionResources
+import io.github.shaonialife.carptocar.protocol.ProtocolAudit
 import io.github.shaonialife.carptocar.util.DeviceIdentity
 import io.github.shaonialife.carptocar.util.SessionTrace
 import java.io.IOException
@@ -53,6 +54,18 @@ class AirPlayClient(
      * （catplay 每 1s force_announce）。
      */
     private val retryTick: ((attempt: Int) -> Unit)? = null,
+    /**
+     * 接收端端口**连续拒绝**时的高频钩子（每 3 次拒绝调用一次，必须非阻塞）。
+     *
+     * 2026-11-06 19:31 现场：`0x5703` 热点凭据拿到了、入网成功、`0x4300` 也发了，但车机的
+     * AirPlay 服务始终没起——`_airplay._tcp` 不广播、ctrl 邀请 0 次、7000 连续 15 次
+     * `ECONNREFUSED`，整轮 39 秒白等。固件里 `trySendCarPlayStartSession` 的跳过条件之一
+     * 就是 *"AirPlay server is not yet started"*：车机停在「设备还在场、等 IAP2 信息」的分支，
+     * 而 Phase 1 之后我们不再敲它。
+     *
+     * 主控用它做「叫醒」：重发 `0x4e0e + 0x4300` 并重新公告 ctrl mDNS（限次、限频）。
+     */
+    private val onPortRefused: ((refused: Int) -> Unit)? = null,
 ) {
 
     /** 音频 SETUP 时用的车机地址（会话中途要重新核对音量时复用）。 */
@@ -245,12 +258,35 @@ class AirPlayClient(
     var pairingInProgress: Boolean = false
         private set
 
+    /**
+     * 最近一次 [close] **打断在飞请求**的时刻（`SystemClock.uptimeMillis()`；0 = 从没发生）。
+     *
+     * 配对循环用它把「本机掐断」与「车机拒绝」分开：前者只重试同一阶段，后者才写进
+     * [PairingMemory] 的 15 分钟记忆。2026-11-06 实车就是没分清这两种，把端点热更新
+     * 造成的中断记成了「车机不认这台手机」，顺手锁死 15 分钟。
+     */
+    @Volatile
+    private var interruptedExchangeAtUptime: Long = 0L
+
     /** 当前端点（主控合并晚到端点时用作兜底，避免 0x4301 不带 IP 时把可用地址抹掉）。 */
     val currentEndpoint: Iap2SenderSession.CarPlayEndpoint get() = endpoint
 
     /**
      * 热更新接收端端点（0x4301 晚到 / 配对期间 mDNS 新结果）。
-     * 地址或端口变化时关闭当前 TCP，让配对循环下一轮按新地址重连。
+     *
+     * **只在没有交换在飞时关掉当前 TCP**：地址变了当然要按新地址重连，但绝不能把
+     * 一次正在进行的 pair-setup / pair-verify 掐死。配对循环每轮起步前自己会
+     * `close()`（见 [runPairingLoop]），所以配对期间只改字段、下一轮自然用新地址。
+     *
+     * 2026-11-06 16:46 实车就是这个坑：0x4301 在 pair-setup M1→M3 之间晚到，
+     * 旧实现无条件 `close()` →
+     * ```
+     * 控制通道关闭——唤醒 1 个待响应请求
+     * pair-setup 失败（控制通道已关闭（CSeq=2 POST /pair-setup））
+     * → 车机要求退避（Error=3）→ 我们抢先做 pair-verify → Error=2（认证失败）
+     * → 被记成「车机确定性拒绝配对」→ 锁 15 分钟 + 降级明文会话
+     * ```
+     * 一个晚到报文就把整轮连接废掉，还顺手把好端端的配对身份写成了「车机不认」。
      *
      * @return true = 端点确有变化（已切换）；false = 与当前一致，未做任何事
      */
@@ -267,13 +303,19 @@ class AirPlayClient(
         if (unchanged) return false
         endpoint = newEndpoint
         endpointGeneration++
+        val inFlight = pendingResponses.isNotEmpty()
+        val deferClose = AirPlaySessionPolicy.deferEndpointClose(pairingInProgress, pendingResponses.size)
         log(
             "AIRPLAY: 端点更新（$reason）" +
                 "${old.ipAddresses.firstOrNull()}:${old.airPlayPort} → " +
                 "${newEndpoint.ipAddresses.firstOrNull()}:${newEndpoint.airPlayPort}" +
-                "（配对循环下一轮使用新地址）",
+                if (deferClose) {
+                    "（${if (inFlight) "请求在飞" else "配对进行中"}：不打断当前通道，下一轮重连生效）"
+                } else {
+                    "（配对循环下一轮使用新地址）"
+                },
         )
-        close()
+        if (!deferClose) close()
         return true
     }
 
@@ -294,6 +336,11 @@ class AirPlayClient(
         // 默认 120s 内每 2s 试一次——用户在车机上点一下的等待不会被提前放弃。
         val deadline = System.currentTimeMillis() + windowMillis
         var attempt = 0
+        // 端口连续拒绝计数：每 [PORT_REFUSED_WAKE_EVERY] 次触发一次「叫醒车机」。
+        var refusedStreak = 0
+        // 「退避」只多给一次重试机会：够了（一次退避基本就是车机刚被上一次中断搅了状态机），
+        // 又不会在一台「其实已配对、只是回退避码」的车机上把 120s 窗口空转掉。
+        var backoffRetried = false
         while (System.currentTimeMillis() < deadline && !cancelled) {
             attempt++
             // 每轮重试前吸收一次 mDNS 新结果：网关兜底地址连不通时，车机的
@@ -307,13 +354,22 @@ class AirPlayClient(
             }
             close()
             if (!ensureConnected(2_000)) {
+                // 端口连续拒绝：接收端根本还没起 AirPlay 服务。每 3 次给主控一次机会去「叫醒」
+                // 车机（重发 0x4e0e + 0x4300 + 重新公告 ctrl），否则整轮就只是空转日志。
+                refusedStreak++
+                if (refusedStreak % PORT_REFUSED_WAKE_EVERY == 0) {
+                    runCatching { onPortRefused?.invoke(refusedStreak) }
+                }
                 if (attempt == 1 || attempt % 5 == 0) {
                     log("AIRPLAY: 车机 AirPlay 端口未开（等待你点车机上的手机图标 / 车机发 ctrl 邀请）…第 $attempt 次重试")
                 }
                 Thread.sleep(2_000)
                 continue
             }
+            refusedStreak = 0
             attemptedPairing = true
+            // 本轮起点：用于判定失败到底是车机给的，还是我们自己 close() 掐断的。
+            val attemptStartedAt = SystemClock.uptimeMillis()
             val transport = TlvTransport { path, body -> postPairing(path, body) }
             try {
                 val setupStatus =
@@ -327,14 +383,25 @@ class AirPlayClient(
                         val trouble = troubleOf(rejected)
                         pairingTrouble = trouble
                         log("AIRPLAY: ${trouble.text}——${trouble.advice}")
-                        when {
-                            // 「车机不接受再注册一次」≈ 403：它大概率已经存了我们的公钥，
-                            // 正确动作是直接 pair-verify（下面 "403" 分支就是这条路径）。
-                            PairingPolicy.shouldTryPairedFastPath(rejected.stage, rejected.code) -> "403"
-                            rejected.deterministic -> "terminal"
-                            else -> "failed"
+                        // 分派规则见 [pairSetupNext]：退避要先重试同一阶段，绝不能顺着往下
+                        // 做 pair-verify（那里只会回 Error=2，把好身份误记成「车机不认」）。
+                        when (pairSetupNext(rejected.code, backoffRetried)) {
+                            PairSetupNext.PAIRED_FAST_PATH -> "403"
+                            PairSetupNext.TERMINAL -> "terminal"
+                            PairSetupNext.RETRY_SAME_STAGE -> "backoff"
+                            PairSetupNext.CONTINUE_VERIFY -> "failed"
                         }
                     } catch (error: IOException) {
+                        // 被本机打断（端点热更新 / 重连 / 用户取消）：错误码不是车机给的，
+                        // 既不能退避也不能据此判「车机拒绝」，直接重来一轮。
+                        if (interruptedExchangeAtUptime >= attemptStartedAt) {
+                            log(
+                                "AIRPLAY: pair-setup 被本机打断（${error.message}）" +
+                                    "——不计入车机拒绝，重试",
+                            )
+                            pairingTrouble = null
+                            continue
+                        }
                         val message = error.message.orEmpty()
                         val forbidden = message.contains("403")
                         if (forbidden) {
@@ -378,6 +445,19 @@ class AirPlayClient(
                     pairingTrouble = null
                     return keys
                 }
+                if (setupStatus == "backoff") {
+                    // 车机要求退避（常见于上一次 pair-setup 被打断、它刚清过 SRP 状态机）。
+                    // 此时**不能**顺着往下做 pair-verify：那一步只会回 Error=2，而 Error=2 在
+                    // PairingPolicy 里是「确定性失败」，会把好身份记成「车机不认」并锁 15 分钟。
+                    backoffRetried = true
+                    close()
+                    log(
+                        "AIRPLAY: pair-setup 要求退避——${PAIR_SETUP_BACKOFF_MS}ms 后重试同一阶段" +
+                            "（不抢先做 pair-verify：那里只会回 Error=2，把好身份误记成「车机不认」）",
+                    )
+                    Thread.sleep(PAIR_SETUP_BACKOFF_MS)
+                    continue
+                }
                 val receiverStaticKey = endpoint.publicKey?.let(::hexToBytes)
                 val keys = PairVerifyClient(identity, transport, log).run(receiverStaticKey)
                 // pair-verify 之后双方立即启用加密（接收端在 M4 应答后开启）
@@ -390,6 +470,13 @@ class AirPlayClient(
                 // 典型现场：`pair-verify` M4 回 `{Error:2, State:4}` —— 车机不认这台手机的
                 // 配对身份。旧代码把它当成功，于是派生出两把对不上的密钥，加密 SETUP 被
                 // 静默丢弃 10s，最后降级明文（无共享密钥 → 没有声音、没有触摸）。
+                // 但**本机打断**（端点热更新 / 重连）造成的失败不是车机的结论：尤其不能
+                // 把随之而来的 Error=2 记成「确定性拒绝」（那会锁 15 分钟 + 降级明文）。
+                if (interruptedExchangeAtUptime >= attemptStartedAt) {
+                    log("AIRPLAY: pair-verify 被本机打断（${rejected.message}）——不计入车机拒绝，重试")
+                    pairingTrouble = null
+                    continue
+                }
                 val trouble = troubleOf(rejected)
                 pairingTrouble = trouble
                 log("AIRPLAY: 配对第 $attempt 次尝试失败 - ${trouble.text}")
@@ -403,6 +490,11 @@ class AirPlayClient(
                 Thread.sleep(if (rejected.code == PairingErrorCode.BACKOFF) 5_000L else 1_000L)
             } catch (error: IOException) {
                 val message = error.message.orEmpty()
+                if (interruptedExchangeAtUptime >= attemptStartedAt) {
+                    log("AIRPLAY: 配对第 $attempt 次尝试被本机打断（$message）——不计入车机拒绝，重试")
+                    pairingTrouble = null
+                    continue
+                }
                 // verify/认证段的 403 与 pair-setup 403 同源（车机信任已建立），
                 // 见 pairingForbidden 注释：标记后主控不再断 BT / 不降级明文
                 if (message.contains("403")) pairingForbidden = true
@@ -521,8 +613,16 @@ class AirPlayClient(
                     // 判据——能区分「车机没收到包」与「收到但不播」（2026-10-17）。
                     // 前 8 次全打（约覆盖起流后的 8s，正好是 6.5s 拆链看门狗窗口）：
                     // 音频流的 sampleTime 会不会从 0 往前走，是判断「包有没有被消费」的硬证据。
-                    if (body.isNotEmpty() && (sent <= 8 || sent % 30 == 0)) {
-                        logFeedbackBody(body)
+                    //
+                    // 收帧统计（statsDictionary）**每次都解析**：它是屏幕接管门要用的实时量，
+                    // 而 /feedback 每秒一次、bplist 只有几百字节，代价可忽略；
+                    // 落日志仍按上一条的节流节奏走，不刷屏。
+                    if (body.isNotEmpty()) {
+                        val root = parseFeedbackBody(body)
+                        if (root != null) {
+                            updateScreenReceiveStats(root)
+                            if (sent <= 8 || sent % 30 == 0) logFeedbackBody(root)
+                        }
                     }
                 } catch (_: IOException) {
                     break // 连接已断（会话结束）
@@ -539,13 +639,7 @@ class AirPlayClient(
     /** 解析并打印 /feedback 应答（bplist）。字段对照 catplay `StreamFeedback`：
      *  sr / type / streamConnectionID / sampleTime / timestamp / timestampRawNs
      *  （没有包计数——车机回的是自己侧的播放时钟，可据此判断音频流是否被推进）。 */
-    private fun logFeedbackBody(body: ByteArray) {
-        val root =
-            runCatching { BinaryPlist.parse(body) as? Map<*, *> }.getOrNull()
-        if (root == null) {
-            log("AIRPLAY: feedback body 解析失败（${body.size}B）hex=${body.joinToString("") { "%02x".format(it) }}")
-            return
-        }
+    private fun logFeedbackBody(root: Map<*, *>) {
         val streams = root["streams"] as? List<*>
         if (streams == null) {
             log("AIRPLAY: feedback 无 streams 键（keys=${root.keys}）全字段=$root")
@@ -561,10 +655,115 @@ class AirPlayClient(
         }
     }
 
+    /** 解析 /feedback 体；失败只在前几次留 hex 现场（不刷屏）。 */
+    private fun parseFeedbackBody(body: ByteArray): Map<*, *>? {
+        val root = runCatching { BinaryPlist.parse(body) as? Map<*, *> }.getOrNull()
+        if (root == null) {
+            if (feedbackParseFailures < 3) {
+                log("AIRPLAY: feedback body 解析失败（${body.size}B）hex=${body.joinToString("") { "%02x".format(it) }}")
+            }
+            feedbackParseFailures++
+        }
+        return root
+    }
+
+    /**
+     * 车机侧**实收帧率**（`/feedback` → `statsDictionary.rfps`，是我们送的屏幕流的接收端计数）。
+     *
+     * `null` = 车机没回统计（固件不支持，或 SETUP 里 `statsCollectionEnabled` 没开）。
+     * 语义边界见 [AirPlayReceiverStats]：只证明帧进了接收端前级，不证明解码/交屏。
+     */
+    @Volatile
+    var screenReceiveFps: Double? = null
+        private set
+
+    /** 最近一次拿到收帧统计的时刻（`uptimeMillis`；0 = 从没拿到）。 */
+    @Volatile
+    var screenReceiveStatsAt: Long = 0L
+        private set
+
+    /** 车机是否回过 `statsDictionary`（用来区分「没开探针」与「开了但车机不报」）。 */
+    @Volatile
+    var receiverStatsAvailable: Boolean = false
+        private set
+
+    @Volatile
+    private var statsMissingLogged = false
+
+    @Volatile
+    private var statsNoScreenEntryLogged = false
+
+    private var feedbackParseFailures = 0
+
+    private var lastStatsLogAt = 0L
+
+    private var lastLoggedFps: Double? = null
+
+    /** 吸收一条 /feedback 的收帧统计（每秒调用一次）；日志按「首条 + 变化 ≥3fps + 每 10s」节流。 */
+    private fun updateScreenReceiveStats(root: Map<*, *>) {
+        if (!AirPlayReceiverStats.present(root)) {
+            if (!statsMissingLogged) {
+                statsMissingLogged = true
+                log(
+                    if (AirPlayReceiverStats.presentButUnexpected(root)) {
+                        "AIRPLAY: statsDictionary 存在但不是字典" +
+                            "（${root["statsDictionary"]?.javaClass?.simpleName}）——收帧统计解不动，按「没有统计」处理"
+                    } else {
+                        "AIRPLAY: /feedback 没有 statsDictionary——该固件不回报车机侧收帧统计" +
+                            "（无法从手机侧判断帧是否到达；仍可看事件通道有没有回落命令）"
+                    },
+                )
+            }
+            return
+        }
+        receiverStatsAvailable = true
+        val stats = AirPlayReceiverStats.screenStats(root)
+        if (stats.isEmpty()) {
+            if (!statsNoScreenEntryLogged) {
+                statsNoScreenEntryLogged = true
+                log(
+                    "AIRPLAY: statsDictionary 里没有屏幕流条目（实有类型=" +
+                        AirPlayReceiverStats.streamTypes(root) + "，屏幕应为 110/111）——" +
+                        "说明接收端还没把这条流登记成屏幕流",
+                )
+            }
+            return
+        }
+        val primary = stats.first()
+        screenReceiveFps = primary.receiveFps
+        val now = SystemClock.uptimeMillis()
+        screenReceiveStatsAt = now
+        val fps = primary.receiveFps
+        val previous = lastLoggedFps
+        val changed =
+            if (fps == null || previous == null) {
+                true
+            } else {
+                kotlin.math.abs(fps - previous) >= 3.0
+            }
+        if (changed || now - lastStatsLogAt >= 10_000) {
+            lastStatsLogAt = now
+            lastLoggedFps = fps
+            log(
+                "AIRPLAY: 车机收帧统计 " + stats.joinToString("；") { AirPlayReceiverStats.describe(it) } +
+                    "（pre-decode：证明帧进了接收端前级，不能证明解码/交屏）",
+            )
+        }
+    }
+
+    /** 给门禁/界面用的一句话；null = 车机根本没回统计。 */
+    fun screenReceiveSummary(): String? =
+        when {
+            !receiverStatsAvailable -> null
+            screenReceiveFps == null -> "车机有统计但没有屏幕流条目"
+            else -> "车机实收 " + AirPlayReceiverStats.describeFps(screenReceiveFps)
+        }
+
     /** 心跳线程的存活判据：RTSP socket 仍连着。 */
     private fun isSessionAlive(): Boolean = socket?.isClosed == false
 
     fun close() = synchronized(closeLock) {
+        val inFlight = pendingResponses.isNotEmpty()
         val closing = synchronized(connectionLock) {
             lifecycleGeneration++
             closingConnection = true
@@ -593,6 +792,12 @@ class AirPlayClient(
                 readerGeneration++
             }
             failAllPending("控制通道关闭")
+            if (inFlight) {
+                interruptedExchangeAtUptime = SystemClock.uptimeMillis()
+                if (pairingInProgress) {
+                    log("AIRPLAY: 本次 close() 打断了在飞的配对交换——按本机打断处理")
+                }
+            }
         } finally {
             synchronized(connectionLock) { closingConnection = false }
         }
@@ -1929,6 +2134,17 @@ class AirPlayClient(
         /** 配对重试期间调用 [retryTick] 的间隔（次）：每轮回 2s，10 次 ≈ 每 20s 重新公告一次。 */
         private const val RETRY_TICK_ATTEMPTS = 10
 
+        /** 端口每连续拒绝这么多次，就请主控「叫醒」一次车机（约 6s 一次，主控另有 10s/3 次限流）。 */
+        private const val PORT_REFUSED_WAKE_EVERY = 3
+
+        /**
+         * pair-setup 回 `Error=3`（退避）后等多久再重试**同一阶段**。
+         *
+         * 5s 是 HomeKit 规范给的最小退避粒度，也够车机把被打断的 SRP 状态机收干净；
+         * 关键是这段时间内**不要**改走 pair-verify（那条路只会回 Error=2）。
+         */
+        private const val PAIR_SETUP_BACKOFF_MS = 5_000L
+
         /**
          * 接收端明确回「没有这个接口」的 HTTP 状态。命中即判定为 pre-HomeKit 老车机，
          * 立刻转明文会话，不再把 120s 配对窗口空跑完。
@@ -2296,12 +2512,16 @@ class AirPlayClient(
 
         // AAC-LC 保留为回退候选。Q4 优先走已声明的 PCM，避免 48k 音源重采样和编码。
         val aac = mutableListOf<AudioProfile>()
+        // 音频档位优先 48K AAC：CarLife 恒输出 48K PCM（MAX_RATE=48000），若选 44.1K AAC
+        // 会被迫做一次 48K→44.1K 重采样，双晶振时钟域漂移在播放数分钟后累计成卡顿
+        // （Audi Q4 3873 实车稳定复现：music 3~5 分钟开始逐渐卡顿）。把 48K 排前面，
+        // 绝大多数同时声明两种 AAC 的车机直接走零重采样通路。
         val aacOptions =
             listOf(
-                Triple(AUDIO_STREAM_TYPE_MAIN_HIGH, AUDIO_FORMAT_AAC_LC_44K_STEREO, 44_100),
                 Triple(AUDIO_STREAM_TYPE_MAIN_HIGH, AUDIO_FORMAT_AAC_48K_STEREO, 48_000),
-                Triple(AUDIO_STREAM_TYPE, AUDIO_FORMAT_AAC_LC_44K_STEREO, 44_100),
+                Triple(AUDIO_STREAM_TYPE_MAIN_HIGH, AUDIO_FORMAT_AAC_LC_44K_STEREO, 44_100),
                 Triple(AUDIO_STREAM_TYPE, AUDIO_FORMAT_AAC_48K_STEREO, 48_000),
+                Triple(AUDIO_STREAM_TYPE, AUDIO_FORMAT_AAC_LC_44K_STEREO, 44_100),
             )
         aacOptions.forEach { (streamType, bit, rate) ->
             declared
@@ -2841,6 +3061,14 @@ class AirPlayClient(
         val candidates = EndpointHosts.candidates(target.ipAddresses)
         if (candidates.isEmpty()) {
             log("AIRPLAY: 0x4301/ mDNS 未提供可用地址，无法连接")
+            // 审计：走到了「拿不到 AirPlay 端点」这一步。新代车机（WiFi 凭据走
+            // 0x4300→0x4301）唯一的地址来源就是 0x4301 或 mDNS，两者都没有就是硬缺口；
+            // 老车机还多一条网关兜底（SPEC §3.4），所以这里只作 WARN 记录、不改变流程。
+            ProtocolAudit.record(
+                ProtocolAudit.Code.WIFI_NEW_WITHOUT_AP,
+                detail = "端点无可用地址（0x4301 与 _airplay._tcp 都没给出）",
+                evidence = "ssid=${target.ssid} airPlayPort=${target.airPlayPort}",
+            )
             return false
         }
         if (target.airPlayPort <= 0) {
@@ -3337,7 +3565,11 @@ class AirPlayClient(
                         .randomUUID()
                         .toString()
                         .uppercase(),
-                "statsCollectionEnabled" to false,
+                // 打开接收端统计：4580（CL3D）的 libairplay 只有在这个键为 true 时，才会在
+                // `/feedback` 里多回一个 `statsDictionary`，里面带**屏幕流实收帧率 rfps**。
+                // 那是手机侧唯一能回答「车机到底收没收到视频帧」的探针（见 AirPlayReceiverStats）。
+                // 代价只是 /feedback 每包多几百字节，可忽略；关掉就看不到收帧统计。
+                "statsCollectionEnabled" to true,
                 "updateSessionRequest" to false,
                 "keepAliveLowPower" to true,
                 "features" to CONTROLLER_FEATURES,
@@ -3377,6 +3609,28 @@ class AirPlayClient(
                 "deviceID=${root["deviceID"]}" +
                 if (features != null) " features=0x${features.toString(16)}" else "",
         )
+        // ---- 通告一致性（SPEC §3.2 / §8 步 7）----
+        // 车机有两套自报口径：mDNS TXT（Bonjour 里）与 /info（RTSP 里）。规范要求严格一致；
+        // 不一致是 SETUP 400 的常见根因——接收端会拿 TXT 的内容校验我们 SETUP 里声明的
+        // features，两边对不上就拒绝（真实车机不做友好提示，只回 400）。
+        val txtFeatures = currentEndpoint.advertisedFeatures
+        if (features != null && txtFeatures != null && features != txtFeatures) {
+            ProtocolAudit.record(
+                ProtocolAudit.Code.FEATURES_TXT_VS_INFO,
+                detail = "/info=0x${features.toString(16)} TXT=0x${txtFeatures.toString(16)}",
+                evidence = "异或差异=0x${(features xor txtFeatures).toString(16)}",
+            )
+        }
+        // deviceID：TXT 的 `deviceid` 与 /info 的 `deviceID` 应是同一台车机。不一致说明它
+        // 自己的通告互相矛盾，后续 SETUP 里我们用哪个都会被另一方校验失败（SPEC §7 SETUP 403）。
+        val infoDeviceId = root["deviceID"] as? String
+        val txtDeviceId = currentEndpoint.deviceIdentifier
+        if (infoDeviceId != null && txtDeviceId != null && !infoDeviceId.equals(txtDeviceId, ignoreCase = true)) {
+            ProtocolAudit.record(
+                ProtocolAudit.Code.DEVICE_ID_MISMATCH,
+                detail = "/info deviceID=$infoDeviceId，TXT deviceid=$txtDeviceId",
+            )
+        }
         (root["displays"] as? List<*>)?.forEachIndexed { index, display ->
             log("AIRPLAY: /info displays[$index]=$display")
             if (display is Map<*, *>) {

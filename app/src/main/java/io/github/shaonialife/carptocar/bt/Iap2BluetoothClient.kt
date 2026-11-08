@@ -148,6 +148,14 @@ class Iap2BluetoothClient(
         senderSession?.pushNowPlaying()
     }
 
+    /**
+     * 车机 AirPlay 端口一直不开时，让 iAP2 会话重发一次 `0x4e0e + 0x4300` 叫醒它。
+     *
+     * 返回 false = 当前没有可用的发送端会话（链路已断/还没起来），调用方只能退而重公告 ctrl。
+     */
+    fun nudgeCarPlayAvailability(reason: String): Boolean =
+        senderSession?.nudgeCarPlayAvailability(reason) ?: false
+
     /** 目标设备不在已配对列表的提示节流（避免每 3 秒刷屏）。 */
     private var lastTargetMissingLogAt = 0L
 
@@ -710,6 +718,8 @@ class Iap2BluetoothClient(
             } catch (_: SecurityException) {
                 null
             }
+        // 真正建链了：登记对端，音频配置守卫据此知道该盯哪台车机。
+        BtSessionGate.notePeerActive(peerAddress)
         try {
             channel.runSenderSession(
                 context,
@@ -719,7 +729,10 @@ class Iap2BluetoothClient(
                 onWifiCredentials,
                 onEndpointUpdate,
                 nowPlayingProvider,
-                onSessionReady = { session -> senderSession = session },
+                onSessionReady = { session ->
+                    senderSession = session
+                    BtSessionGate.iap2Ready = true
+                },
                 onLinkClosed = onLinkClosed,
             )
         } catch (error: IOException) {
@@ -727,6 +740,7 @@ class Iap2BluetoothClient(
         } finally {
             activeChannel = null
             senderSession = null
+            BtSessionGate.iap2Ready = false
             currentSocket.getAndSet(null)?.let { runCatching { it.close() } }
             runCatching { socket.close() }
             channel.close()
@@ -749,9 +763,6 @@ class Iap2BluetoothClient(
     fun detachCurrentSession() {
         // 主动拆的不要被当成「掉线」去补连（否则会立刻把刚退役的控制会话又建回来）
         manualTeardown = true
-        // 断链**之前**先告诉车机「EA 会话结束」。车机侧没被显式停掉的 EAP/VIWI 会话
-        // 会挡住下一次连接，而它自己的清理要等 mediaDisconnectTimeout(15s) 才成立。
-        senderSession?.closeEaSessions("主动断开控制会话")
         activeChannel?.let { channel ->
             activeChannel = null
             channel.close()
@@ -765,8 +776,6 @@ class Iap2BluetoothClient(
         // 递增世代：即便有线程卡在 connect()，事后也会因世代不符自杀，不会在下次启动时复活
         generation.incrementAndGet()
         BtSessionGate.clearLinkLost()
-        // 同 detachCurrentSession：先把 EA 会话收干净，再关 socket
-        senderSession?.closeEaSessions("停止控制链路")
         currentSocket.getAndSet(null)?.let { runCatching { it.close() } }
         activeChannel?.let { runCatching { it.close() } }
         thread?.interrupt()
@@ -805,6 +814,31 @@ object BtSessionGate {
     /** 入站（车机主动连入）的 iAP2 会话活跃：出站暂停，避免两条 RFCOMM 互相踩。 */
     @Volatile
     var inboundActive: Boolean = false
+
+    /**
+     * 最近一次**真正建链**的对端地址（入站或出站都算，null = 还没连上过）。
+     *
+     * 用途：音频配置守卫（[BtProfiles.guardAudioProfiles]）要知道「盯哪台设备」。
+     * 用户指定了目标时直接用目标地址；没指定时（自动选车机）只能靠这里记下的
+     * 实际对端——否则守卫会盯着一台没连上的设备空转。
+     */
+    @Volatile
+    var activePeerAddress: String? = null
+
+    fun notePeerActive(address: String?) {
+        if (address != null) activePeerAddress = address
+    }
+
+    /**
+     * iAP2 会话已跑通 bring-up（发送端会话就绪）。
+     *
+     * 与 [sessionActive]（CarPlay 端点拿到、画面能上）不同：这个更早，只表示车机
+     * 已经认可这条控制链路。音频配置守卫（[BtProfiles.guardAudioProfiles]）
+     * 就是看它来决定「还要不要继续断 HFP/A2DP」——宝马 fork 的结论是 iAP2 一建立
+     * 车机就不再依赖配置文件状态，继续断只是徒增抖动。
+     */
+    @Volatile
+    var iap2Ready: Boolean = false
 
     /**
      * CarPlay 会话已建立（任一路径成功拿到端点后置位，由 SessionController 维护）：

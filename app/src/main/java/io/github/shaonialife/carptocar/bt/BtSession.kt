@@ -3,7 +3,6 @@ package io.github.shaonialife.carptocar.bt
 import android.content.Context
 import io.github.shaonialife.carptocar.iap2.CarPlayNowPlaying
 import io.github.shaonialife.carptocar.iap2.Iap2SenderSession
-import io.github.shaonialife.carptocar.mib3.Mib3ControlLink
 import io.github.shaonialife.carptocar.transport.Iap2LinkChannel
 import io.github.shaonialife.carptocar.util.DeviceIdentity
 
@@ -24,21 +23,22 @@ internal fun Iap2LinkChannel.runSenderSession(
     /** 保活泵退出（链路断开）回调——用于释放主控的「会话处理中」互斥，见调用处注释。 */
     onLinkClosed: () -> Unit = {},
 ) {
+    // 蓝牙列表里的名字先修一遍：MagicOS 在本地蓝牙名未设置时会把「未知设备」当成
+    // 适配器名，车机屏幕上就出现「未知设备 / 已连接」。
+    // 注意这只修**蓝牙名**；iAP2 的 0x4E09 自报身份固定是 iPhone（见 Iap2SenderSession），
+    // 两者不能混用——把本地蓝牙名塞进 0x4E09 会让车机把我们归类成普通蓝牙设备。
+    DeviceIdentity.ensureUsableBluetoothName(context, log)
     val session =
         Iap2SenderSession(
             this,
             { line -> log(line) },
             resolveBluetoothMac(context, log),
-            DeviceIdentity.deviceName(context),
             onWifiCredentials,
             onEndpointUpdate,
             // MFi 挑战长度按车机身份持久化（省掉 20B 静默 6 秒的试探）
             context.applicationContext,
             nowPlayingProvider,
         )
-    // EA 隧道（MIB3 车机控制）在 bring-up 期间就挂上：0xEA00 是在 run() 里发的，
-    // 0xEA03 可能在 run() 还没返回时到达，晚挂会漏掉第一条状态。
-    Mib3ControlLink.attach(session) { line -> log(line) }
     try {
         val endpoint = session.run(timeoutMillis)
         onEndpoint(endpoint)
@@ -46,7 +46,6 @@ internal fun Iap2LinkChannel.runSenderSession(
         onSessionReady(session)
         session.pumpIncomingForever()
     } finally {
-        Mib3ControlLink.detach()
         // 链路断开（保活泵退出 / run 抛错）：通知主控释放「会话处理中」——否则车机拆链
         // 后立刻回连带来的新端点会被**僵尸轮次**堵门：车机 15s 看门狗 + 我方 WiFi 加入
         // 长等待的窗口错配，让新端点只能干等到用户放弃（上游 0.1.14 奥迪 3315 真机定谳）。

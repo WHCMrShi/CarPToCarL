@@ -4,6 +4,7 @@ import io.github.shaonialife.carptocar.util.ConnectionResources
 
 import android.content.Context
 import io.github.shaonialife.carptocar.media.MediaSessionsState
+import io.github.shaonialife.carptocar.video.FirstFramePolicy
 import io.github.shaonialife.carptocar.video.VideoSender
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -160,6 +161,29 @@ object CarLifeHijack {
     /** 当前会话的视频通道；为 null 时收到的帧只进 GOP 缓存。 */
     @Volatile
     private var sender: VideoSender? = null
+
+    /**
+     * 「当期首帧已送达 → 需要补一次 RECORD」的一次性标记。
+     *
+     * 车机让屏判据是「解码成功使 VideoState=active」。若 RECORD 之后先喂了一批旧帧
+     * 或长时间没有画面，屏幕会话可能已被 `badFramesThreshold` 判进错误态；此后即使
+     * 码流恢复健康，也需要在**真正写出当期第一帧之后**再补一次 RECORD 重新仲裁让屏。
+     * 每轮会话只补一次（attach / 源重启置位，首帧送达后清位）。
+     */
+    @Volatile
+    private var screenReactivateNeeded = false
+
+    /** 当期首帧写进车机通道时回调上层（SessionController 补发 RECORD）。 */
+    @Volatile
+    var onVideoSourceRecovered: (() -> Unit)? = null
+
+    /** 首帧成功送达后触发一次屏激活补发；回调在 CarLife 读线程上，投递由上层负责。 */
+    private fun maybeReactivateScreen() {
+        if (!screenReactivateNeeded) return
+        screenReactivateNeeded = false
+        logSink?.invoke("CARLIFE: 当期首帧已送达车机——通知上层补发 RECORD 重建屏激活")
+        onVideoSourceRecovered?.invoke()
+    }
 
     /**
      * 当前会话的音频 sink。
@@ -517,60 +541,98 @@ object CarLifeHijack {
     }
 
     /**
-     * 会话建立后把车机通道接上：把缓存的 GOP 立刻灌进去，之后每帧实时直通。
+     * 会话建立后把车机通道接上：**默认用缓存关键帧立即起播**，之后每帧实时直通。
      *
-     * 调用前 [VideoSender.startPassthrough] 必须已成功（数据端口就绪）。
+     * 两条实车证据对着看（详见 [io.github.shaonialife.carptocar.video.FirstFramePolicy]）：
+     * 同源项目在奥迪 CL39 上 RECORD 后 **4 毫秒**就送出首帧（回放缓存 GOP），
+     * 我们 1.2.25 在奥迪 3810 上「清空缓存、等当期 IDR」，RECORD 后 **5.5 秒**才有首帧。
+     * 4580 的 HMI 在屏幕流 SETUP 之后只等很短时间就要画面，这个空窗可能就是
+     * 「连上、有声、全黑」的原因。
+     *
+     * 所以默认改成：缓存 GOP 的首帧**自带 SPS** 时立即回放（SPS 与参考帧同代，不存在
+     * 「旧 SPS + 新参考帧」的混搭）；不带 SPS 才退回旧行为等当期 IDR。
+     * 开关见 [io.github.shaonialife.carptocar.video.FirstFramePolicy]（可一键回退）。
      */
     fun attach(videoSender: VideoSender, log: (String) -> Unit) {
         logSink = log
+        sender = null
         val pending = synchronized(gopLock) {
             val snapshot = gop.toList()
             gop.clear()
             gopBytes = 0
             snapshot
         }
-        // 缓存里的 SPS/PPS 先交给视频层：即使下面一帧都补不出来（缓存为空 / 新会话首帧
-        // 是裸 P 帧），第一个到达的帧也能立刻发出 VideoConfig，不必干等引擎重建编码器。
+        // 缓存 SPS/PPS 只作兜底：当期/回放帧自带 SPS 会覆盖它。
         spsPps?.let { videoSender.seedCsd(it) }
-        // **先补历史帧、再打开实时通路**：旧实现先 `sender = videoSender` 再灌缓存，
-        // 期间到达的实时新帧会先写进车机通道，随后才补上更旧的缓存帧 —— 解码顺序倒置
-        // （画面回跳一段旧内容），且 noteDelivered 被两条线程同时调用。
-        var pushed = 0
-        for ((data, key) in pending) {
-            if (videoSender.submitH264(data, key)) {
-                pushed++
-                noteDelivered(data.size)
-            }
-        }
-        // 补帧期间到达的帧会落进 GOP 缓存（此时 sender 仍为 null）：一并补发，
-        // 否则它们既没进过车机，也不会再被 flush。
+        // attach 期间暂存进 GOP 的帧属于上一轮时间基准，一律丢弃（不回放）。
         val late = synchronized(gopLock) {
             val snapshot = gop.toList()
             gop.clear()
             gopBytes = 0
             snapshot
         }
-        if (late.isNotEmpty()) {
-            for ((data, key) in late) {
-                if (videoSender.submitH264(data, key)) {
+        screenReactivateNeeded = true
+        val firstPending = pending.firstOrNull()
+        val replay = FirstFramePolicy.shouldReplay(
+            policyEnabled = FirstFramePolicy.useCachedGop,
+            firstFrameIsKey = firstPending?.second == true,
+            firstFrameHasSps = firstPending?.let { hasSpsNal(it.first) } == true,
+        )
+        if (replay) {
+            log(
+                "CARLIFE: 回放缓存 ${pending.size} 帧立即起播（首帧自带 SPS，" +
+                    "策略=${FirstFramePolicy.describe()}；丢弃 attach 期间 ${late.size} 帧）",
+            )
+            var pushed = 0
+            for ((frame, keyFrame) in pending) {
+                // 缓存帧本来就是旧的，不传 sourceTimestamp（避免被算成排队延迟）
+                if (videoSender.submitH264(frame, keyFrame)) {
                     pushed++
-                    noteDelivered(data.size)
-                }
+                    noteDelivered(frame.size)
+                } else break
             }
+            log("CARLIFE: 缓存回放已推送 $pushed/${pending.size} 帧——后续实时直通")
+        } else {
+            log(
+                "CARLIFE: 已跳过 ${pending.size + late.size} 帧缓存" +
+                    "（历史 GOP + attach 期间暂存）——" +
+                    when {
+                        !FirstFramePolicy.useCachedGop -> "策略=等当期 IDR（可用偏好回退到立即起播）"
+                        firstPending == null -> "缓存里没有帧，等引擎当期 IDR"
+                        firstPending.second != true -> "缓存首帧不是关键帧，等当期 IDR 更安全"
+                        else -> "缓存首帧不是自带 SPS 的关键帧，等当期 IDR 更安全"
+                    },
+            )
         }
+        // 回放完成后才开放实时通路，防止实时新帧先于缓存旧帧写入。
         sender = videoSender
         startFirstFrameWatchdog(videoSender)
-        if (pending.isEmpty() && late.isEmpty()) {
-            log("CARLIFE: 尚无可补的历史帧（缓存为空），等待 CarLife 推流…")
-            return
+        // 主动催一个带 SPS 的当期 IDR；startFirstFrameWatchdog 还有 3 秒后的兜底。
+        log("CARLIFE: 请求引擎重建编码器（约 1 秒后出当期首帧）")
+        client?.requestVideoReinit()
+    }
+
+    /**
+     * 帧数据里有没有 SPS（NAL 类型 7）。
+     *
+     * 只用来判断「缓存 IDR 是否自带 SPS」——带就说明它和后面的 P 帧同属一代编码器，
+     * 回放不会出现「旧 csd + 新参考帧」的混搭。
+     */
+    private fun hasSpsNal(data: ByteArray): Boolean {
+        var index = 0
+        while (index + 3 < data.size) {
+            val startCode =
+                data[index] == 0.toByte() &&
+                    data[index + 1] == 0.toByte() &&
+                    data[index + 2] == 1.toByte()
+            if (startCode) {
+                if ((data[index + 3].toInt() and 0x1F) == 7) return true
+                index += 3
+            } else {
+                index++
+            }
         }
-        log("CARLIFE: 已补 ${pending.size + late.size} 帧历史画面（实际推送 $pushed）")
-        // 一帧都没送出去 = 缓存里没有 SPS/PPS（VideoConfig 发不出去就会全速丢帧）。
-        // 让引擎重建编码器，它随后会补一个带 SPS 的 IDR，画面即可恢复。
-        if (pushed == 0) {
-            log("CARLIFE: 缓存里没有 SPS/PPS——请求引擎重建编码器（约 1 秒后出首帧）")
-            client?.requestVideoReinit()
-        }
+        return false
     }
 
     /**
@@ -740,6 +802,7 @@ object CarLifeHijack {
                 // 并等到新 IDR 再送帧，否则「CarPlay 不掉、CarLife 重连后永久没画面」
                 // （2026-10-25 用户实测）。首次劫持时 sender 还是 null，这里是空操作。
                 if (sender != null) {
+                    screenReactivateNeeded = true
                     sender?.onSourceRestart("CarLife 会话重建（引擎重连）")
                     startSourceRestartWatchdog(hu)
                 }
@@ -887,7 +950,10 @@ object CarLifeHijack {
         val frame = ensureSpsPps(data)
         val target = sender
         if (target != null) {
-            if (target.submitH264(frame, keyFrame, sourceTimestampMs)) noteDelivered(frame.size)
+            if (target.submitH264(frame, keyFrame, sourceTimestampMs)) {
+                noteDelivered(frame.size)
+                maybeReactivateScreen()
+            }
             return
         }
         synchronized(gopLock) {

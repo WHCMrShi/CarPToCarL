@@ -1,7 +1,10 @@
 package io.github.shaonialife.carptocar.util
 
+import android.Manifest
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
 import io.github.shaonialife.carptocar.util.SysShell
@@ -38,6 +41,25 @@ object DeviceIdentity {
     private const val KEY_MAC_OVERRIDE = "bt_mac_override"
 
     private val MAC_REGEX = Regex("([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}")
+
+    /**
+     * 各 ROM 在「本地蓝牙名未设置」时返回的占位串（小写比较）。
+     *
+     * `未知设备` 是 MagicOS/Cinemo 车机上都会原样显示的元凶：它既不是名字也不是空值，
+     * 所以旧实现 `isNotBlank()` 放行了它，车机屏幕上就出现「未知设备」。
+     */
+    private val PLACEHOLDER_NAMES =
+        setOf(
+            "未知设备",
+            "未知",
+            "未知的设备",
+            "未命名",
+            "unknown",
+            "unknown device",
+            "null",
+            "n/a",
+            "na",
+        )
 
     /** 手填地址（进程内缓存，避免每次 SETUP 都读偏好）。 */
     @Volatile
@@ -147,18 +169,110 @@ object DeviceIdentity {
         return mac
     }
 
-    /** 设备名（0x4E09 DeviceInformationUpdate 用；对齐真机发的是本机蓝牙名）。 */
+    /**
+     * 车机蓝牙列表里要显示的**蓝牙名**（占位串一律换掉）。
+     *
+     * **不要把它塞进 iAP2 的 0x4E09**：那一层是真机身份，固定 `iPhone`
+     * （见 `Iap2SenderSession.IAP2_DEVICE_NAME`）。2026-11-07 别克 E2LB 现场
+     * 把两者混用，车机把我们归类成普通蓝牙设备。
+     *
+     * 取名顺序：适配器名 → `Settings.Secure.bluetooth_name` → 营销名 → MODEL。
+     */
     fun deviceName(context: Context): String =
+        displayName(adapterName(context))
+            ?: displayName(storedBluetoothName(context))
+            ?: fallbackDeviceName()
+
+    /**
+     * 把一个候选名净化成可用名：空白与各 ROM 的占位串（`未知设备` 等）返回 null。
+     *
+     * 抽成纯函数是为了让单测能直接咬住「未知设备不能发给车机」这条约定
+     * （真机上 `BluetoothAdapter.getName()` 返回的就是这个串）。
+     */
+    fun displayName(raw: String?): String? {
+        val name = raw?.trim().orEmpty()
+        if (name.isEmpty()) return null
+        return name.takeIf { it.lowercase() !in PLACEHOLDER_NAMES }
+    }
+
+    /** 本机蓝牙名原始值（可能为空或占位）。 */
+    private fun adapterName(context: Context): String? =
         try {
             context
                 .getSystemService(BluetoothManager::class.java)
                 ?.adapter
                 ?.name
-                ?.takeIf { it.isNotBlank() }
-                ?: "iPhone"
         } catch (_: Exception) {
-            "iPhone"
+            null
         }
+
+    /** `Settings.Secure.bluetooth_name`（部分 ROM 上适配器名是占位、这里才是真名）。 */
+    private fun storedBluetoothName(context: Context): String? =
+        try {
+            Settings.Secure.getString(context.contentResolver, "bluetooth_name")
+        } catch (_: Exception) {
+            null
+        }
+
+    /** 占位/无意义名：车机会原样显示，用户看到的就是「未知设备」。 */
+    private fun isUsableName(raw: String?): Boolean = displayName(raw) != null
+
+    /** 拿不到可用蓝牙名时的兜底：营销名 → Build.MODEL → 应用名。 */
+    private fun fallbackDeviceName(): String =
+        marketingName()?.takeIf { it.isNotBlank() }
+            ?: Build.MODEL?.takeIf { it.isNotBlank() }
+            ?: "CarPToCarL"
+
+    /** 营销名（`ro.product.marketname`），取不到返回 null。 */
+    fun marketingName(): String? =
+        try {
+            val sp = Class.forName("android.os.SystemProperties")
+            val get = sp.getMethod("get", String::class.java)
+            (get.invoke(null, "ro.product.marketname") as? String)?.takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
+
+    @Volatile
+    private var nameEnsureAttempted = false
+
+    /**
+     * 本机蓝牙名是占位串时改成可用名（进程内只试一次）。
+     *
+     * 为什么必须改系统名而不只是改 0x4E09：车机蓝牙列表显示的是**配对时的蓝牙名**，
+     * 0x4E09 只影响 iAP2 会话内的称呼。名字叫「未知设备」时车机 HMI 认不出这台手机
+     * （2026-11-07 别克 E2LB：屏幕上就是「未知设备 / 已连接」）。
+     */
+    fun ensureUsableBluetoothName(
+        context: Context,
+        log: (String) -> Unit = {},
+    ) {
+        if (context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) return
+        if (nameEnsureAttempted) return
+        nameEnsureAttempted = true
+        val current = adapterName(context)
+        if (isUsableName(current)) return
+        val target = fallbackDeviceName()
+        val renamed =
+            try {
+                context
+                    .getSystemService(BluetoothManager::class.java)
+                    ?.adapter
+                    ?.setName(target) ?: false
+            } catch (_: SecurityException) {
+                false
+            } catch (_: Exception) {
+                false
+            }
+        if (renamed) {
+            log("BT: 本机蓝牙名是占位「${current.orEmpty()}」——已改名为「$target」（只影响车机蓝牙列表；iAP2 0x4E09 固定发 iPhone）")
+        } else {
+            log(
+                "BT: 本机蓝牙名是占位「${current.orEmpty()}」——改名失败（ROM 拦了 setName），" +
+                    "车机列表里仍可能显示旧名；iAP2 0x4E09 不受影响（固定发 iPhone）",
+            )
+        }
+    }
 
     private fun resolveViaShell(): String? =
         try {

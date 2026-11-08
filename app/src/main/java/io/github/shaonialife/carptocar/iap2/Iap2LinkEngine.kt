@@ -15,7 +15,7 @@ private const val PHONE_DECLARED_MAX_OUTGOING = 0x7F
  *  2. 对端收到 marker 后进入协商并发送自己的同步包；双方收到同步包即回 ACK
  *  3. 协商状态下收到 ACK 即进入 NORMAL（控制会话 10 可用）
  *
- * 数据帧：control=0x40（捎带 ACK），seq=发送序号（u8 回绕，初始 99），
+ * 数据帧：control=0x40（捎带 ACK），seq=发送序号（u8 回绕，**每条链路随机初值**），
  * ack=已按序收到的最新序号，sessionId=10。对端 marker 会被帧头扫描自然丢弃。
  *
  * 协议语义参照 reference/xcertplay transport/Iap2LinkEngine.kt（独立重写）。
@@ -123,7 +123,16 @@ class Iap2LinkEngine(
     var peerSynchronization: SynchronizationPayload? = null
         private set
 
-    private var sentSequence = INITIAL_SEQUENCE
+    /**
+     * 本条链路的初始发送序号：**每次新建链路随机取 0–255**。
+     *
+     * 手册《CarPlay 车机开发手册》4.3 与真机抓包（catplay `take_own_seq()`、iPhone
+     * sysdiagnose）都是随机；旧实现固定 99，导致同一台车每次重连的 SYN 字节完全一样
+     * （2026-11-07 myCadillac 13 轮全是 `ctl=0x80 seq=99`，车机零回复——做了会话缓存
+     * 或重放判定的车机会把重复序号当重传帧丢掉）。序号只是本端账法，随机不影响
+     * 现有车型：对端用 ack 回显「期望的下一个」，与初值无关。
+     */
+    private var sentSequence = randomInitialSequence()
     private var lastSentAcknowledged: Int? = null
     private var lastReceivedInOrder = 0
 
@@ -155,12 +164,6 @@ class Iap2LinkEngine(
 
     /** 诊断：丢弃未知会话 ID 的数据帧时回调（(sessionId, bytes)）。 */
     var onUnknownSessionData: ((Int, Int) -> Unit)? = null
-
-    /**
-     * EA 会话（2 号）数据帧回调：设置后 EA 帧不再被当作未知会话丢弃，
-     * 而是交由此回调（事件通道虚拟链路上的触摸 HID 载体）。
-     */
-    var onEaData: ((bytes: ByteArray) -> Unit)? = null
 
     /** 诊断：每个入向链路帧的摘要（control/seq/ack/sessionId/载荷长度），真车排查用。 */
     var onFrameReceived: ((control: Int, sequence: Int, ack: Int, sessionId: Int, size: Int) -> Unit)? = null
@@ -542,9 +545,10 @@ class Iap2LinkEngine(
                 handleData(sequence, payload!!)
             } else if (fileTransferSessionId != null && sessionId == fileTransferSessionId) {
                 handleData(sequence, payload!!, fileTransfer = true)
-            } else if (sessionId == SESSION_EA && onEaData != null) {
-                // EA 会话数据（含触摸 HID）：对端序号账法与控制会话独立，直接上抛
-                onEaData?.invoke(payload!!)
+            } else if (sessionId == SESSION_EA) {
+                // EA（ExternalAccessory）会话数据：本项目**已移除 EA 车机控制**，这里不再
+                // 上抛给任何消费者。但链路层仍要 ACK——不确认会让对端不停重传同一个包，
+                // 连带把控制会话也拖慢（EA 的序号账法与控制会话独立，只补 ACK 不前移自身序号）。
                 sendAcknowledgement()
             } else {
                 reportUnknownSessionData(sessionId, payload!!.size)
@@ -863,7 +867,8 @@ class Iap2LinkEngine(
         private const val CONTROL_ACKNOWLEDGEMENT = 0x40
         private const val CONTROL_EXTENDED_ACKNOWLEDGEMENT = 0x20
         private const val CONTROL_RESET = 0x10
-        private const val INITIAL_SEQUENCE = 99
+        /** 初始序号随机（见 [sentSequence] 注释）：固定值会被做重放判定的车机当重复帧。 */
+        private fun randomInitialSequence(): Int = java.security.SecureRandom().nextInt(0x100)
         private const val MARKER_RESEND_MILLIS = 1_000L
         private const val SYNC_RESEND_MILLIS = 500L
         private const val ACK_SLACK = 10

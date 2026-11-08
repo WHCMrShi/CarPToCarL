@@ -48,6 +48,26 @@ class AudioCandidatesTest {
     }
 
     @Test
+    fun pcm48RemainsDefaultWhenUpstreamAac48IsAlsoAvailable() {
+        val receiver = client(
+            listOf(
+                format(102, "media", (1L shl 23) or (1L shl 22)),
+                format(100, "media", 1L shl 15),
+                format(100, "compatibility", 1L shl 15),
+            ),
+        )
+        try {
+            val candidates = receiver.audioCandidates()
+            assertEquals(AudioCodec.PCM, candidates.first().codec)
+            assertEquals(48_000, candidates.first().sampleRate)
+            assertEquals("media", candidates.first().audioType)
+            assertEquals(48_000, candidates.first { it.codec == AudioCodec.AAC_LC }.sampleRate)
+        } finally {
+            receiver.dispose()
+        }
+    }
+
+    @Test
     fun aacOnlyReceiverDoesNotAcquireUndeclaredPcmCandidate() {
         val candidates = client(listOf(format(102, "media", 1L shl 22))).audioCandidates()
         assertEquals(1, candidates.size)

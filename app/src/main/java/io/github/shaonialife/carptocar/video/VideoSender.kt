@@ -699,14 +699,14 @@ class VideoSender(
             }
             if (!configSent) {
                 if (hasSps) {
-                    sendConfigFromNals(nalUnits, output)
+                    sendConfigFromNals(nalUnits, output, "当期帧自带SPS")
                 } else {
                     // 新源的首个 IDR 没带 SPS/PPS：用上一轮缓存的 csd 兜底重发。
                     // 没这层兜底就是「configSent 永远 false → 每帧丢弃 → 永久黑屏」。
                     val csd = cachedCsd
                     if (csd != null) {
                         log("VIDEO: 新 IDR 未携带 SPS/PPS——用缓存 csd 重发 VideoConfig")
-                        sendConfigFromNals(csd, output)
+                        sendConfigFromNals(csd, output, "缓存csd兜底")
                     } else {
                         droppedBeforeConfig++
                         return false
@@ -894,7 +894,7 @@ class VideoSender(
     ) {
         val annexB = ByteArray(size)
         buffer.get(annexB)
-        sendConfigFromNals(splitAnnexB(annexB), output)
+        sendConfigFromNals(splitAnnexB(annexB), output, "本机编码器输出SPS")
     }
 
     /** 本帧携带的 SPS 是否与已发出的那份一致（true = 无需重发 config）。 */
@@ -908,6 +908,7 @@ class VideoSender(
     private fun sendConfigFromNals(
         nalUnits: List<NalSlice>,
         output: java.io.OutputStream,
+        csdSource: String,
     ) {
         val sps = nalUnits.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 7 }?.copyBytes()
         val pps = nalUnits.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 8 }?.copyBytes()
@@ -941,14 +942,14 @@ class VideoSender(
         val spsSane = parsed != null &&
             parsed.first in 320..4096 && parsed.second in 180..2304
         val (cfgWidth, cfgHeight) = resolveConfigSize(canvas, live, width, height, parsed)
-        if (parsed != null && (parsed.first != cfgWidth || parsed.second != cfgHeight)) {
-            log(
-                "VIDEO: SPS 解析 ${parsed.first}x${parsed.second}" +
-                    "（${if (spsSane) "宏块对齐值，仅诊断" else "不合理已忽略"}），" +
-                    "VideoConfig 声明 ${cfgWidth}x$cfgHeight" +
-                    "\n  ↳ SPS ${sps.size}B=" + sps.joinToString(" ") { "%02x".format(it) },
-            )
-        }
+        // SPS 诊断**每次发 config 都打**，包括解析失败的情况。
+        // 旧实现只在「解析出来且与声明不一致」时打，于是「解析失败」和「恰好一致」
+        // 在日志里长得一模一样——排查时无法判断车机在让屏那一刻拿到的 avcC 究竟
+        // 是 1412×654 还是别的东西（2026-11-06 14:00 日志踩过这个坑）。
+        log(
+            describeSpsConfig(parsed, cfgWidth to cfgHeight, csdSource, spsSane) +
+                "\n  ↳ SPS ${sps.size}B=" + sps.joinToString(" ") { "%02x".format(it) },
+        )
         val streamSize = live?.takeIf { it.first > 0 && it.second > 0 } ?: (width to height)
         if (!canvasMismatchLogged && (streamSize.first != cfgWidth || streamSize.second != cfgHeight)) {
             canvasMismatchLogged = true
@@ -1258,11 +1259,22 @@ class VideoSender(
         /** 屏幕流 keepAlive 间隔（catplay `DEFAULT_KEEP_ALIVE` = 1s）。 */
         private const val KEEPALIVE_INTERVAL_MS = 1_000L
 
-        /** 直通空闲多久后开始重发 IDR（毫秒）。 */
-        private const val IDLE_RESEND_AFTER_MS = 1_500L
+        /**
+         * 直通空闲多久后开始重发 IDR（毫秒）。
+         *
+         * 对齐同源项目实车行为（2026-11-06 18:36 奥迪 CL39 日志：
+         * `已 1s 没有新画面——重发最后一个 IDR 维持车机连接（第 N 次）`）。
+         * 车机对屏流空闲的容忍很短，晚于 1s 开始补帧就可能被判「没有画面」。
+         */
+        private const val IDLE_RESEND_AFTER_MS = 1_000L
 
-        /** 空闲重发间隔（毫秒）：2s 一次足够撑住车机的存活判定，也不会白烧带宽。 */
-        private const val IDLE_RESEND_INTERVAL_MS = 2_000L
+        /**
+         * 空闲重发间隔（毫秒）。
+         *
+         * 同样对齐 1s：源停摆时每秒一个 10~200KB 的关键帧（≈1Mbps），
+         * 换来车机侧解码/让屏状态不被判空闲；真实帧一到立刻停补。
+         */
+        private const val IDLE_RESEND_INTERVAL_MS = 1_000L
 
         /**
          * 构造屏幕流 keepAlive 帧（明文头 + 可选 bplist 统计体）。
@@ -1304,6 +1316,32 @@ class VideoSender(
                 writeLittleEndianFloat(header, 124, body.size.toFloat())
             }
             return if (body.isEmpty()) header else header + body
+        }
+
+        /**
+         * SPS 诊断行（纯函数，便于单测）：**无论解析成功与否都返回一行**。
+         *
+         * 旧实现只在「SPS 解析出来且 ≠ 声明」时才打日志，导致「解析失败」与「恰好
+         * 一致」在日志里完全无法区分。2026-11-06 14:00 那份日志正是因此无法确定
+         * 车机在让屏时刻收到的 avcC 到底是什么尺寸。现在把 csd 来源（当期帧自带 /
+         * 缓存兜底 / 本机编码器）也一起写进去，一次导日志即可定案。
+         */
+        internal fun describeSpsConfig(
+            parsed: Pair<Int, Int>?,
+            cfg: Pair<Int, Int>,
+            csdSource: String,
+            sane: Boolean,
+        ): String {
+            val parsedText = parsed?.let { "${it.first}x${it.second}" } ?: "解析失败"
+            val verdict =
+                if (parsed == null || parsed.first != cfg.first || parsed.second != cfg.second) {
+                    " ⚠ 与 SPS 不一致/未解析"
+                } else {
+                    " ✓与 SPS 一致"
+                }
+            return "VIDEO: SPS=$parsedText" +
+                "（${if (sane) "宏块对齐值，仅诊断" else "不合理/解析失败"}）" +
+                " csd来源=$csdSource → VideoConfig 声明 ${cfg.first}x${cfg.second}$verdict"
         }
 
         /**

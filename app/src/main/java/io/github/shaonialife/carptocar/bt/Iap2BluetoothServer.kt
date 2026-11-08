@@ -38,6 +38,14 @@ class Iap2BluetoothServer(
     private val nowPlayingProvider: (() -> CarPlayNowPlaying?)? = null,
     /** 保活泵退出（BT 链路断开）时回调：主控据此释放「会话处理中」（僵尸轮次堵门修复）。 */
     private val onLinkClosed: () -> Unit = {},
+    /**
+     * 有设备真正连进来（通过目标校验之后）时回调。
+     *
+     * 「兼容模式」下监听是常开的（App 一启动就发布服务，不等「启动连接」），
+     * 主控据此把「只是挂着等」和「真的在跑会话」区分开——否则 `isSessionRunning`
+     * 会一直为真，自动连接会被自己挡掉。
+     */
+    private val onPeerConnected: () -> Unit = {},
 ) {
     companion object {
         /**
@@ -50,6 +58,26 @@ class Iap2BluetoothServer(
     }
 
     private var serverSocket: AtomicReference<BluetoothServerSocket?> = AtomicReference(null)
+
+    /**
+     * 「车机只认苹果设备」兼容模式的占位 SDP 记录（默认关，见 [BtCompatPrefs]）。
+     * 生命周期跟着 [start]/[stop] 走——监听在，占位就在。
+     */
+    private val identityProbe = BtIdentityProbeSockets(context) { line -> log(line) }
+
+    val isProbeRunning: Boolean get() = identityProbe.isRunning
+
+    /**
+     * 立刻撤掉占位记录（用户关掉开关时用），**不影响** iAP2 监听。
+     *
+     * 不能顺手把监听也停掉：这一刀可能落在正在跑的会话上（车机全靠这条 RFCOMM
+     * 做控制通道），开关的语义只是「别再声明苹果 UUID」，不是「断开」。
+     */
+    fun stopProbe() {
+        if (!identityProbe.isRunning) return
+        identityProbe.stop()
+        log("BT-PROBE: 占位 SDP 记录已撤下（iAP2 监听保持）")
+    }
 
     @Volatile
     private var activeChannel: Iap2LinkChannel? = null
@@ -68,12 +96,24 @@ class Iap2BluetoothServer(
         senderSession?.pushNowPlaying()
     }
 
+    /**
+     * 车机 AirPlay 端口一直不开时，让 iAP2 会话重发一次 `0x4e0e + 0x4300` 叫醒它。
+     *
+     * 返回 false = 当前没有可用的发送端会话（链路已断/还没起来），调用方只能退而重公告 ctrl。
+     */
+    fun nudgeCarPlayAvailability(reason: String): Boolean =
+        senderSession?.nudgeCarPlayAvailability(reason) ?: false
+
     fun hasPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
             PackageManager.PERMISSION_GRANTED
 
     fun start(): Boolean {
-        if (running) return true
+        if (running) {
+            // 已在监听：只把占位记录对齐到当前开关状态（运行期拨开关就靠这条生效）
+            syncIdentityProbe()
+            return true
+        }
         if (!hasPermission()) {
             log("BT: 缺少 BLUETOOTH_CONNECT 权限")
             return false
@@ -94,6 +134,7 @@ class Iap2BluetoothServer(
             )
             running = true
             log("BT: 监听 $SDP_NAME，等待接收端回连…")
+            syncIdentityProbe()
             Thread(::acceptLoop, "iap2-bt-accept").apply {
                 isDaemon = true
                 start()
@@ -105,14 +146,33 @@ class Iap2BluetoothServer(
         }
     }
 
+    /** 占位记录跟随开关：开着补挂、关掉撤下。失败不影响 iAP2 主链路。 */
+    private fun syncIdentityProbe() {
+        if (BtCompatPrefs.enabled(context)) {
+            if (!identityProbe.isRunning) identityProbe.start()
+        } else {
+            stopProbe()
+        }
+    }
+
     @SuppressLint("MissingPermission")
     private fun acceptLoop() {
         while (running) {
             val socket: BluetoothSocket =
                 try {
-                    serverSocket.get()?.accept() ?: break
+                    val server = serverSocket.get()
+                    if (server == null) {
+                        running = false
+                        break
+                    }
+                    server.accept()
                 } catch (error: IOException) {
                     if (running) log("BT: accept 失败 - ${error.message}")
+                    // 必须把 running 改回 false：accept 循环是唯一的接收方，循环一退出
+                    // 就再没人接连接了。留着 true 会让 isRunning 一直骗人说「在监听」，
+                    // 而 start() 又因为 running 已是 true 直接返回——监听永久假死。
+                    // 「监听常开」（见 BtCompatPrefs）依赖下一次 start() 能把循环重新拉起来。
+                    running = false
                     break
                 }
             val peerName =
@@ -142,6 +202,9 @@ class Iap2BluetoothServer(
                 continue
             }
             log("BT: 接收端已连入 name=$peerName，开始 iAP2 发送端会话")
+            // 登记对端：音频配置守卫（BtProfiles.guardAudioProfiles）据此知道盯哪台设备
+            BtSessionGate.notePeerActive(peerAddress)
+            onPeerConnected()
             Thread({ runSession(socket) }, "iap2-bt-session").apply {
                 isDaemon = true
                 start()
@@ -166,7 +229,10 @@ class Iap2BluetoothServer(
                 onWifiCredentials,
                 onEndpointUpdate,
                 nowPlayingProvider,
-                onSessionReady = { session -> senderSession = session },
+                onSessionReady = { session ->
+                    senderSession = session
+                    BtSessionGate.iap2Ready = true
+                },
                 onLinkClosed = onLinkClosed,
             )
         } catch (error: IOException) {
@@ -174,6 +240,7 @@ class Iap2BluetoothServer(
         } finally {
             activeChannel = null
             senderSession = null
+            BtSessionGate.iap2Ready = false
             BtSessionGate.inboundActive = false
             channel.close()
             // 两条完全不同的撤退路径，日志必须能分辨（否则用户以为「蓝牙连上就断 = App 有 bug」）：
@@ -195,8 +262,6 @@ class Iap2BluetoothServer(
 
     /** 主动结束当前 BT 控制会话（不影响监听）。用于 AirPlay 配对前复现控制通道退役状态。 */
     fun detachCurrentSession() {
-        // 断链之前先把 EA 会话收干净：车机侧没被显式停掉的 EAP/VIWI 会话会挡住下一次连接
-        senderSession?.closeEaSessions("主动断开控制会话")
         activeChannel?.let { channel ->
             activeChannel = null
             channel.close()
@@ -206,6 +271,7 @@ class Iap2BluetoothServer(
 
     fun stop() {
         running = false
+        identityProbe.stop()
         serverSocket.getAndSet(null)?.let { runCatching { it.close() } }
         log("BT: 监听已停止")
     }
