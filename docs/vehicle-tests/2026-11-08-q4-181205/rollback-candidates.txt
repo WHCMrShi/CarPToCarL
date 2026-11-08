@@ -1,0 +1,31 @@
+# Last connected anchor: e1e9290dd389c5afa2f00f06b1f22fd7437cc9cc
+# Delivery code: ca2066fe712f; newest first; snapshot only, NOT an executable revert script.
+# Review every dependency; pure documentation commits may be retained. No revert has been performed.
+
+ca2066f fix(video): carry socket ownership explicitly with captured output streams
+57d34e1 chore(diagnostics): retain connection pipeline stages and stamp build revisions
+11b8ba2 fix(audio): leave silent-only profile sessions unclassified
+628db42 fix(carlife): use the first control connection for handshake without probing
+0fdeebd fix(video): isolate CarLife reading with a bounded IDR-aware sender queue
+a640940 fix(video): detect blocked writes independently and close their owned sockets
+60b1093 docs(vehicle-tests): record last connected APK and rollback anchor
+da8d6f3 fix(video): match decoder config to SPS and fence late notice frames
+6f5cc72 docs(vehicle-tests): archive review evidence and follow-up validation
+11b85bf fix(artwork): reset failed retry budgets when tracks share a cover
+7305d73 fix(artwork): preserve transparency and add Android codec fixtures
+55ca837 fix(carlife): retire uncertain control writes instead of replaying HUD requests
+d1cd5de fix(carlife): salvage complete media entries with bounded list parsing
+d62a774 fix(artwork): use single in-flight file frames and support peer window one
+66f947d fix(artwork): retry failed subscriptions without retransmitting successful images
+65bda3a fix(audio): scope playback evidence by track state and signal time
+b2dad28 fix(video): recover local stream failures before terminal session cleanup
+da9486b fix(audio): reject stale setup and rebuild results after session end
+2a6ad93 fix(audio): preserve complete normal speech input and separate backlog budgets
+5c58686 fix(session): bind CarLife ownership before video startup
+c977456 fix(audio): retain aligned tail of oversized navigation PCM blocks
+e1072ac chore(diagnostics): distinguish HUD activation from actual navigation traffic
+c67e110 fix(session): stop bound CarLife when its CarPlay stream ends
+5abab57 fix(audio): decouple CarLife ingress from blocking UDP writes
+ca40a55 fix(artwork): bound thumbnails and avoid redundant transfer resets
+f8ae5a5 fix(audio): recover silent input without relying on notification binding
+fca8d69 fix(carlife): decode direct media messages and protobuf progress
