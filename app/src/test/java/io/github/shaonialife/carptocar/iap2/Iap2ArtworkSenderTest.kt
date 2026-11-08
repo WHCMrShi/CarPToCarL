@@ -7,6 +7,24 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class Iap2ArtworkSenderTest {
+    @Test fun newTrackWithSameCoverGetsIndependentRetryBudget() {
+        ArtworkRepository().use { repo ->
+            val sender = Iap2ArtworkSender()
+            sender.subscribe(26)
+            val first = loaded(repo, "first-track")
+            var id = start(sender, first)
+            repeat(3) {
+                sender.response(byteArrayOf(id.toByte(), 6)); sender.subscribe(26)
+                val next = sender.decorate(first, 26, true).artworkTransferId
+                if (next != null) { sender.metadataSent(next); send(sender); id = next }
+            }
+            assertNull(sender.decorate(first, 26, true).artworkTransferId)
+            val sameAlbum = loaded(repo, "second-track")
+            val fresh = start(sender, sameAlbum)
+            sender.response(byteArrayOf(fresh.toByte(), 6)); sender.subscribe(26)
+            assertNotNull(sender.decorate(sameAlbum, 26, true).artworkTransferId)
+        }
+    }
     @Test fun failedSameTrackCanRetryTwiceButSuccessDoesNotRetransmit() {
         ArtworkRepository().use { repo ->
             val sender = Iap2ArtworkSender()

@@ -59,6 +59,12 @@ internal class Iap2ArtworkSender(
         attribute = requestedField
         val result = value.artworkSource?.request()
         val nextImage = result?.image
+        if (value.artworkSource?.trackId != lastTrack) {
+            retryCount = 0; retryContent = null
+            if (failed && phase == Phase.DONE) {
+                content = null; transferId = null; failed = false
+            }
+        }
         awaitingImage = result != null && !result.complete
         diagnostic("prepare revision=${value.artworkSource?.revision} sourcePresent=${value.artworkSource != null} complete=${result?.complete} imageBytes=${nextImage?.size ?: 0}")
         // 加载中不等于「无封面」；新曲先撤去引用，不发送空文件再撤销。
