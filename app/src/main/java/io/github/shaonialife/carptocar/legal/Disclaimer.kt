@@ -1,6 +1,7 @@
 package io.github.shaonialife.carptocar.legal
 
 import android.content.Context
+import io.github.shaonialife.carptocar.BuildConfig
 
 /**
  * 免责声明的接受状态与放行规则。
@@ -22,7 +23,8 @@ object DisclaimerPrefs {
 
     fun acceptedVersion(context: Context): Int = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_ACCEPTED_VERSION, 0)
 
-    fun hasAcceptedCurrent(context: Context): Boolean = acceptedVersion(context) >= CURRENT_VERSION
+    fun hasAcceptedCurrent(context: Context): Boolean =
+        BuildConfig.SKIP_STARTUP_DISCLAIMER || acceptedVersion(context) >= CURRENT_VERSION
 
     fun accept(context: Context) {
         context
@@ -61,12 +63,13 @@ internal fun canAcceptDisclaimer(
 ): Boolean = countdownDone && (!contentScrollable || scrolledToBottom)
 
 /**
- * 是否还需要展示启动时的强制声明：本机没有接受过**当前版本**。
+ * Q4 构建默认跳过启动声明；保留接受记录和只读查看能力。
  */
 internal fun needsDisclaimerAtLaunch(
     acceptedVersion: Int,
     currentVersion: Int,
-): Boolean = acceptedVersion < currentVersion
+    skipStartup: Boolean = BuildConfig.SKIP_STARTUP_DISCLAIMER,
+): Boolean = !skipStartup && acceptedVersion < currentVersion
 
 /**
  * 底部提示文案（让用户知道「为什么按钮点不动」）。返回 null 表示可以点。

@@ -31,14 +31,16 @@ class DisclaimerPolicyTest {
 class DisclaimerVersionTest {
     @Test
     fun firstRunNeedsDisclaimer() {
-        assertTrue(needsDisclaimerAtLaunch(acceptedVersion = 0, currentVersion = 1))
+        assertTrue(needsDisclaimerAtLaunch(acceptedVersion = 0, currentVersion = 1, skipStartup = false))
+        assertFalse(needsDisclaimerAtLaunch(acceptedVersion = 0, currentVersion = 1))
     }
 
     @Test
     fun acceptedCurrentVersionNeedsNothing() {
         assertFalse(needsDisclaimerAtLaunch(acceptedVersion = 1, currentVersion = 1))
         // 老版本接受过（1）但当前是 2：文案变了必须重新确认
-        assertTrue(needsDisclaimerAtLaunch(acceptedVersion = 1, currentVersion = 2))
+        assertTrue(needsDisclaimerAtLaunch(acceptedVersion = 1, currentVersion = 2, skipStartup = false))
+        assertFalse(needsDisclaimerAtLaunch(acceptedVersion = 1, currentVersion = 2))
         // 已接受更高版本（回退安装旧 APK）：不再打扰
         assertFalse(needsDisclaimerAtLaunch(acceptedVersion = 3, currentVersion = 2))
     }
