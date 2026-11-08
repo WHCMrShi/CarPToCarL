@@ -5,6 +5,9 @@ import io.github.shaonialife.carptocar.airplay.StreamFrameCipher
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.util.Random
@@ -170,6 +173,34 @@ class VideoFrameWorkspaceTest {
         assertSame(retained, workspace.seal(small, header(AnnexBNals.avccSize(small) + 16), 2))
     }
 
+    @Test fun productionWriterRejectsCapturedOutputFromRetiredSocket() {
+        val sender = VideoSender("127.0.0.1", 5000, StreamFrameCipher.ChaCha(key), 1412, 654, log = {})
+        val ownerField = VideoSender::class.java.getDeclaredField("socket").apply { isAccessible = true }
+        val config = VideoSender::class.java.getDeclaredField("configSent").apply { isAccessible = true }
+        val counter = VideoSender::class.java.getDeclaredField("frameCounter").apply { isAccessible = true }
+        val capture = VideoSender::class.java.getDeclaredMethod("captureOutput").apply { isAccessible = true }
+        val send = VideoSender::class.java.getDeclaredMethod("sendFrameFromNals", List::class.java,
+            Boolean::class.javaPrimitiveType, java.io.OutputStream::class.java).apply { isAccessible = true }
+        val bytes = java.io.ByteArrayOutputStream()
+        val original = object : java.net.Socket() {
+            override fun getOutputStream(): java.io.OutputStream = bytes
+        }
+        ownerField.set(sender, original)
+        val captured = capture.invoke(sender)
+        java.net.Socket().use { replacement ->
+            ownerField.set(sender, replacement)
+            config.setBoolean(sender, true)
+            try {
+                send.invoke(sender, AnnexBNals.split(annex(20)), true, captured)
+                fail("retired output must be rejected before consuming a nonce")
+            } catch (error: java.lang.reflect.InvocationTargetException) {
+                assertTrue(error.cause is java.io.IOException)
+            }
+            assertEquals(0, bytes.size())
+            assertEquals(0L, counter.getLong(sender))
+        }
+    }
+
     @Test
     fun productionWriterSendsOneWholeFrameAndControlFramesDoNotConsumeNonce() {
         val sender = VideoSender("127.0.0.1", 5000, StreamFrameCipher.ChaCha(key), 1412, 654, log = {})
@@ -218,14 +249,21 @@ class VideoFrameWorkspaceTest {
                             }
                         }
                     val ownedSocket = object : java.net.Socket() {
-                        override fun getOutputStream(): java.io.OutputStream = output
+                        // A socket API need not return the same stream object on every call.
+                        override fun getOutputStream(): java.io.OutputStream = object : java.io.OutputStream() {
+                            override fun write(value: Int) = output.write(value)
+                            override fun write(bytes: ByteArray, offset: Int, length: Int) = output.write(bytes, offset, length)
+                        }
                     }
                     VideoSender::class.java.getDeclaredField("socket").apply { isAccessible = true }
                         .set(sender, ownedSocket)
+                    val capture = VideoSender::class.java.getDeclaredMethod("captureOutput").apply { isAccessible = true }
+                    val captured = capture.invoke(sender) as java.io.OutputStream
+                    assertNotSame(ownedSocket.getOutputStream(), ownedSocket.getOutputStream())
                     for ((counter, size) in listOf(0L to 200, 1L to 6000, 2L to 2)) {
                         val source = annex(size)
                         val before = writes
-                        send.invoke(sender, AnnexBNals.split(source), counter == 0L, output)
+                        send.invoke(sender, AnnexBNals.split(source), counter == 0L, captured)
                         assertEquals(before + 1, writes)
                         val head = ByteArray(128).also { input.readFully(it) }
                         val length =
@@ -238,7 +276,7 @@ class VideoFrameWorkspaceTest {
                             AirPlayCrypto.chachaSeal(key, AirPlayCrypto.nonce64(counter), packed(legacySplit(source)), head),
                             body,
                         )
-                        control.invoke(sender, 2, ByteArray(0), 0, output)
+                        control.invoke(sender, 2, ByteArray(0), 0, captured)
                         val keepAlive = ByteArray(128).also { input.readFully(it) }
                         assertEquals(2, keepAlive[4].toInt())
                     }

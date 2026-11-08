@@ -104,11 +104,24 @@ class VideoSender(
     private val writeDeadline = WriteDeadline<Socket>()
     @Volatile private var sourceQueue: VideoIngressQueue? = null
 
+    private class OwnedOutput(val owner: Socket, private val stream: java.io.OutputStream) : java.io.OutputStream() {
+        override fun write(value: Int) = stream.write(value)
+        override fun write(bytes: ByteArray, offset: Int, length: Int) = stream.write(bytes, offset, length)
+        override fun flush() = stream.flush()
+    }
+
+    private fun captureOutput(): java.io.OutputStream? {
+        val owner = socket ?: return null
+        return OwnedOutput(owner, owner.getOutputStream())
+    }
+
     private fun writeStream(kind: String, output: java.io.OutputStream, body: () -> Unit) {
         val waitingAt = System.nanoTime() / 1_000_000
         synchronized(writeLock) {
             val owner = socket ?: throw java.io.IOException("video socket retired")
-            if (owner.getOutputStream() !== output) throw java.io.IOException("stale video output")
+            if ((output as? OwnedOutput)?.owner?.let { it !== owner } == true) {
+                throw java.io.IOException("stale video output")
+            }
             val now = System.nanoTime() / 1_000_000
             if (now - waitingAt >= 250) log("VIDEO-WRITE: kind=$kind lockWaitMs=${now - waitingAt}")
             val lease = writeDeadline.begin(owner, kind, now)
@@ -546,7 +559,7 @@ class VideoSender(
         while (running.get()) {
             try {
                 if (reconnecting) { Thread.sleep(100); continue }
-                val output = socket?.getOutputStream()
+                val output = captureOutput()
                 if (output == null) { Thread.sleep(200); continue }
                 synchronized(submissionLock) {
                     maybeSendKeepAlive(output)
@@ -709,7 +722,7 @@ class VideoSender(
     ): Boolean {
         if (!running.get()) return false
         val output = try {
-            socket?.getOutputStream()
+            captureOutput()
         } catch (error: Exception) {
             null
         } ?: return false
@@ -859,7 +872,7 @@ class VideoSender(
 
     private fun drainEncoder() {
         val codec = encoder ?: return
-        val output = socket?.getOutputStream() ?: return
+        val output = captureOutput() ?: return
         val bufferInfo = MediaCodec.BufferInfo()
         try {
             while (running.get()) {
