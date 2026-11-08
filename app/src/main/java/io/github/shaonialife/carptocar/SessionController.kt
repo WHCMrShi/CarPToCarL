@@ -4729,7 +4729,7 @@ object SessionController {
                                                     null
                                                 },
                                             onEnded = onStreamEnded@{ ended ->
-                                                CarLifeHijack.stopIfAttached(ended)
+                                                CarLifeHijack.stopIfOwnedBy(ended)
                                                 if (videoSender !== ended || currentClient !== client) {
                                                     appendLog("CONNECT-DIAG: ignored retired video end callback")
                                                     return@onStreamEnded
@@ -4755,6 +4755,7 @@ object SessionController {
                                             },
                                         )
                                     // 先连端口（车机看门狗），编码器等 RECORD 后再启动
+                                    if (hijackMode) videoSender?.let(CarLifeHijack::bindProjection)
                                     videoSender?.openDataPort()
                                 }
                                 // 先 RECORD 激活会话并起视频，再协商音频（2026-10-17 奥迪定谳）：

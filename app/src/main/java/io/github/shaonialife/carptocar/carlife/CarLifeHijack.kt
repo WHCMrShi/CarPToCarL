@@ -161,6 +161,7 @@ object CarLifeHijack {
     /** 当前会话的视频通道；为 null 时收到的帧只进 GOP 缓存。 */
     @Volatile
     private var sender: VideoSender? = null
+    private val projectionOwner = ProjectionOwner<VideoSender>()
     private val zeroFrameRecovery = ZeroFrameRecoveryBudget()
 
     /**
@@ -557,6 +558,10 @@ object CarLifeHijack {
      */
     @Synchronized
     fun attach(videoSender: VideoSender, log: (String) -> Unit) {
+        if (!running.get() || !videoSender.isRunning || !projectionOwner.isCurrent(videoSender)) {
+            log("CONNECT-DIAG: skipped attachment of ended or retired video owner")
+            return
+        }
         logSink = log
         sender = null
         val pending = synchronized(gopLock) {
@@ -662,14 +667,18 @@ object CarLifeHijack {
         releaseTouch()
         touchState.newSession()
         sender = null
+        projectionOwner.clear()
         firstDeliverLogged = false
         deliverWindowFrames = 0
     }
 
+    @Synchronized
+    fun bindProjection(owner: VideoSender) { projectionOwner.bind(owner) }
+
     /** 只允许当前 CarPlay 视频所有者结束 HU；上一轮迟到的回调不能停止下一轮。 */
     @Synchronized
-    fun stopIfAttached(owner: VideoSender): Boolean {
-        if (sender !== owner) return false
+    fun stopIfOwnedBy(owner: VideoSender): Boolean {
+        if (!projectionOwner.end(owner)) return false
         logSink?.invoke("CONNECT-DIAG: CarPlay owner ended; stopping attached CarLife session")
         stop()
         return true
@@ -678,6 +687,7 @@ object CarLifeHijack {
     /** 完全停止（退出 App / 关闭开关 / 当前 CarPlay 真实结束）。 */
     @Synchronized
     fun stop() {
+        projectionOwner.clear()
         startupPrewarmAllowed = false
         running.set(false)
         warmScope.close()
