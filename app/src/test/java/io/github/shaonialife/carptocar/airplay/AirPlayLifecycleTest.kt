@@ -13,6 +13,24 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class AirPlayLifecycleTest {
+    @Test fun liveControlEvidenceEndsWhenPeerClosesBeforeVideoStartup() {
+        ServerSocket(0).use { server ->
+            val client = client(server.localPort)
+            try {
+                assertFalse(client.controlConnectionAlive)
+                assertTrue(connect(client))
+                val peer = server.accept()
+                val socket = AirPlayClient::class.java.getDeclaredField("socket").apply { isAccessible = true }.get(client)
+                AirPlayClient::class.java.getDeclaredMethod("startReader", java.net.Socket::class.java)
+                    .apply { isAccessible = true }.invoke(client, socket)
+                assertTrue(client.controlConnectionAlive)
+                peer.close()
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
+                while (client.controlConnectionAlive && System.nanoTime() < deadline) Thread.sleep(10)
+                assertFalse(client.controlConnectionAlive)
+            } finally { client.dispose() }
+        }
+    }
     private fun client(port: Int): AirPlayClient =
         AirPlayClient(
             Iap2SenderSession.CarPlayEndpoint("test", "", 0, 0, port, null, null, null, listOf("127.0.0.1")),

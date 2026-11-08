@@ -82,7 +82,7 @@ class AirPlayClient(
     @Volatile
     private var endpointGeneration = 0
 
-    private var socket: Socket? = null
+    @Volatile private var socket: Socket? = null
     private val connectionLock = Any()
     private val closeLock = Any()
     @Volatile private var lifecycleGeneration = 0L
@@ -98,6 +98,11 @@ class AirPlayClient(
         socket === owner && resources === scope && !scope.isClosed && !owner.isClosed
 
     private var cSeq = 0
+
+    val controlConnectionAlive: Boolean get() = synchronized(connectionLock) {
+        !cancelled && !disposed && !closingConnection && !resources.isClosed &&
+            socket?.let { it.isConnected && !it.isClosed } == true
+    }
 
     /**
      * 最近一次成功连上接收端时使用的地址（字符串形式，IPv6 链路本地地址带 `%<iface>`）。

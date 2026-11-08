@@ -251,8 +251,8 @@ class Iap2BluetoothServer(
             //  - sessionActive=false：会话在拿到端点前就断了，才是真故障，等重连。
             log(
                 if (BtSessionGate.sessionActive) {
-                    "SESSION 结束——接收端已断开 RFCOMM，iAP2 已迁到 WiFi 隧道" +
-                        "（无线 CarPlay 正常交接，继续推流；BT 监听仍在，需要时会再连）"
+                    "SESSION: RFCOMM ended while a WiFi session is active or negotiating; " +
+                        "handoff outcome follows CONNECT-DIAG and actual stream state"
                 } else {
                     "SESSION 结束，等待接收端重连（BT 监听仍在运行）"
                 },

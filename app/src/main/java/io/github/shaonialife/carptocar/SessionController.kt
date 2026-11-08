@@ -903,6 +903,12 @@ object SessionController {
      */
     fun onSenderLinkClosed() {
         if (videoSender?.isRunning == true) return
+        val client = currentClient
+        if (sessionStarting.get() && client?.controlConnectionAlive == true &&
+            boundCarSsid?.let(::carWifiReady) == true) {
+            appendLog("CONNECT-DIAG: BT ended during live WiFi/AirPlay negotiation; retain bounded setup attempt client=${System.identityHashCode(client)}")
+            return
+        }
         if (sessionStarting.compareAndSet(true, false)) {
             connectCancelled = true
             appendLog(">>> 本轮蓝牙链路断开——释放「会话处理中」，等待车机重连端点接手")
