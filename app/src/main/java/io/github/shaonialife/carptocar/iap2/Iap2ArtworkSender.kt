@@ -100,9 +100,10 @@ internal class Iap2ArtworkSender(
         }
     }
 
-    @Synchronized fun poll(maxPayload: Int): Plan? {
+    @Synchronized fun poll(maxPayload: Int, sessionVersion: Int = 2): Plan? {
         if (activePlan != null) return null
-        if (maxPayload < 12) { phase = Phase.DONE; image = null; cancel = null; awaitingImage = false; return null }
+        val setupSize = Iap2FileTransferFormat.setupSize(sessionVersion) ?: return null
+        if (maxPayload < setupSize) { phase = Phase.DONE; image = null; cancel = null; awaitingImage = false; return null }
         if (phase in listOf(Phase.START, Phase.DATA, Phase.SUCCESS) && clock() >= deadline) {
             log("ARTWORK: 封面传输超时 id=$transferId phase=$phase sent=$offset/${image?.size ?: 0}，取消文件传输")
             cancel = transferId; phase = Phase.DONE; image = null
@@ -115,11 +116,9 @@ internal class Iap2ArtworkSender(
         } else {
             if (!announced || id == null) return null
             when (phase) {
-                Phase.SETUP -> ByteArray(12).also {
-                    it[0] = id.toByte(); it[1] = 4
-                    val size = image?.size ?: 0
-                    repeat(8) { n -> it[2 + n] = (size.toLong() ushr (56 - n * 8)).toByte() }
-                    it[11] = 2; phase = Phase.START; deadline = clock() + 10_000
+                Phase.SETUP -> Iap2FileTransferFormat.setup(id, image?.size ?: 0, sessionVersion).also {
+                    log("ARTWORK: SETUP version=$sessionVersion bytes=${it.size} id=$id imageBytes=${image?.size ?: 0}")
+                    phase = Phase.START; deadline = clock() + 10_000
                 }
                 Phase.DATA -> {
                     val size = image?.size ?: 0

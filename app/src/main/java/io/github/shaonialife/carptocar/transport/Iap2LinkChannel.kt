@@ -118,6 +118,7 @@ class Iap2LinkChannel(
     @Volatile internal var onFileTransfer: ((ByteArray) -> Unit)? = null
     internal fun supportsFileTransfer(): Boolean = synchronized(lock) { engine.supportsArtworkTransfer }
     internal fun artworkDiagnostics(): String = synchronized(lock) { engine.artworkDiagnostics() }
+    internal fun fileTransferVersion(): Int? = synchronized(lock) { engine.fileTransferSessionVersion }
     internal fun fileTransferPayloadLimit(): Int = synchronized(lock) {
         (engine.peerSynchronization?.maxLength ?: 0) - Iap2LinkEngine.HEADER_BYTES - 1
     }

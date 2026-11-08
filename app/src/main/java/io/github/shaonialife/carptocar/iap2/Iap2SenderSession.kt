@@ -1061,7 +1061,7 @@ class Iap2SenderSession(
         },
         afterUpdate = {
             if (!channel.supportsFileTransfer()) null else {
-                val plan = artworkSender.poll(channel.fileTransferPayloadLimit())
+                val plan = artworkSender.poll(channel.fileTransferPayloadLimit(), channel.fileTransferVersion() ?: 0)
                 if (plan != null) artworkSender.submitted(plan, channel.sendFileTransfer(plan.bytes))
                 if (artworkSender.pending()) artworkSender.nextDelayMillis() else null
             }

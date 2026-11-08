@@ -18,3 +18,13 @@
 媒体期望状态从 false 变为 true 后独立等待 20 秒；有效格式宣告后也重新给 20 秒宽限。原有 PCM 静默、socket 打开宽限、真实视频存活和重连次数限制继续生效。真实断链仍走既有恢复，TTS 不按静默重连，不改变正常 PCM 内容或发送策略。
 
 完整构建通过：685 项单测、lint 0 errors / 95 warnings、assembleDebug 通过；未实车验证。
+
+## 3. 仪表封面：协商文件会话 v1
+
+日志中的 Wi-Fi 表为 `1/k0/v2, 2/k1/v1, 3/k2/v1`，并订阅字段 26；旧代码只接受文件 v2，因此未读取图片或发送文件。
+现在仅接受唯一有效的 kind=1、version=1/2，会话 ID 不重复；未知版本和歧义会话仍禁用。按协商版本编码：v1 SETUP 为 id、命令和 8 字节大小（10 字节），v2 另带 2 字节文件类型（12 字节）。不修改对端会话表，BT 和 Wi-Fi 均把版本传到发送器。
+
+格式交叉核对：[独立 iAP2 dissector](https://gist.github.com/JJTech0130/78527c600f7b4d0a7aeb294eab06d8ba) 区分基础 10 字节与 v2 类型字段；[xcertplay 接收端](https://github.com/shilapi/xcertplay/blob/master/shared/src/main/java/com/shilapi/xcertplay/iap2/session/Iap2FileTransferReceiver.kt)核对原有 v2。没有导入外部源码。
+保留订阅门禁、大小限制、引用先行、单文件在途、ACK/EAK/RTO、START/SUCCESS、取消和超时。新增字节级格式测试及模拟 v1 接收端的 Wi-Fi 完整图片往返。不是仅将 v2 报文强发给 v1。
+
+完整构建通过：689 项单测、lint 0 errors / 95 warnings、assembleDebug 通过。真实 Q4 是否接受并显示，仍需车测。

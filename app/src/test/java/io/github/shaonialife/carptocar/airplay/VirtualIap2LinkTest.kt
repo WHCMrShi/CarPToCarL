@@ -43,7 +43,8 @@ private fun splitLinkFrames(chunk: ByteArray): List<ByteArray> {
 }
 
 class VirtualIap2LinkTest {
-    private class Harness {
+    private class Harness(private val legacyFileSession: Boolean = false) {
+        private var legacySynSent = false
         val controlSent = ArrayList<ByteArray>()
         val allControl = ArrayList<ByteArray>()
         val eventSent = ArrayList<ByteArray>()
@@ -75,6 +76,17 @@ class VirtualIap2LinkTest {
         /** 车机→手机：喂字节并冲刷链路出站。 */
         fun carToLink() {
             val out = car.takeOutput()
+            if (legacyFileSession && !legacySynSent && out.isNotEmpty()) {
+                // 同一接收端状态机，在线上声明文件 v1；同时修正 SYN 的载荷校验和。
+                val marker = Iap2LinkEngine.MARKER
+                val offset = if (out.take(marker.size) == marker.toList()) marker.size else 0
+                check(out[offset] == 0xff.toByte() && out[offset + 1] == 0x5a.toByte())
+                check(out[offset + 4].toInt() and 0x80 != 0)
+                check(out[out.size - 4] == 12.toByte() && out[out.size - 3] == 1.toByte() && out[out.size - 2] == 2.toByte())
+                out[out.size - 2] = 1
+                out[out.size - 1] = (out.last().toInt() + 1).toByte()
+                legacySynSent = true
+            }
             if (out.isNotEmpty()) link.onCarBytes(out)
         }
 
@@ -148,7 +160,15 @@ class VirtualIap2LinkTest {
     }
 
     @Test fun artworkSubscriptionTransfersExactBytesAndStopsOnUnsubscribe() {
-        val h = Harness()
+        artworkTransfer(false)
+    }
+
+    @Test fun legacyArtworkSubscriptionTransfersExactBytesAndStopsOnUnsubscribe() {
+        artworkTransfer(true)
+    }
+
+    private fun artworkTransfer(legacy: Boolean) {
+        val h = Harness(legacy)
         io.github.shaonialife.carptocar.media.ArtworkRepository().use { repo ->
             val expected = ByteArray(3000) { it.toByte() }.also {
                 it[0] = 0xff.toByte(); it[1] = 0xd8.toByte(); it[2] = 0xff.toByte()
@@ -174,6 +194,7 @@ class VirtualIap2LinkTest {
                             val bytes = event.bytes
                             assertEquals(id, bytes[0])
                             if (bytes[1].toInt() == 4) {
+                                assertEquals(if (legacy) 10 else 12, bytes.size)
                                 assertTrue(h.car.sendFileTransfer(byteArrayOf(id, 1), h.now))
                             } else {
                                 data.write(bytes, 2, bytes.size - 2)

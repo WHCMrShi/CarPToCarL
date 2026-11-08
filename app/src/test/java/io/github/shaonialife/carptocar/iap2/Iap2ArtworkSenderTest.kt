@@ -7,6 +7,29 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class Iap2ArtworkSenderTest {
+    @Test fun legacyReceiverGetsTenByteSetupAndExactImageBeforeSuccess() {
+        ArtworkRepository().use { repo ->
+            val value = loaded(repo)
+            val sender = Iap2ArtworkSender()
+            val id = sender.decorate(value, 26, true).artworkTransferId!!
+            sender.metadataSent(id)
+            val setup = sender.poll(1024, 1)!!
+            assertArrayEquals(Iap2FileTransferFormat.setup(id, 5000, 1), setup.bytes)
+            sender.submitted(setup, true)
+            sender.response(byteArrayOf(id.toByte(), 1))
+            val bytes = java.io.ByteArrayOutputStream()
+            repeat(10) {
+                val plan = sender.poll(1024, 1) ?: return@repeat
+                assertEquals(id.toByte(), plan.bytes[0])
+                bytes.write(plan.bytes, 2, plan.bytes.size - 2)
+                sender.submitted(plan, true)
+            }
+            assertArrayEquals(image(5000), bytes.toByteArray())
+            assertTrue(sender.pending()) // 数据入队不等于 SUCCESS。
+            sender.response(byteArrayOf(id.toByte(), 5))
+            assertFalse(sender.pending())
+        }
+    }
     @Test fun diagnosticsDistinguishGateFromTransferAndDoNotRepeatEveryTick() {
         val logs = mutableListOf<String>()
         val sender = Iap2ArtworkSender(log = { logs += it })

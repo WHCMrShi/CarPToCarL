@@ -233,7 +233,8 @@ class Iap2LinkEngineTest {
             listOf(Iap2LinkEngine.SessionDescriptor(1, 0, 2), Iap2LinkEngine.SessionDescriptor(1, 1, 2)) to null,
             listOf(Iap2LinkEngine.SessionDescriptor(0, 1, 2)) to null,
             listOf(Iap2LinkEngine.SessionDescriptor(12, 1, 99)) to null,
-            listOf(Iap2LinkEngine.SessionDescriptor(12, 1, 1)) to null,
+            listOf(Iap2LinkEngine.SessionDescriptor(12, 1, 1)) to 12,
+            listOf(Iap2LinkEngine.SessionDescriptor(12, 1, 1), Iap2LinkEngine.SessionDescriptor(13, 1, 2)) to null,
         )
         cases.forEach { (sessions, expected) ->
             val phone = Iap2LinkEngine()
@@ -254,7 +255,8 @@ class Iap2LinkEngineTest {
             } else {
                 phone.takeOutput()
                 assertTrue(phone.sendFileTransfer(byteArrayOf(128.toByte(), 4), 2))
-                assertEquals(9, phone.takeOutput()[7].toInt() and 255)
+                assertEquals(expected, phone.takeOutput()[7].toInt() and 255)
+                assertEquals(sessions.single { it.kind == 1 }.version, phone.fileTransferSessionVersion)
             }
         }
     }

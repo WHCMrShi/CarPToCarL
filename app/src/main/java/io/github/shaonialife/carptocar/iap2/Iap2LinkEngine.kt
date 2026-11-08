@@ -379,23 +379,29 @@ class Iap2LinkEngine(
     /** 文件数据使用协商会话及共享可靠链路；文件层 START/SUCCESS 超时由上层独立处理。 */
     val fileTransferSessionId: Int? get() {
         val sessions = peerSynchronization?.sessions ?: return null
-        return sessions.singleOrNull { it.kind == 1 && it.version == 2 }?.id
+        return sessions.singleOrNull { it.kind == 1 }?.takeIf { it.version in 1..2 }?.id
             ?.takeIf { id -> id > 0 && sessions.count { it.id == id } == 1 }
     }
 
-    val supportsArtworkTransfer: Boolean get() = fileTransferSessionId != null && declaredMaxOutgoing >= 2 &&
-        (peerSynchronization?.maxLength ?: 0) >= HEADER_BYTES + 1 + 12
+    internal val fileTransferSessionVersion: Int? get() = peerSynchronization?.sessions
+        ?.singleOrNull { it.id == fileTransferSessionId && it.kind == 1 }?.version
+
+    val supportsArtworkTransfer: Boolean get() {
+        val setupSize = fileTransferSessionVersion?.let(Iap2FileTransferFormat::setupSize) ?: return false
+        return fileTransferSessionId != null && declaredMaxOutgoing >= 2 &&
+            (peerSynchronization?.maxLength ?: 0) >= HEADER_BYTES + 1 + setupSize
+    }
 
     internal fun artworkDiagnostics(): String {
         val sync = peerSynchronization
         val reason = when {
             sync == null -> "no-peer-SYN"
-            fileTransferSessionId == null -> "no-unique-kind1-v2-session"
+            fileTransferSessionId == null -> "no-unique-supported-file-session"
             declaredMaxOutgoing < 2 -> "window-too-small"
-            sync.maxLength < HEADER_BYTES + 1 + 12 -> "payload-too-small"
+            !supportsArtworkTransfer -> "payload-too-small"
             else -> "enabled"
         }
-        return "gate=$reason fileSession=$fileTransferSessionId window=$declaredMaxOutgoing maxLength=${sync?.maxLength} " +
+        return "gate=$reason fileSession=$fileTransferSessionId version=$fileTransferSessionVersion window=$declaredMaxOutgoing maxLength=${sync?.maxLength} " +
             "sessions=${sync?.sessions?.joinToString { "${it.id}/k${it.kind}/v${it.version}" }}"
     }
     internal var onFileDiagnostic: ((String) -> Unit)? = null
