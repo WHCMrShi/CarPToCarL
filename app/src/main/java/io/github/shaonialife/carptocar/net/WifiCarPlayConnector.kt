@@ -499,7 +499,9 @@ class WifiCarPlayConnector(
         callback.set(newCallback)
         val accepted =
             try {
-                connectivityManager.requestNetwork(request, newCallback)
+                // Observe every matching WiFi: a best-network request stops reporting the old
+                // network's loss after a replacement, even when our lease rejects that replacement.
+                connectivityManager.registerNetworkCallback(request, newCallback)
                 true
             } catch (error: Exception) {
                 log("WiFi: 绑定当前 WiFi 请求失败（${error.message}）")
