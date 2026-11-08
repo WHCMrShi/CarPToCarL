@@ -1516,6 +1516,12 @@ object SessionController {
                     // 空闲态收到邀请 = 车机正在等我们连（会话失败后唯一的恢复入口）。
                     // 回调本身只入队，真正的建链在后台线程做——它会占用应答窗口。
                     advertiser.onInvite = { receiverId -> onCtrlInvite(receiverId) }
+                    advertiser.onNetworkInvite = { receiverId, local ->
+                        val target = TargetDevicePrefs.get(context)?.address
+                        if (sessionWanted && !compatSuppressed && target != null && target.equals(BtSessionGate.activePeerAddress, true)) {
+                            wifiConnector?.recordReceiverInvite(target, receiverId, local)
+                        }
+                    }
                 }
             endpointBrowser =
                 CarPlayServiceBrowser(
@@ -1587,6 +1593,7 @@ object SessionController {
      * 幂等：已有会话时 BT 组件的 start() 自行短路，不会双开。
      */
     fun startConnection(context: Context) {
+        wifiConnector?.clearReceiverEvidence()
         io.github.shaonialife.carptocar.bt.CarIdleGuard.beginStartup(context)
         appendLog("CONNECT-DIAG: start requested running=${isSessionRunning()} phase=$phaseHint; default media=48k PCM")
         pendingCtrlInvite.begin()
@@ -1659,6 +1666,7 @@ object SessionController {
         val hadProjection = CarPlayService.mediaProjection != null
         // 用户终态：解冻恢复不得再自动把会话拉起来
         sessionWanted = false
+        wifiConnector?.clearReceiverEvidence()
         // All terminal callers must cancel in-flight WiFi work, not only the UI cancel button.
         connectCancelled = true
         pendingCtrlInvite.end()
@@ -2373,19 +2381,7 @@ object SessionController {
             if (boundCarSsid == ssid && wifiConnector?.currentNetwork != null) {
                 bound = true
             } else {
-                val latch = java.util.concurrent.CountDownLatch(1)
-                wifiConnector?.bindCurrentWifi { ok ->
-                    bound = ok
-                    latch.countDown()
-                }
-                // 分片等待：期间用户取消要能立刻退出，不必等满窗口
-                val deadline = android.os.SystemClock.uptimeMillis() + WIFI_BIND_WAIT_S * 1_000
-                while (!connectCancelled &&
-                    bound.not() &&
-                    android.os.SystemClock.uptimeMillis() < deadline
-                ) {
-                    if (latch.await(200, java.util.concurrent.TimeUnit.MILLISECONDS)) break
-                }
+                bound = wifiConnector?.bindCurrentWifiBlocking(WIFI_BIND_WAIT_S * 1_000L, ssid) { connectCancelled } != null
                 if (bound) boundCarSsid = ssid
             }
         }

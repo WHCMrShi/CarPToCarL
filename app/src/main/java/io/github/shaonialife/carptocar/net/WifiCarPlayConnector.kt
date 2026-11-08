@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.LinkProperties
 import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.net.wifi.WifiNetworkSpecifier
@@ -69,6 +70,17 @@ class WifiCarPlayConnector(
 
     val currentNetwork: Network? get() = boundNetwork.get()
     private val boundNetwork = AtomicReference<Network?>(null)
+    private val identityProof = WifiIdentityProof({ SystemClock.elapsedRealtime() })
+    @Volatile private var retryIdentity: (() -> Unit)? = null
+
+    fun recordReceiverInvite(target: String, receiver: String?, local: String?) {
+        if (identityProof.record(target, receiver, local)) {
+            log("WIFI: target receiver invitation recorded with exact local interface; ttlMs=30000")
+            retryIdentity?.invoke()
+        }
+    }
+
+    fun clearReceiverEvidence() { identityProof.clear() }
 
     /**
      * 应用专属网络被系统断开（热点关闭/离开范围）时回调。会话层据此提示用户；
@@ -465,13 +477,33 @@ class WifiCarPlayConnector(
         val latch = CountDownLatch(1)
         val result = AtomicReference<Network?>(null)
         val lease = WifiNetworkLease<Network>()
+        val capabilities = java.util.concurrent.ConcurrentHashMap<Network, NetworkCapabilities>()
+        val links = java.util.concurrent.ConcurrentHashMap<Network, LinkProperties>()
         val newCallback =
-            object : ConnectivityManager.NetworkCallback() {
+            object : ConnectivityManager.NetworkCallback(ConnectivityManager.NetworkCallback.FLAG_INCLUDE_LOCATION_INFO) {
                 override fun onAvailable(network: Network) {
+                    log("WIFI: fallback candidate=$network awaiting ordered capabilities and link properties")
+                }
+
+                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                    capabilities[network] = caps
+                    tryBind(network)
+                }
+
+                override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) {
+                    links[network] = properties
+                    tryBind(network)
+                }
+
+                fun tryBind(network: Network) {
                     if (callback.get() !== this) return
-                    val observedSsid = networkSsid(network)
-                    if (expectedSsid != null && observedSsid != null && expectedSsid != observedSsid) {
-                        log("WIFI: fallback rejected network=$network reason=ssid-mismatch")
+                    if (boundNetwork.get() == network) return
+                    val caps = capabilities[network] ?: return
+                    val properties = links[network] ?: return
+                    val observedSsid = plainSsid((caps.transportInfo as? WifiInfo)?.ssid)
+                    val target = io.github.shaonialife.carptocar.bt.TargetDevicePrefs.get(context)?.address
+                    if (!identityProof.accepts(expectedSsid, observedSsid, target, properties.linkAddresses.mapNotNull { it.address.hostAddress })) {
+                        log("WIFI: fallback not authorized network=$network identity=${if (observedSsid == null) "unknown-no-matching-proof" else "ssid-mismatch"}")
                         return
                     }
                     if (!lease.accept(network)) {
@@ -483,12 +515,14 @@ class WifiCarPlayConnector(
                         boundNetwork.set(network)
                         result.set(network)
                     }
-                    log("WIFI: fallback selected network=$network identity=${if (observedSsid != null) "ssid-visible" else "ssid-unavailable"} bound=$bound; lease pinned")
+                    log("WIFI: fallback selected network=$network identity=${if (observedSsid != null) "ssid-visible" else "target-invite-and-exact-interface"} bound=$bound; lease pinned")
                     log("WiFi: 建议网络已生效——绑定当前 WiFi（$network bindProcessToNetwork=$bound）")
                     latch.countDown()
                 }
 
                 override fun onLost(network: Network) {
+                    capabilities.remove(network)
+                    links.remove(network)
                     if (callback.get() === this && lease.lost(network) && boundNetwork.compareAndSet(network, null)) {
                         result.compareAndSet(network, null)
                         connectivityManager.bindProcessToNetwork(null)
@@ -497,6 +531,7 @@ class WifiCarPlayConnector(
                 }
             }
         callback.set(newCallback)
+        retryIdentity = { capabilities.keys.forEach { newCallback.tryBind(it) } }
         val accepted =
             try {
                 // Observe every matching WiFi: a best-network request stops reporting the old
@@ -574,20 +609,6 @@ class WifiCarPlayConnector(
         return if (plain.isEmpty() || plain == UNKNOWN_SSID) null else plain
     }
 
-    private fun networkSsid(network: Network): String? {
-        val info = runCatching { connectivityManager.getNetworkCapabilities(network)?.transportInfo as? WifiInfo }.getOrNull()
-        plainSsid(info?.ssid)?.let { return it }
-        // Legacy connectionInfo can only identify this callback when there is a single WiFi.
-        val wifiNetworks = runCatching {
-            connectivityManager.allNetworks.filter {
-                connectivityManager.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
-            }
-        }.getOrDefault(emptyList())
-        if (wifiNetworks != listOf(network)) return null
-        @Suppress("DEPRECATION")
-        return plainSsid(runCatching { wifiManager?.connectionInfo?.ssid }.getOrNull())
-    }
-
     /**
      * 目标热点已经在系统里连着时，**直接把它绑到本进程**——不发 specifier、不弹确认框。
      *
@@ -611,6 +632,7 @@ class WifiCarPlayConnector(
     }
 
     fun release() {
+        retryIdentity = null
         callback.getAndSet(null)?.let {
             runCatching { connectivityManager.unregisterNetworkCallback(it) }
         }

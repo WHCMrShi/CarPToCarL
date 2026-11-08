@@ -93,6 +93,7 @@ class CarPlayCtrlAdvertiser(
      */
     @Volatile
     var onInvite: ((receiverId: String?) -> Unit)? = null
+    var onNetworkInvite: ((receiverId: String?, localAddress: String?) -> Unit)? = null
 
     /** 注册时的 WiFi SSID：换网（2.4G→5G 或车机热点切换）后旧注册不可见，需重新注册。 */
     private var registeredSsid: String? = null
@@ -296,6 +297,7 @@ class CarPlayCtrlAdvertiser(
                 inviteCount++
                 log("$TAG: ✓ 车机 ctrl 邀请（第 $inviteCount 次，receiver=${receiverId ?: "?"}）——AirPlay 窗口已开启")
                 // 回调里可能再走一轮连接（会话失败后的恢复入口），异常不能打死应答
+                runCatching { onNetworkInvite?.invoke(receiverId, client.localAddress?.hostAddress) }
                 runCatching { onInvite?.invoke(receiverId) }
                     ?.onFailure { log("$TAG: 邀请回调异常 - ${it.message ?: it.javaClass.simpleName}") }
             }
