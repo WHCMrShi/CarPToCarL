@@ -437,6 +437,8 @@ class AudioSender(
     /** 最近一次收到**真实** PCM 的时刻（uptimeMillis）；静音保活据此判断要不要补帧。 */
     @Volatile
     private var lastRealFeedAt = 0L
+    private val realInputSeen = AtomicBoolean(false)
+    val hasRealInput: Boolean get() = realInputSeen.get()
     private val continuity = AudioContinuityWindow()
     @Volatile private var ingress: AudioIngressQueue? = null
 
@@ -545,7 +547,10 @@ class AudioSender(
         if (!running.get() || record != null) return // 采集模式在跑时不接受注入
         if (size <= 0 || size > srcPcm.size) return
         val admitted = ingress?.offer(srcPcm, size, if (srcRate > 0) srcRate else sampleRate, if (srcChannels == 1) 1 else 2, speech) == true
-        if (admitted) lastRealFeedAt = android.os.SystemClock.uptimeMillis()
+        if (admitted) {
+            realInputSeen.set(true)
+            lastRealFeedAt = android.os.SystemClock.uptimeMillis()
+        }
         continuity.input(System.nanoTime(), admitted)
     }
 

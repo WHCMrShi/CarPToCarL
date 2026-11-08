@@ -729,6 +729,7 @@ object SessionController {
     /** 音频通道真正开始推流的时刻（uptimeMillis）；0 = 未开始。 */
     @Volatile
     private var activeAudioStartedAt: Long = 0L
+    @Volatile private var activeAudioHadInput = false
 
     /**
      * 音频「存活窗口」（ms）：超过它才认为该档位可用。
@@ -2872,6 +2873,7 @@ object SessionController {
                 )
             if (!installAudio(lease, sender) {
                 activeAudioProfile = profile
+                activeAudioHadInput = false
                 activeAudioReceiverKey = identity
                 activeAudioStartedAt = android.os.SystemClock.uptimeMillis()
             }) false else { startCallWatcher(); true }
@@ -2897,6 +2899,7 @@ object SessionController {
         var previous: AudioSender? = null
         var watcher: Thread? = null
         val detach = {
+            activeAudioHadInput = activeAudioHadInput || audioSender?.hasRealInput == true
             previous = audioSender; audioSender = null
             watcher = callWatcher; callWatcher = null; callWatcherLease = null
         }
@@ -3283,14 +3286,20 @@ object SessionController {
             return
         }
         val lived = if (startedAt > 0) android.os.SystemClock.uptimeMillis() - startedAt else -1L
+        val hadInput = activeAudioHadInput || audioSender?.hasRealInput == true
+        activeAudioHadInput = false
         // 本轮记忆很快失效：下次连接重新按最新记忆选档
         activeAudioProfile = null
         activeAudioStartedAt = 0L
         if (startedAt == 0L || identity.isBlank()) return
+        if (!hadInput) {
+            appendLog("AUDIO: 档位 ${profile.label} 存活 ${lived / 1000}s，但没有真实 PCM 输入；仅协商/静音保活，不记录成功或不兼容")
+            return
+        }
         val ctx = appContext?.applicationContext
         if (lived >= AUDIO_PROFILE_PROBE_MS) {
             AudioProfileMemory.recordWorking(ctx, identity, profile.key)
-            appendLog("AUDIO: 档位 ${profile.label} 存活 ${lived / 1000}s——记为本车机可用档位")
+            appendLog("AUDIO: 档位 ${profile.label} 存活 ${lived / 1000}s 且收到真实 PCM——记录传输候选可用；不代表已确认车内可听")
             return
         }
         val allKeys = audioCandidateKeys(identity)
