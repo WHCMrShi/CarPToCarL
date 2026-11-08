@@ -108,9 +108,12 @@ class CarPlayService : Service() {
 
     private fun releaseLocks() {
         runCatching { wakeLock?.release() }
+        val wakeHeld = wakeLock?.isHeld == true
         wakeLock = null
         runCatching { wifiLock?.release() }
+        val wifiHeld = wifiLock?.isHeld == true
         wifiLock = null
+        fileLog("SVC: lock-release wakeHeld=$wakeHeld wifiHeld=$wifiHeld")
     }
 
     override fun onStartCommand(

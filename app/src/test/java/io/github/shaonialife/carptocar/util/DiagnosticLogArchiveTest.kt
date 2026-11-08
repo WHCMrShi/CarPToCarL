@@ -49,6 +49,12 @@ class DiagnosticLogArchiveTest {
         val main = temp.newFile()
         val writer = SessionLogFile(main, "marker", maxBytes = 30)
         val evidence = listOf(
+            "IDLE: check source=service lateMs=1200 verdict=UI_VISIBLE",
+            "APPROACH: target ACL disconnected",
+            "SVC: lock-release wakeHeld=false wifiHeld=false",
+            "WIFI: fallback ignored replacement network=123",
+            "WiFi: fallback binding complete",
+            "iap2 并行兜底：0x5702 等待超时",
             "VIDEO-WRITE: timeout kind=frame elapsedMs=4000",
             "VIDEO-QUEUE: dropped=32 waitingIdr=true",
             "VIDEO-PATH: wireFrames=150 write=frame:4000ms",
