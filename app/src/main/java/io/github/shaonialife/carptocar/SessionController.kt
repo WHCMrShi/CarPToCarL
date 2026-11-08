@@ -1057,7 +1057,12 @@ object SessionController {
             server.stopProbe()
             return
         }
-        if (fromUser) compatSuppressed = false
+        if (io.github.shaonialife.carptocar.bt.BtCompatResumePolicy.needsNewConnection(fromUser, compatSuppressed, connectCancelled)) {
+            val context = appContext ?: return
+            appendLog("CONNECT-DIAG: explicit compat resume starts a fresh connection, not a cancelled listener")
+            startConnection(context)
+            return
+        }
         if (compatSuppressed) return
         if (!server.hasPermission()) {
             // 首次启动还没授权：不刷屏，等授权后由看门狗在 30 秒内自己挂上
