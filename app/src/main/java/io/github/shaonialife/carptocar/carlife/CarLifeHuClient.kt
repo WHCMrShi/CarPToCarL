@@ -185,6 +185,7 @@ class CarLifeHuClient(
 ) {
 
     private val running = AtomicBoolean(false)
+    private val hudObserver = CarLifeHudObserver(::send, log)
     private val sockets = ConcurrentHashMap<Int, Socket>()
     private var cmdOut: OutputStream? = null
     private var touchOut: OutputStream? = null
@@ -624,7 +625,12 @@ class CarLifeHuClient(
             CarLifeProtocol.MD_VERSION_MATCH -> {
                 versionMatched = true
                 send(CarLifeProtocol.HU_STATISTICS, CarLifeProtocol.statisticsInfo())
+                hudObserver.versionMatched()
             }
+
+            CarLifeHudProtocol.SUBSCRIBE_DONE,
+            CarLifeHudProtocol.NEXT_TURN,
+            CarLifeHudProtocol.ASSISTANT_GUIDE -> hudObserver.receive(serviceType, payload)
 
             CarLifeProtocol.MD_INFO -> {
                 log("CARLIFE: 收到手机设备信息（${payload.size}B）")
@@ -688,6 +694,7 @@ class CarLifeHuClient(
 
             CarLifeProtocol.MD_MODULE_STATUS -> {
                 val modules = CarLifeProtocol.parseModuleStatus(payload)
+                hudObserver.moduleStatus(modules)
                 if (modules.isEmpty()) return
                 if (modules.any { it.second == 0 }) {
                     send(
@@ -1688,6 +1695,7 @@ class CarLifeHuClient(
             while (running.get()) {
                 Thread.sleep(1000)
                 if (!running.get()) return
+                hudObserver.tick(android.os.SystemClock.uptimeMillis())
                 send(CarLifeProtocol.HEARTBEAT, ByteArray(0))
             }
         } catch (error: Exception) {

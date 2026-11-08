@@ -42,5 +42,6 @@ class DiagnosticLogArchiveTest {
         assertFalse(text.contains("password"))
         assertTrue(text.contains("done"))
         assertFalse(DiagnosticLogArchive.isDiagnostic("RAW rx: binary payload"))
+        assertTrue(DiagnosticLogArchive.isDiagnostic("HUD-DIAG: NEXT_TURN action=1"))
     }
 }
