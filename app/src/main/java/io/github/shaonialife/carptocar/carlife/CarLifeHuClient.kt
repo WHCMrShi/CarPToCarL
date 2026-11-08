@@ -763,16 +763,9 @@ class CarLifeHuClient(
             CarLifeProtocol.MD_MEDIA_PROGRESS -> {
                 // 媒体进度条（u32 progressBar，单位 ms）。只做低频诊断：限流 10 秒，
                 // 否则冻结解冻一次就能把几百行灌进日志（见 progressLog 注释）。
-                val progress = if (payload.size >= 4) {
-                    ((payload[0].toInt() and 0xFF) shl 24) or
-                        ((payload[1].toInt() and 0xFF) shl 16) or
-                        ((payload[2].toInt() and 0xFF) shl 8) or
-                        (payload[3].toInt() and 0xFF)
-                } else {
-                    0
-                }
+                val progress = CarLifeMediaProtocol.progress(payload)
                 if (progressLog.allow("media-progress")) {
-                    log("CARLIFE: 媒体进度 ${progress}ms（同类提示 10 秒最多一行）")
+                    log("CARLIFE: 媒体进度 ${progress?.let { "${it}ms" } ?: "invalid protobuf (${payload.size}B)"}（同类提示 10 秒最多一行）")
                 }
             }
 

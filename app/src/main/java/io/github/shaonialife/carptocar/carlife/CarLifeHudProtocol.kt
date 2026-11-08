@@ -12,57 +12,7 @@ internal object CarLifeHudProtocol {
     const val START = 0x18045
     val modules = listOf(0, 1) // 数据订阅编号；不是模块状态中的 NAVI=2 / EDOG=8。
 
-    data class Field(val number: Int, val wire: Int, val value: Long? = null, val bytes: ByteArray? = null)
-    data class Fields(val items: List<Field>, val error: String?) {
-        fun int(number: Int): Int? = items.lastOrNull { it.number == number && it.wire == 0 }?.value?.toInt()
-        fun bytes(number: Int): ByteArray? = items.lastOrNull { it.number == number && it.wire == 2 }?.bytes
-        fun shape(): String = items.joinToString(",") { "${it.number}/${it.wire}" + (it.bytes?.let { b -> ":${b.size}B" } ?: "") }
-    }
-
-    fun parse(payload: ByteArray): Fields {
-        val fields = mutableListOf<Field>()
-        var index = 0
-        fun varint(): Long {
-            var value = 0L
-            for (i in 0..9) {
-                require(index < payload.size) { "truncated-varint" }
-                val b = payload[index++].toInt() and 255
-                require(i != 9 || b <= 1) { "overflow-varint" }
-                value = value or ((b and 127).toLong() shl (i * 7))
-                if (b and 128 == 0) return value
-            }
-            error("overflow-varint")
-        }
-        return try {
-            require(payload.size <= 65535) { "oversized-command" }
-            while (index < payload.size) {
-                require(fields.size < 128) { "too-many-fields" }
-                val tag = varint()
-                require(tag in 8..0xffffffffL) { "invalid-tag" }
-                val number = (tag ushr 3).toInt()
-                val wire = (tag and 7).toInt()
-                if (wire == 0) {
-                    fields += Field(number, wire, value = varint())
-                } else {
-                    val length = when (wire) {
-                        1 -> 8L
-                        2 -> varint()
-                        5 -> 4L
-                        else -> error("unsupported-wire-$wire")
-                    }
-                    require(length >= 0 && length <= payload.size - index) { "truncated-field-$number" }
-                    val end = index + length.toInt()
-                    fields += Field(number, wire, bytes = if (wire == 2) payload.copyOfRange(index, end) else null)
-                    index = end
-                }
-            }
-            Fields(fields, null)
-        } catch (e: IllegalArgumentException) {
-            Fields(fields, e.message)
-        } catch (e: IllegalStateException) {
-            Fields(fields, e.message)
-        }
-    }
+    fun parse(payload: ByteArray) = CarLifeProtobuf.parse(payload)
 
     /** START 和 SUBSCRIBE 都带列表，显式编码编号 0，不能按 proto3 默认值省略。 */
     fun subscription(ids: List<Int>): ByteArray = ByteArrayOutputStream().apply {
