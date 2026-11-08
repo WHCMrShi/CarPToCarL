@@ -82,7 +82,7 @@ class CarLifeHuClient(
      * 「用户确实在放东西」才值得重连——否则人只是停在桌面没开音乐，也会被当成故障反复
      * 重连，白白打断引擎的音频管道。默认 false = 永不因沉默重连（只有断链才重连）。
      */
-    private val audioExpected: () -> Boolean = { false },
+    private val audioExpected: () -> Boolean? = { null },
     /** 上层持有跨 HU 会话的限次预算；默认不升级为整轮重建。 */
     private val requestZeroFrameRecovery: (Long, Boolean, Int) -> Boolean = { _, _, _ -> false },
     /** 收到手机推送的媒体信息（歌名/歌手/封面，0x10035）。 */
@@ -186,6 +186,9 @@ class CarLifeHuClient(
 
     private val running = AtomicBoolean(false)
     private val hudObserver = CarLifeHudObserver(::send, log)
+    private val playbackEvidence = CarLifePlaybackEvidence()
+    private val audioExpectationLog = LogThrottle(30_000L)
+    private var mediaTrack: List<String>? = null
     private val sockets = ConcurrentHashMap<Int, Socket>()
     private var cmdOut: OutputStream? = null
     private var touchOut: OutputStream? = null
@@ -751,6 +754,8 @@ class CarLifeHuClient(
                     return
                 }
                 infos.forEach { info ->
+                    val key = listOf(info.songId, info.song, info.artist, info.album)
+                    if (mediaTrack != key) { mediaTrack = key; playbackEvidence.reset() }
                     log(
                         "CARLIFE: 媒体信息 song=${info.song} artist=${info.artist} " +
                             "album=${info.album} dur=${info.duration}ms mode=${info.mode} " +
@@ -764,6 +769,7 @@ class CarLifeHuClient(
                 // 媒体进度条（u32 progressBar，单位 ms）。只做低频诊断：限流 10 秒，
                 // 否则冻结解冻一次就能把几百行灌进日志（见 progressLog 注释）。
                 val progress = CarLifeMediaProtocol.progress(payload)
+                if (progress != null) playbackEvidence.progress(android.os.SystemClock.uptimeMillis(), progress)
                 if (progressLog.allow("media-progress")) {
                     log("CARLIFE: 媒体进度 ${progress?.let { "${it}ms" } ?: "invalid protobuf (${payload.size}B)"}（同类提示 10 秒最多一行）")
                 }
@@ -1437,6 +1443,7 @@ class CarLifeHuClient(
                         CarLifeProtocol.MUSIC_PKG_INIT -> {
                             val format = parseAudioInit(payload)
                             if (format != null) {
+                                channel.expectation.format(android.os.SystemClock.uptimeMillis())
                                 val (rate, channelConfig, sampleFormat) = format
                                 val channels = channelsOf(channelConfig)
                                 log(
@@ -1530,7 +1537,9 @@ class CarLifeHuClient(
 
     private fun superviseAudio(channel: AudioChannel) {
         val now = android.os.SystemClock.uptimeMillis()
-        channel.expectation.observe(now, engineAudioActive || audioExpected())
+        val external = audioExpected()
+        val expected = playbackEvidence.expected(now, external, engineAudioActive)
+        channel.expectation.observe(now, expected)
         val socket = sockets[channel.port]
         if (socket == null || socket.isClosed || channel.dead) {
             // 断链重连：不设次数上限（引擎冷启动期可能连续 reset，重连成功才停）
@@ -1547,6 +1556,9 @@ class CarLifeHuClient(
         if (channel.isTts) return
         val silentFor = now - channel.lastPcmAt
         if (silentFor < SILENT_RECONNECT_MS) return
+        if (audioExpectationLog.allow("silent-${channel.port}")) {
+            log("AUDIO-DIAG: silent-input port=${channel.port} idleMs=$silentFor expected=$expected external=$external engineStart=$engineAudioActive; recovery requires fresh grace and live video")
+        }
         // 刚（重新）接上的宽限期：给引擎一点时间把流推起来。
         if (now - channel.openedAt < SILENT_GRACE_MS) return
         // 从本次开始播放/新格式算宽限，不能用桌面静默的历史时长立即拆音频口。
@@ -1555,7 +1567,7 @@ class CarLifeHuClient(
         // 那是会话冻结/断链恢复的活，这里跟着重连只会把水搅浑。
         if (lastFrameAt == 0L || now - lastFrameAt > VIDEO_ALIVE_MS) return
         // 「确实该有声音」：引擎刚发过 0x30002，或上层确认音乐会话正在播放。
-        if (!engineAudioActive && !audioExpected()) return
+        if (!expected) return
         if (now < channel.nextSilentAt) return
         if (channel.silentReopens >= SILENT_MAX_ATTEMPTS) {
             if (channel.nextSilentAt != Long.MAX_VALUE) {

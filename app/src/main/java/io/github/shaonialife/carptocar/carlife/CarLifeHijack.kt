@@ -756,7 +756,12 @@ object CarLifeHijack {
                 onAudioGate = { active -> if (!scope.isClosed) onEngineAudioGate(active) },
                 // 音频沉默看门狗判据：音乐会话确实在播 = 此刻「应该」有声，
                 // 9240 却连续零 PCM 才是异常。读不到会话（null）时按「不确定」放行不重连。
-                audioExpected = { MediaSessionsState.nowPlaying?.playing == true },
+                audioExpected = {
+                    val systemMusic = runCatching {
+                        appContext?.getSystemService(android.media.AudioManager::class.java)?.isMusicActive == true
+                    }.getOrDefault(false)
+                    CarLifePlaybackEvidence.external(MediaSessionsState.nowPlaying?.playing, systemMusic)
+                },
                 onMediaInfo = { info -> if (!scope.isClosed) onMediaInfo(info) },
                 requestedFps = requestedFps,
                 initialConnectType = connectType,
