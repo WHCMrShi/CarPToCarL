@@ -624,6 +624,7 @@ class CarLifeHuClient(
     }
 
     private fun handleMessage(serviceType: Int, payload: ByteArray) {
+        hudObserver.controlMessage(serviceType)
         when (serviceType) {
             CarLifeProtocol.MD_VERSION_MATCH -> {
                 versionMatched = true
@@ -633,7 +634,7 @@ class CarLifeHuClient(
 
             CarLifeHudProtocol.SUBSCRIBE_DONE,
             CarLifeHudProtocol.NEXT_TURN,
-            CarLifeHudProtocol.ASSISTANT_GUIDE -> hudObserver.receive(serviceType, payload)
+            CarLifeHudProtocol.ASSISTANT_GUIDE -> hudObserver.receive(serviceType, payload, android.os.SystemClock.uptimeMillis())
 
             CarLifeProtocol.MD_INFO -> {
                 log("CARLIFE: 收到手机设备信息（${payload.size}B）")
@@ -697,7 +698,7 @@ class CarLifeHuClient(
 
             CarLifeProtocol.MD_MODULE_STATUS -> {
                 val modules = CarLifeProtocol.parseModuleStatus(payload)
-                hudObserver.moduleStatus(modules)
+                hudObserver.moduleStatus(modules, android.os.SystemClock.uptimeMillis())
                 if (modules.isEmpty()) return
                 if (modules.any { it.second == 0 }) {
                     send(

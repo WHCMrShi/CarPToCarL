@@ -4,6 +4,31 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CarLifeHudObserverTest {
+    @Test fun boundedControlHistogramAndNavigationStateExplainMissingTbt() {
+        val f = Fixture()
+        f.observer.versionMatched()
+        f.observer.tick(100)
+        repeat(40) { f.observer.controlMessage(0x10100 + it) }
+        f.observer.moduleStatus(listOf(2 to 1), 1000)
+        f.observer.tick(30100)
+        assertTrue(f.lines.any { it.contains("navigation={2=1}") && it.contains("navigationStateAgeMs=29100") })
+        assertTrue(f.lines.any { it.contains("otherControlRx=8") })
+        assertTrue(f.lines.any { it.contains("0x10100:1") })
+        assertFalse(f.lines.any { it.contains("0x10127:1") })
+    }
+
+    @Test fun failedStartIsDistinctFromSuccessfulDecisionAndAckLatencyIsRecorded() {
+        val lines = mutableListOf<String>()
+        val observer = CarLifeHudObserver({ id, _ -> id != CarLifeHudProtocol.START }, lines::add)
+        observer.versionMatched()
+        observer.tick(100)
+        observer.receive(CarLifeHudProtocol.SUBSCRIBE_DONE, byteArrayOf(8, 1, 18, 4, 8, 0, 16, 1), 127)
+        observer.tick(1000)
+        observer.tick(30100)
+        assertTrue(lines.any { it.contains("latencyMs=27") })
+        assertTrue(lines.any { it.contains("startAttempted=true startSent=false") })
+    }
+
     private class Fixture {
         val sent = mutableListOf<Pair<Int, ByteArray>>()
         val lines = mutableListOf<String>()
