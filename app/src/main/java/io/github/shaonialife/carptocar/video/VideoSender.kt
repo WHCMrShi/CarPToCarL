@@ -101,6 +101,38 @@ class VideoSender(
     private val writeLock = Any()
     private val submissionLock = Any()
     private val realSourceSeen = AtomicBoolean(false)
+    private val writeDeadline = WriteDeadline<Socket>()
+
+    private fun writeStream(kind: String, output: java.io.OutputStream, body: () -> Unit) {
+        val waitingAt = System.nanoTime() / 1_000_000
+        synchronized(writeLock) {
+            val owner = socket ?: throw java.io.IOException("video socket retired")
+            if (owner.getOutputStream() !== output) throw java.io.IOException("stale video output")
+            val now = System.nanoTime() / 1_000_000
+            if (now - waitingAt >= 250) log("VIDEO-WRITE: kind=$kind lockWaitMs=${now - waitingAt}")
+            val lease = writeDeadline.begin(owner, kind, now)
+            try { body() } finally {
+                writeDeadline.finish(lease)
+                val elapsed = System.nanoTime() / 1_000_000 - now
+                if (elapsed >= 250) log("VIDEO-WRITE: kind=$kind elapsedMs=$elapsed")
+            }
+        }
+    }
+
+    private fun startWriteWatchdog() {
+        Thread({
+            try {
+                while (running.get()) {
+                    Thread.sleep(250)
+                    val now = System.nanoTime() / 1_000_000
+                    val lease = writeDeadline.overdue(now) ?: continue
+                    log("VIDEO-WRITE: timeout kind=${lease.kind} elapsedMs=${now - lease.startedAt}; closing owned socket to unblock writer")
+                    // Close the captured socket only; a replacement belongs to another write.
+                    runCatching { lease.owner.close() }
+                }
+            } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+        }, "video-write-watch").apply { isDaemon = true; start() }
+    }
     private var encoder: MediaCodec? = null
     private var inputSurface: Surface? = null
     private val running = AtomicBoolean(false)
@@ -483,6 +515,7 @@ class VideoSender(
         // 预置 csd 仍然有用：它让首个 IDR 一到就能立刻发 config，只是不许放行 P 帧。
         beginAwaitingKeyFrame()
         log("VIDEO: 直通模式启动（外部 H.264，跳过重编码）${width}x$height")
+        startWriteWatchdog()
         Thread({ passthroughKeepAliveLoop() }, "video-passthrough-ka").apply {
             isDaemon = true
             start()
@@ -869,7 +902,7 @@ class VideoSender(
         lastKeepAliveAt = now
         keepAliveCount++
         val frame = buildKeepAliveFrame(keepAliveWithStats, frames, bytesPerSecond, framesPerSecond)
-        synchronized(writeLock) {
+        writeStream("keepalive", output) {
             output.write(frame)
             output.flush()
         }
@@ -957,7 +990,7 @@ class VideoSender(
         // 真车（Audi 4851）却黑屏（2026-10-19 用户日志）。
         val viewArea = (viewAreaSize?.invoke() ?: canvas)?.takeIf { it.first > 0 && it.second > 0 }
         val header = buildVideoConfigHeader(body.size, cfgWidth, cfgHeight, viewArea)
-        synchronized(writeLock) {
+        writeStream("config", output) {
             // config 帧是明文，但同样不能插在别的帧中间（否则接收端按半帧解析）。
             output.write(header)
             output.write(body)
@@ -1133,7 +1166,7 @@ class VideoSender(
         // keepAlive/config 帧在两种模式下都不加密。头只能构造一次——ChaCha 的 AAD
         // 必须是最终发出的那 128 字节（重复构造会带不同时间戳，对端解密必然失败）。
         // 构造头 + 加密 + 写字节 + 计数器自增必须整体串行（见 [writeLock]）。
-        synchronized(writeLock) {
+        writeStream("frame", output) {
             val header =
                 buildHeader(
                     OP_FRAME,

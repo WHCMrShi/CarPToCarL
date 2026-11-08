@@ -217,6 +217,11 @@ class VideoFrameWorkspaceTest {
                                 raw.write(bytes, offset, length)
                             }
                         }
+                    val ownedSocket = object : java.net.Socket() {
+                        override fun getOutputStream(): java.io.OutputStream = output
+                    }
+                    VideoSender::class.java.getDeclaredField("socket").apply { isAccessible = true }
+                        .set(sender, ownedSocket)
                     for ((counter, size) in listOf(0L to 200, 1L to 6000, 2L to 2)) {
                         val source = annex(size)
                         val before = writes
