@@ -14,6 +14,15 @@ import java.util.concurrent.TimeUnit
  * 而且**被动断开的自动重绑整条失效**（2026-11-02 日志的三处症状同源）。
  */
 class WifiJoinGateTest {
+    @org.junit.Test fun resetWakesOldWaitersAndOldFinishCannotReplaceTheNewRequest() {
+        val gate = WifiJoinGate()
+        val old = (gate.decide("car", 0) as WifiJoinGate.Decision.Run).ticket
+        gate.reset()
+        org.junit.Assert.assertEquals(false, old.await(1))
+        val next = gate.decide("car", 1) as WifiJoinGate.Decision.Run
+        gate.finish(old, true, 2)
+        org.junit.Assert.assertSame(next.ticket, (gate.decide("car", 3) as WifiJoinGate.Decision.Wait).ticket)
+    }
     private fun gate() = WifiJoinGate(5_000L)
 
     @Test

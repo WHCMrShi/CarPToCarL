@@ -27,6 +27,7 @@ object CarApproachPrefs {
     private const val KEY_ACL_CONNECTED = "car_approach_acl_connected"
     @Volatile private var observedAddress: String? = null
     @Volatile private var observedConnected = false
+    fun clearAclObservation() { observedConnected = false; observedAddress = null }
 
     /**
      * 「请把本应用加入电池优化白名单」的提醒间隔：7 天。

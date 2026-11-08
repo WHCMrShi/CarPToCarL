@@ -130,6 +130,15 @@ class WifiJoinGate(
     /** 当前是否有请求在跑（诊断/日志用）。 */
     fun runningSsid(): String? = synchronized(lock) { pending?.ssid }
 
+    /** Terminal cancellation must wake old waiters without handing them a new request's result. */
+    fun reset() = synchronized(lock) {
+        pending?.let { it.succeeded = false; it.latch.countDown() }
+        pending = null
+        lastSsid = null
+        lastAtMillis = 0L
+        lastSucceeded = false
+    }
+
     companion object {
         /**
          * 默认去重窗口。5 秒只挡住「同一瞬间两条路径各发一次」，而一次应用专属网络的
