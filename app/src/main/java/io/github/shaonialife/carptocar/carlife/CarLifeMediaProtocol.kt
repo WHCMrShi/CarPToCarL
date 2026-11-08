@@ -2,16 +2,18 @@ package io.github.shaonialife.carptocar.carlife
 
 /** 手机版本同时存在单条媒体消息和列表封装；按字段 1 的 wire type 判别，禁止猜测嵌套。 */
 internal object CarLifeMediaProtocol {
-    fun parseMedia(payload: ByteArray): List<CarLifeMediaInfo> {
-        val f = CarLifeProtobuf.parse(payload)
-        if (f.error != null) return emptyList()
+    fun parseMedia(payload: ByteArray, log: (String) -> Unit = {}): List<CarLifeMediaInfo> {
+        val f = CarLifeProtobuf.parse(payload, maxFields = 1024)
+        if (f.error != null) log("CARLIFE: media-wire warning=${f.error} completeFields=${f.items.size}")
         return when (f.items.firstOrNull { it.number == 1 }?.wire) {
-            2 -> listOfNotNull(media(f))
+            2 -> if (f.error == null) listOfNotNull(media(f)) else emptyList()
             0 -> {
                 val entries = f.items.filter { it.number == 2 && it.wire == 2 }
-                if (f.int(1) != entries.size) emptyList()
-                else entries.mapNotNull { item ->
-                    CarLifeProtobuf.parse(item.bytes!!).takeIf { it.error == null }?.let(::media)
+                if (f.int(1) != entries.size) log("CARLIFE: media-wire countMismatch declared=${f.int(1)} completeEntries=${entries.size}")
+                entries.mapNotNull { item ->
+                    val inner = CarLifeProtobuf.parse(item.bytes!!)
+                    if (inner.error != null) log("CARLIFE: media-wire skippedEntry error=${inner.error}")
+                    inner.takeIf { it.error == null }?.let(::media)
                 }
             }
             else -> emptyList()

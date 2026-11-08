@@ -739,7 +739,9 @@ class CarLifeHuClient(
 
             CarLifeProtocol.MD_MEDIA_INFO -> {
                 // 手机 CarLife 内置播放器开始播放时主动推送的媒体信息（歌名/歌手/封面）
-                val infos = CarLifeProtocol.parseMediaInfoList(payload)
+                val infos = CarLifeProtocol.parseMediaInfoList(payload) { line ->
+                    if (emptyMediaLog.allow("media-wire")) log(line)
+                }
                 if (infos.isEmpty()) {
                     // 每次媒体变化都会来一包，解析不出内容时对排查无帮助——限流 5 秒。
                     // 但只说「解析为空」永远查不出格式差异，带上头 32B：真机 7368B 的

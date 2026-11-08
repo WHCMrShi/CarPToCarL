@@ -22,13 +22,28 @@ class CarLifeMediaProtocolTest {
         val one = media()
         val payload = byteArrayOf(8, 1, 18, one.size.toByte()) + one + byteArrayOf(120, 1)
         assertEquals("漫步人生路", CarLifeProtocol.parseMediaInfoList(payload).single().song)
-        assertTrue(CarLifeProtocol.parseMediaInfoList(byteArrayOf(8, 2, 18, one.size.toByte()) + one).isEmpty())
+        assertEquals("漫步人生路", CarLifeProtocol.parseMediaInfoList(byteArrayOf(8, 2, 18, one.size.toByte()) + one).single().song)
     }
 
     @Test fun malformedAndAmbiguousDataDoNotLeakPartialTrack() {
         assertTrue(CarLifeProtocol.parseMediaInfoList(media() + byteArrayOf(82, 127)).isEmpty())
         assertTrue(CarLifeProtocol.parseMediaInfoList(byteArrayOf(18, 1, 65)).isEmpty())
         assertTrue(CarLifeProtocol.parseMediaInfoList(byteArrayOf(8, 1, 18, 100, 8)).isEmpty())
+    }
+
+    @Test fun largeListsAndCompleteEntriesBeforeBadTailRemainUsable() {
+        val one = media()
+        val entry = byteArrayOf(18, one.size.toByte()) + one
+        val large = java.io.ByteArrayOutputStream().apply {
+            write(byteArrayOf(8, 0x80.toByte(), 1))
+            repeat(128) { write(entry) }
+        }.toByteArray()
+        assertEquals(128, CarLifeProtocol.parseMediaInfoList(large).size)
+        val warnings = mutableListOf<String>()
+        assertEquals(1, CarLifeProtocol.parseMediaInfoList(byteArrayOf(8, 2) + entry + byteArrayOf(18, 127, 1), warnings::add).size)
+        assertTrue(warnings.isNotEmpty())
+        // 完整外层中的坏子条目只跳过该条；单条报文截断仍拒绝。
+        assertEquals(1, CarLifeProtocol.parseMediaInfoList(byteArrayOf(8, 2) + entry + byteArrayOf(18, 2, 26, 127)).size)
     }
 
     @Test fun progressDecodesVarintRatherThanBigEndianHeader() {

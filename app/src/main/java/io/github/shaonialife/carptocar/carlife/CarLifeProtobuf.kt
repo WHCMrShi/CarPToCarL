@@ -9,7 +9,7 @@ internal object CarLifeProtobuf {
         fun shape(): String = items.joinToString(",") { "${it.number}/${it.wire}" + (it.bytes?.let { b -> ":${b.size}B" } ?: "") }
     }
 
-    fun parse(payload: ByteArray): Fields {
+    fun parse(payload: ByteArray, maxFields: Int = 128): Fields {
         val fields = mutableListOf<Field>()
         var index = 0
         fun varint(): Long {
@@ -26,7 +26,7 @@ internal object CarLifeProtobuf {
         return try {
             require(payload.size <= 65535) { "oversized-command" }
             while (index < payload.size) {
-                require(fields.size < 128) { "too-many-fields" }
+                require(fields.size < maxFields.coerceIn(1, 1024)) { "too-many-fields" }
                 val tag = varint()
                 require(tag in 8..0xffffffffL) { "invalid-tag" }
                 val number = (tag ushr 3).toInt()

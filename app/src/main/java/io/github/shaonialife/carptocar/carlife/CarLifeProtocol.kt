@@ -545,7 +545,7 @@ internal object CarLifeProtocol {
      *   field 1 (cnt)      → tag 0x08 (varint)
      *   field 2 (mediaInfo)→ tag 0x12 (length-delimited，内嵌完整 CarlifeMediaInfo 子消息)
      */
-    fun parseMediaInfoList(payload: ByteArray): List<CarLifeMediaInfo> = CarLifeMediaProtocol.parseMedia(payload)
+    fun parseMediaInfoList(payload: ByteArray, log: (String) -> Unit = {}): List<CarLifeMediaInfo> = CarLifeMediaProtocol.parseMedia(payload, log)
 
     private fun readVarint(
         payload: ByteArray,
