@@ -432,6 +432,7 @@ class AudioSender(
     /** 最近一次收到**真实** PCM 的时刻（uptimeMillis）；静音保活据此判断要不要补帧。 */
     @Volatile
     private var lastRealFeedAt = 0L
+    private val continuity = AudioContinuityWindow()
 
     private var keepAliveThread: Thread? = null
 
@@ -493,6 +494,7 @@ class AudioSender(
                             ) {
                                 break // 真实 PCM 回来了，本拍不再补
                             }
+                            continuity.silence()
                             dispatchPcm(silence)
                             nextFillAt += frameMillis.toLong().coerceAtLeast(1L)
                             guard++
@@ -537,6 +539,7 @@ class AudioSender(
     ) {
         if (!running.get() || record != null) return // 采集模式在跑时不接受注入
         if (size <= 0 || size > srcPcm.size) return
+        continuity.input(System.nanoTime())
         // 真实 PCM 到场：静音保活立刻让位（这一行必须在 alignPcm 之前，
         // 否则重采样失败时空转判定会误以为「一直没声音」）
         lastRealFeedAt = android.os.SystemClock.uptimeMillis()
@@ -669,6 +672,7 @@ class AudioSender(
             pcmFrames.clear()
             passthroughBuffer.reset()
         }
+        continuity.summary(System.nanoTime())?.let { log("$it final=true codec=$codec") }
         restorePhoneMedia()
         if (syncSent > 0 && syncIcmpDeferrals > 0) {
             log(
@@ -932,6 +936,7 @@ class AudioSender(
         timestamp += samplesPerPacket
         nonceCounter++
         return try {
+            val sendStarted = System.nanoTime()
             if (codec == AudioCodec.PCM) {
                 pcmDatagram.setData(wire, 0, wire.size)
                 client.send(pcmDatagram)
@@ -940,6 +945,10 @@ class AudioSender(
             }
             packetsSent++
             bytesSent += wire.size
+            val sentAt = System.nanoTime()
+            continuity.output(sentAt, sentAt - sendStarted)?.let {
+                log("$it codec=$codec nextSeq=$sequence nextSample=$timestamp")
+            }
             true
         } catch (error: IOException) {
             log("AUDIO: UDP 发送失败 - ${error.message}")
