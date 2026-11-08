@@ -84,9 +84,6 @@ class Iap2BluetoothClient(
 
         private const val FAILURE_LOG_THROTTLE_MILLIS = 15_000L
 
-        /** 目标连不上多少轮后放开限制（16s/轮 → 约 32s 后回退，避免一个死目标堵死整轮）。 */
-        private const val TARGET_FALLBACK_ROUNDS = 2
-
         /** 「蓝牙已连接→已断开」日志节流（车机可能反复自动重连，避免刷屏）。 */
         private const val PROFILE_LOG_THROTTLE_MILLIS = 15_000L
 
@@ -311,7 +308,6 @@ class Iap2BluetoothClient(
         // 每轮启动重置 SDP 结论与跳过日志（新配对/换固件后重新探测）
         iap2ServiceCache.clear()
         skippedNoService.clear()
-        BtSessionGate.targetSoftFallback = false
         running = true
         val myGeneration = generation.incrementAndGet()
         val target = targetProvider()
@@ -340,7 +336,6 @@ class Iap2BluetoothClient(
                 null
             } ?: return
         var lastFailureLogAt = 0L
-        var targetFailRounds = 0
         /** 连续「SDP 层失败」的轮数（见 [PASSIVE_FALLBACK_ROUNDS]）。 */
         var passiveFailRounds = 0
         /** 连续「没有有效会话」的轮数，用于 [RETRY_BACKOFF_MILLIS] 退避（连上即断也算）。 */
@@ -391,6 +386,7 @@ class Iap2BluetoothClient(
                             "——停止补连（CarPlay 画面/声音不受影响，下次整轮连接再试）",
                     )
                 }
+                failStreak = 0; passiveFailRounds = 0
                 sleepQuietly(2_000)
                 continue
             }
@@ -421,6 +417,7 @@ class Iap2BluetoothClient(
             var sdpLookupFailures = 0
             for (device in candidates) {
                 if (!running || generation.get() != myGeneration) return
+                if (!dialAllowed(device)) break
                 val name =
                     try {
                         device.name
@@ -433,8 +430,8 @@ class Iap2BluetoothClient(
                 // 其它在线设备）——确认提供 …caff 才进入「断开+连接」流程。选定目标
                 // 的设备不过闸（用户显式指定，保持原路径与时序）。
                 val gate =
-                    if (targetProvider() == null || BtSessionGate.targetSoftFallback) {
-                        // 软回退（目标连不上、放开限制）也过闸：否则会把已配对的耳机、
+                    if (targetProvider() == null) {
+                        // 自动发现模式先筛选服务，避免探测已配对的耳机、
                         // 蓝牙键盘（AB Shutter3）、音箱全试一遍，既断别人的音频又拖慢
                         // 重试节奏（2026-10-26 雪铁龙日志实测）。
                         awaitIap2Service(device)
@@ -454,6 +451,7 @@ class Iap2BluetoothClient(
                     // 此时才断开配置文件重试一次——耳机类设备永远不会被我们断掉音频。
                     var probe = tryConnect(device)
                     if (probe == null && !looksLikePersonalAudio(device)) {
+                        if (!dialAllowed(device)) break
                         val dropped = BtProfiles.disconnect(context, device)
                         if (dropped.isNotEmpty()) {
                             log("BT-C: $name SDP 未给结论、直连失败——已断开 ${dropped.joinToString("/")} 再试一次")
@@ -486,6 +484,7 @@ class Iap2BluetoothClient(
                     // （HFP/A2DP 在线）时，车机不开放无线 CarPlay 的 iAP2 服务窗口——
                     // 表现为每 3s 连接失败。iAP2 是独立的 SDP 直连服务，与这些配置文件
                     // 无关，断开后不影响 CarPlay 本身（声音走 WiFi 的 AirPlay）。
+                    if (!dialAllowed(device)) break
                     val dropped = BtProfiles.disconnect(context, device)
                     if (dropped.isNotEmpty()) {
                         val now = android.os.SystemClock.uptimeMillis()
@@ -527,23 +526,6 @@ class Iap2BluetoothClient(
                 }
             }
             if (connected == null) {
-                // 目标连续连不上 → 放开目标限制（见 BtSessionGate.targetSoftFallback）。
-                // 只在「用户指定了目标」时计数，且只降级一次。
-                // 补连控制链路期间（recoveryPeers != null）不计数：那不是「这次坐的是另一台车」，
-                // 放开限制只会让补连轮次去拨耳机/音箱，白白浪费恢复窗口。
-                if (recoveryPeers == null &&
-                    targetProvider() != null &&
-                    !BtSessionGate.targetSoftFallback
-                ) {
-                    targetFailRounds++
-                    if (targetFailRounds >= TARGET_FALLBACK_ROUNDS) {
-                        BtSessionGate.targetSoftFallback = true
-                        log(
-                            "BT-C: 目标「${targetProvider()?.name}」连续 $targetFailRounds 轮连不上" +
-                                "——本轮放开目标限制，任一已配对车机连入都接受（不必等它）",
-                        )
-                    }
-                }
                 // 方向兜底：连续多轮「SDP 里根本没有 …caff」时，主动一侧已无意义
                 // （雪铁龙 R4 的 180ms 失败即属此类），切被动等车机连入一段时间。
                 // 补连控制链路期间不切：那会把恢复窗口全花在「等车机自己连进来」上，
@@ -645,7 +627,7 @@ class Iap2BluetoothClient(
             // 目标策略：地址命中即唯一候选——不再按 SDP 缓存过滤（缓存可能缺失，
             // 而用户显式指定就该尝试）；目标不在已配对列表时给一次提示并空转等待。
             val hit = bonded.filter { TargetDevicePrefs.matches(target, it.address) }
-            if (!BtSessionGate.targetSoftFallback) {
+            run {
                 if (hit.isEmpty()) {
                     val now = android.os.SystemClock.uptimeMillis()
                     if (now - lastTargetMissingLogAt > FAILURE_LOG_THROTTLE_MILLIS) {
@@ -659,14 +641,6 @@ class Iap2BluetoothClient(
                 }
                 return hit
             }
-            // 软回退：目标降级为「优先」，其余已配对设备一并作为候选
-            // （按 UUID 提示有 iAP2 服务的排前面，减少无谓的连接尝试）。
-            val ranked =
-                bonded.sortedWith(
-                    compareByDescending<BluetoothDevice> { TargetDevicePrefs.matches(target, it.address) }
-                        .thenByDescending { d -> d.uuids?.any { it.uuid == ACCESSORY_IAP2_UUID } == true },
-                )
-            return ranked
         }
         val withService =
             bonded.filter { device ->
@@ -676,7 +650,14 @@ class Iap2BluetoothClient(
     }
 
     @SuppressLint("MissingPermission")
+    private fun dialAllowed(device: BluetoothDevice): Boolean = running && BtDialPolicy.allows(
+        targetProvider()?.address, device.address, BtSessionGate.inboundActive,
+        BtSessionGate.sessionActive, BtSessionGate.linkRecoveryTarget(),
+    )
+
+    @SuppressLint("MissingPermission")
     private fun tryConnect(device: BluetoothDevice): BluetoothSocket? {
+        if (!dialAllowed(device)) return null
         val socket =
             try {
                 device.createRfcommSocketToServiceRecord(ACCESSORY_IAP2_UUID)
@@ -847,21 +828,6 @@ object BtSessionGate {
      */
     @Volatile
     var sessionActive: Boolean = false
-
-    /**
-     * 目标设备软回退：指定了目标车机但连续多轮连不上时置位。
-     *
-     * 场景：用户上次连的是 A 车（配了目标），这次坐的是 B 车 / 测试台。
-     * 旧行为是**死等目标**——出站只试目标、入站把非目标全部掐掉，
-     * 用户体感就是「点了启动连接，四十多秒毫无反应」（2026-10-25 日志实测
-     * 17:48:47 启动 → 17:49:30 才连上）。置位后目标降级为「优先」：
-     * 出站回退到全部已配对设备，入站也不再拒绝。
-     *
-     * 每次 `connect()` 重新开始都会清零，所以真车场景只要目标在窗口内可达，
-     * 行为与旧版完全一致。
-     */
-    @Volatile
-    var targetSoftFallback: Boolean = false
 
     /**
      * 「CarPlay 在跑、但我们自己的 iAP2 控制链路掉了」——掉线那一台的地址与时刻。

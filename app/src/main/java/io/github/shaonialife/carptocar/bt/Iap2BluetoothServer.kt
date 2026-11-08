@@ -191,7 +191,6 @@ class Iap2BluetoothServer(
                     null
                 }
             if (target != null &&
-                !BtSessionGate.targetSoftFallback &&
                 !TargetDevicePrefs.matches(target, peerAddress)
             ) {
                 log(
