@@ -41,6 +41,7 @@ android {
         applicationId = "io.github.shaonialife.carptocar"
         minSdk = 31
         targetSdk = 34
+        testInstrumentationRunner = "io.github.shaonialife.carptocar.media.ArtworkEncodingInstrumentation"
         versionCode = appVersionCode
         versionName = appVersionName
         // Q4 实车测试分支：以后构建也跳过首次启动声明，不写入虚假的用户接受记录。

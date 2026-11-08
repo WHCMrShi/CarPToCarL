@@ -91,9 +91,14 @@ internal object ArtworkEncoder {
                 (bitmap.width.toLong() * targetSide / side).toInt().coerceAtLeast(1),
                 (bitmap.height.toLong() * targetSide / side).toInt().coerceAtLeast(1), true) else bitmap
             try {
-                for (quality in intArrayOf(85, 70, 55)) {
+                val transparent = scaled.hasAlpha() && IntArray(scaled.width * scaled.height).let { pixels ->
+                    scaled.getPixels(pixels, 0, scaled.width, 0, 0, scaled.width, scaled.height)
+                    pixels.any { (it ushr 24) != 255 }
+                }
+                val format = if (transparent) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+                for (quality in if (transparent) intArrayOf(100) else intArrayOf(85, 70, 55)) {
                     output.reset()
-                    if (!scaled.compress(Bitmap.CompressFormat.JPEG, quality, output)) return null
+                    if (!scaled.compress(format, quality, output)) return null
                     if (output.size() <= MAX_TRANSFER_BYTES) return output.toByteArray()
                 }
             } finally { if (scaled !== bitmap) scaled.recycle() }
