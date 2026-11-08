@@ -1,5 +1,7 @@
 package io.github.shaonialife.carptocar
 
+import io.github.shaonialife.carptocar.util.SessionEpoch
+
 import android.content.Context
 import android.view.KeyEvent
 import io.github.shaonialife.carptocar.airplay.AirPlayClient
@@ -661,12 +663,18 @@ object SessionController {
 
     @Volatile
     var audioSender: AudioSender? = null
+    private val audioEpoch = SessionEpoch()
 
     @Volatile
     var currentClient: AirPlayClient? = null
+        set(value) {
+            if (field !== value) audioEpoch.begin(value)
+            field = value
+        }
 
     /** 通话状态看门狗线程（音频会话期间每秒看一次 AudioManager.mode）。 */
     private var callWatcher: Thread? = null
+    private var callWatcherLease: SessionEpoch.Lease? = null
 
     @Volatile
     var currentHiddenSource: HiddenDisplaySource? = null
@@ -1698,6 +1706,7 @@ object SessionController {
 
     /** 会话结束/新周期开始前彻底退役上一代会话（旧管线泄漏会累积编码器/虚拟显示器，最终 dequeueBuffer -19）。 */
     fun retireSession() {
+        retireAudioOwner()
         appendLog("CONNECT-DIAG: retire temporary media pipelines; clientPresent=${currentClient != null} videoPresent=${videoSender != null} audioPresent=${audioSender != null}")
         // 只断车机视频通道，不拆 CarLife 劫持本身：本方法在每轮配对起步也会执行，
         // 而 CarLife 连接与 GOP 缓存要跨会话保留（用户可以在会话中途才进「无线连接」）。
@@ -1708,8 +1717,6 @@ object SessionController {
         videoSender = null
         // 暗幕/常亮随会话收掉（本方法在每轮配对起步也会执行，新一轮推流起来后会重新置位）
         ScreenDimmer.setSessionActive(false)
-        audioSender?.stop()
-        audioSender = null
         // 通话场景标记必须随会话清掉：留着的话下一轮会被当成「已经在通话档」，
         // 进入通话时 switchAudioScene 直接返回 true，一条通话流都不会建。
         audioInCallMode = false
@@ -2792,6 +2799,7 @@ object SessionController {
             appendLog("AUDIO: 无接收端可用地址，跳过音频通道")
             return false
         }
+        val lease = audioEpoch.capture(client) ?: return false
         return try {
             // 车机身份 → 只用于「本车机哪些音频档位踩过雷」的持久化记忆。
             val identity = client.receiverIdentity()
@@ -2824,6 +2832,7 @@ object SessionController {
             var streamInfo: AirPlayClient.AudioStreamInfo? = null
             for (candidate in ordered) {
                 val result = client.runAudioStream(sharedSecret, candidate, tuning)
+                if (!audioEpoch.isCurrent(lease)) return false
                 if (result != null) {
                     chosen = candidate
                     streamInfo = result
@@ -2846,9 +2855,6 @@ object SessionController {
                 appendLog("AUDIO: 全部候选档位协商失败（共 ${ordered.size} 档）——本次仅推视频")
                 return false
             }
-            activeAudioProfile = profile
-            activeAudioReceiverKey = identity
-            activeAudioStartedAt = android.os.SystemClock.uptimeMillis()
             val sender =
                 AudioSender(
                     host = host,
@@ -2864,23 +2870,39 @@ object SessionController {
                     // 接收端只能「按到达时刻猜」，严格的实现干脆不排播（2026-10-20 实测）。
                     controlPort = audio.controlPort,
                 )
-            audioSender = sender
-            if (!sender.startPassthrough()) {
-                audioSender = null
-                activeAudioProfile = null
-                activeAudioStartedAt = 0L
-                false
-            } else {
-                startCallWatcher()
-                true
-            }
+            if (!installAudio(lease, sender) {
+                activeAudioProfile = profile
+                activeAudioReceiverKey = identity
+                activeAudioStartedAt = android.os.SystemClock.uptimeMillis()
+            }) false else { startCallWatcher(); true }
         } catch (error: Exception) {
             appendLog("AUDIO: 通道启动异常 - ${error.message}")
-            audioSender = null
-            activeAudioProfile = null
-            activeAudioStartedAt = 0L
             false
         }
+    }
+
+    private fun installAudio(lease: SessionEpoch.Lease, candidate: AudioSender, state: () -> Unit): Boolean {
+        if (!audioEpoch.isCurrent(lease) || !candidate.startPassthrough()) { candidate.stop(); return false }
+        var previous: AudioSender? = null
+        val installed = audioEpoch.commit(lease) {
+            previous = audioSender
+            audioSender = candidate
+            state()
+        }
+        if (installed) previous?.stop() else candidate.stop()
+        return installed
+    }
+
+    private fun retireAudioOwner(owner: AirPlayClient? = null) {
+        var previous: AudioSender? = null
+        var watcher: Thread? = null
+        val detach = {
+            previous = audioSender; audioSender = null
+            watcher = callWatcher; callWatcher = null; callWatcherLease = null
+        }
+        if (owner == null) audioEpoch.clear(detach) else audioEpoch.end(owner, detach)
+        watcher?.interrupt()
+        previous?.stop()
     }
 
     /**
@@ -2901,8 +2923,10 @@ object SessionController {
      * 绝不能把「本来还有声」搞成「彻底没声」。
      */
     @Synchronized
-    fun rebuildAudioChannel(reason: String): Boolean {
+    fun rebuildAudioChannel(reason: String, expectedClient: AirPlayClient? = currentClient): Boolean {
         val client = currentClient ?: return false
+        if (client !== expectedClient) return false
+        val lease = audioEpoch.capture(client) ?: return false
         val secret = currentSharedSecret ?: return false
         val host = currentAudioHost ?: return false
         val profile = activeAudioProfile ?: return false
@@ -2922,8 +2946,6 @@ object SessionController {
             return false
         }
         // 新流已就绪：停旧发送端。旧流不再有包，接收端会在超时后自行回收。
-        old.stop()
-        audioSender = null
         // 看门狗线程跟随 audioSender 字段：换流后自动续上，所以这里**不该**置
         // callWatcher = null —— 那只丢引用、旧线程仍在跑，紧接着 startCallWatcher()
         // 再起一个就成双线程（两边同时切音频流）。startCallWatcher 自己有 isAlive 检查。
@@ -2940,14 +2962,10 @@ object SessionController {
                 adtsFrames = AudioTuning.RAW_SPF.adts,
                 controlPort = info.controlPort,
             )
-        audioSender = sender
-        if (!sender.startPassthrough()) {
-            audioSender = null
-            activeAudioStartedAt = 0L
+        if (!installAudio(lease, sender) { activeAudioStartedAt = android.os.SystemClock.uptimeMillis() }) {
             appendLog("AUDIO: 音频流重建后启动失败——本次仅推视频（重连可恢复）")
             return false
         }
-        activeAudioStartedAt = android.os.SystemClock.uptimeMillis()
         startCallWatcher()
         // 新流是在「会话已激活」之后加入的：按 AirPlay 语义必须补发 RECORD 纳入会话，
         // 否则车机对 SETUP 回 200、给端口，但不排播（见 startAudioChannel 同名注释）。
@@ -2979,9 +2997,11 @@ object SessionController {
     private fun switchAudioScene(
         inCall: Boolean,
         reason: String,
+        lease: SessionEpoch.Lease,
     ): Boolean {
-        if (audioInCallMode == inCall) return true
         val client = currentClient ?: return false
+        if (client !== lease.owner || !audioEpoch.isCurrent(lease)) return false
+        if (audioInCallMode == inCall) return true
         val secret = currentSharedSecret ?: return false
         val host = currentAudioHost ?: return false
         val context = appContext?.applicationContext ?: return false
@@ -3032,8 +3052,6 @@ object SessionController {
             return false
         }
         // 新流已就绪：停旧流。旧流不再有包，接收端会在超时后自行回收。
-        old.stop()
-        audioSender = null
         val sender =
             AudioSender(
                 host = host,
@@ -3047,15 +3065,14 @@ object SessionController {
                 adtsFrames = AudioTuning.RAW_SPF.adts,
                 controlPort = info.controlPort,
             )
-        audioSender = sender
-        if (!sender.startPassthrough()) {
-            audioSender = null
+        if (!installAudio(lease, sender) {
+            audioInCallMode = inCall
+            activeCallProfile = if (inCall) target else null
+            if (!inCall) rejectedCallProfileKey = null
+        }) {
             appendLog("AUDIO: 切换后音频流启动失败——本段仅推视频（重连可恢复）")
             return false
         }
-        audioInCallMode = inCall
-        activeCallProfile = if (inCall) target else null
-        if (!inCall) rejectedCallProfileKey = null
         // 新流是在「会话已激活」之后加入的：按 AirPlay 语义必须补发 RECORD 纳入会话，
         // 否则车机对 SETUP 回 200、给端口，但不排播。
         client.record()
@@ -3090,7 +3107,8 @@ object SessionController {
 
 
     /** 延迟 2.5 秒再重建：让车机先把通话通路的资源收干净，避免两边抢音频设备。 */
-    private fun scheduleAudioRebuild() {
+    private fun scheduleAudioRebuild(owner: AirPlayClient, lease: SessionEpoch.Lease) {
+        if (!audioEpoch.isCurrent(lease)) return
         val worker =
             Thread {
                 try {
@@ -3098,7 +3116,8 @@ object SessionController {
                 } catch (_: InterruptedException) {
                     return@Thread
                 }
-                runCatching { rebuildAudioChannel("通话结束 ${AUDIO_REBUILD_DELAY_MS / 1000} 秒后") }
+                if (!audioEpoch.isCurrent(lease)) return@Thread
+                runCatching { rebuildAudioChannel("通话结束 ${AUDIO_REBUILD_DELAY_MS / 1000} 秒后", owner) }
                     .onFailure { appendLog("AUDIO: 重建异常 - ${it.message}") }
             }
         worker.isDaemon = true
@@ -3119,19 +3138,20 @@ object SessionController {
      * ① 重新核对并纠正车机音量；② 补一轮同步包重锚。两者都幂等，失败只记日志。
      */
     private fun startCallWatcher() {
-        if (callWatcher?.isAlive == true) return
+        val owner = currentClient ?: return
+        val lease = audioEpoch.capture(owner) ?: return
+        if (callWatcher?.isAlive == true && callWatcherLease == lease) return
         val manager =
             appContext?.applicationContext?.getSystemService(Context.AUDIO_SERVICE)
                 as? android.media.AudioManager ?: return
-        callWatcher =
-            Thread {
+        val watcher = Thread {
                 var lastMode = manager.mode
                 // 目标状态与连续计数：mode 在通话建立/挂断的瞬间会抖几下（IN_CALL → NORMAL
                 // → IN_COMMUNICATION），只认「连续 2 秒同向」才动手，避免来回换流。
                 var pendingInCall = isCallMode(lastMode)
                 var pendingTicks = 0
                 var idleTicks = 0
-                while (true) {
+                while (audioEpoch.isCurrent(lease)) {
                     try {
                         Thread.sleep(1_000)
                     } catch (_: InterruptedException) {
@@ -3167,7 +3187,7 @@ object SessionController {
                     if (inCall) {
                         appendLog("AUDIO: 进入通话（${audioModeName(mode)}）→ 换到通话音频档")
                         val switched =
-                            runCatching { switchAudioScene(true, "进入通话") }.getOrElse {
+                            runCatching { switchAudioScene(true, "进入通话", lease) }.getOrElse {
                                 appendLog("AUDIO: 切换通话档异常 - ${it.message}")
                                 false
                             }
@@ -3176,11 +3196,12 @@ object SessionController {
                         }
                     } else {
                         appendLog("AUDIO: 通话结束——重新核对车机音量并补同步包（车机常停在静音位）")
-                        currentClient?.refreshVolume("通话结束")
+                        if (!audioEpoch.isCurrent(lease)) return@Thread
+                        owner.refreshVolume("通话结束")
                         sender.resyncAnchor("通话结束")
                         if (audioInCallMode) {
                             val switched =
-                                runCatching { switchAudioScene(false, "通话结束") }.getOrElse {
+                                runCatching { switchAudioScene(false, "通话结束", lease) }.getOrElse {
                                     appendLog("AUDIO: 切回媒体档异常 - ${it.message}")
                                     false
                                 }
@@ -3189,19 +3210,21 @@ object SessionController {
                             } else {
                                 // 切不回去就按老办法重建媒体流：接收端在为通话释放过
                                 // 音频输出设备后，只有新建流才会重新打开。
-                                scheduleAudioRebuild()
+                                scheduleAudioRebuild(owner, lease)
                             }
                         } else {
                             // 没切过通话档（车机未声明 telephony / 切换失败）：仍按老办法重建。
-                            scheduleAudioRebuild()
+                            scheduleAudioRebuild(owner, lease)
                         }
                     }
                 }
             }.apply {
                 isDaemon = true
                 name = "audio-call-watch"
-                start()
             }
+        if (audioEpoch.commit(lease) {
+            callWatcher?.interrupt(); callWatcher = watcher; callWatcherLease = lease
+        }) watcher.start()
     }
 
     private fun isCallMode(mode: Int): Boolean =
@@ -4729,13 +4752,12 @@ object SessionController {
                                                     null
                                                 },
                                             onEnded = onStreamEnded@{ ended ->
+                                                retireAudioOwner(client)
                                                 CarLifeHijack.stopIfOwnedBy(ended)
                                                 if (videoSender !== ended || currentClient !== client) {
                                                     appendLog("CONNECT-DIAG: ignored retired video end callback")
                                                     return@onStreamEnded
                                                 }
-                                                audioSender?.stop()
-                                                audioSender = null
                                                 // 会话真实结束：解除静默降噪（客户端恢复探测/重连）
                                                 appendLog(">>> CarPlay 会话结束（推流终止）——恢复蓝牙探测")
                                                 BtSessionGate.sessionActive = false
