@@ -70,6 +70,22 @@ class WifiCarPlayConnector(
 
     val currentNetwork: Network? get() = boundNetwork.get()
     private val boundNetwork = AtomicReference<Network?>(null)
+    @Volatile private var bindingCurrent: (() -> Boolean)? = null
+
+    /** Read only. A cached Network alone is not proof that sockets can still use it. */
+    fun usableNetwork(): Network? {
+        val owner = callback.get() ?: return null
+        var usable: Network? = null
+        callback.runIfCurrent(owner) {
+            if (bindingCurrent?.invoke() != true) return@runIfCurrent
+            val network = boundNetwork.get() ?: return@runIfCurrent
+            if (runCatching {
+                    connectivityManager.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
+                        connectivityManager.boundNetworkForProcess == network
+                }.getOrDefault(false)) usable = network
+        }
+        return usable
+    }
     private val identityProof = WifiIdentityProof({ SystemClock.elapsedRealtime() })
     @Volatile private var retryIdentity: (() -> Unit)? = null
 
@@ -191,15 +207,15 @@ class WifiCarPlayConnector(
                 .setNetworkSpecifier(specifier)
                 .build()
         val latch = CountDownLatch(1)
-        val result = AtomicReference<Network?>(null)
+        val result = WifiRequestState<Network>()
         val unavailable = AtomicBoolean(false)
         val newCallback =
             object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
                     callback.runIfCurrent(this) {
                         if (isCancelled()) return@runIfCurrent
-                        val bound = connectivityManager.bindProcessToNetwork(network)
-                        if (bound) { boundNetwork.set(network); result.set(network) }
+                        val bound = result.available(network) { connectivityManager.bindProcessToNetwork(network) }
+                        if (bound) boundNetwork.set(network)
                         log("CONNECT-DIAG: specifier available request=${System.identityHashCode(this)} bound=$bound")
                         log("WiFi: 已加入应用专属网络 \"$ssid\"（$network bindProcessToNetwork=$bound）——不影响其它应用联网")
                         latch.countDown()
@@ -207,17 +223,25 @@ class WifiCarPlayConnector(
                 }
 
                 override fun onUnavailable() {
-                    unavailable.set(true)
-                    log("CONNECT-DIAG: specifier unavailable request=${System.identityHashCode(this)}")
-                    log("WiFi: 系统未允许加入 \"$ssid\"（用户拒绝或热点不在范围内）")
-                    latch.countDown()
+                    var lost = false
+                    callback.runIfCurrent(this) {
+                        unavailable.set(true)
+                        val previous = result.unavailable()
+                        if (previous != null && boundNetwork.compareAndSet(previous, null)) {
+                            connectivityManager.bindProcessToNetwork(null)
+                            lost = true
+                        }
+                        log("CONNECT-DIAG: specifier unavailable request=${System.identityHashCode(this)} previouslyBound=$lost")
+                        log("WiFi: 系统专属网络请求已失效（可能为拒绝、撤销或热点不可用，不推定用户操作）")
+                        latch.countDown()
+                    }
+                    if (lost) onNetworkLost?.invoke(ssid) { callback.get() === this && !isCancelled() }
                 }
 
                 override fun onLost(network: Network) {
                     var lost = false
                     callback.runIfCurrent(this) {
-                        if (boundNetwork.compareAndSet(network, null)) {
-                            result.compareAndSet(network, null)
+                        if (result.lost(network) && boundNetwork.compareAndSet(network, null)) {
                             connectivityManager.bindProcessToNetwork(null)
                             lost = true
                         }
@@ -226,6 +250,7 @@ class WifiCarPlayConnector(
                 }
             }
         if (!callback.replace(newCallback, { !isCancelled() }, ::disposeRequest)) return JoinResult.Unavailable
+        callback.runIfCurrent(newCallback) { bindingCurrent = { !isCancelled() && result.get() != null } }
         log("CONNECT-DIAG: requesting system WiFi selection request=${System.identityHashCode(newCallback)}")
         val accepted =
             try {
@@ -502,7 +527,10 @@ class WifiCarPlayConnector(
                 }
             }
         if (!callback.replace(newCallback, { !isCancelled() }, ::disposeRequest)) return null
-        callback.runIfCurrent(newCallback) { retryIdentity = { capabilities.keys.forEach { newCallback.tryBind(it) } } }
+        callback.runIfCurrent(newCallback) {
+            bindingCurrent = { !isCancelled() && result.get() != null }
+            retryIdentity = { capabilities.keys.forEach { newCallback.tryBind(it) } }
+        }
         val accepted =
             try {
                 // Observe every matching WiFi: a best-network request stops reporting the old
@@ -611,6 +639,7 @@ class WifiCarPlayConnector(
     }
 
     private fun disposeRequest(owner: ConnectivityManager.NetworkCallback) {
+        bindingCurrent = null
         retryIdentity = null
         runCatching { connectivityManager.unregisterNetworkCallback(owner) }
         if (boundNetwork.getAndSet(null) != null) connectivityManager.bindProcessToNetwork(null)

@@ -1876,6 +1876,7 @@ object SessionController {
     private fun onCarWifiLost(ssid: String, valid: () -> Boolean) {
         val work = connectionWork.capture()
         if (!work.isCurrent || !valid()) return
+        val lostSetup = setupWork.capture()
         val label = ssid.ifBlank { "车机热点" }
         var accepted = false
         work.runIfCurrent {
@@ -1910,11 +1911,23 @@ object SessionController {
         }
         uiHintSink?.invoke("车机热点 \"$label\" 已断开——正在自动重绑")
         Bg.run("wifi-rebind") {
+            var retired = false
+            work.runIfCurrent {
+                lostSetup.runIfCurrent {
+                    if (valid() && !carWifiReady(target.ssid) && !connectCancelled && sessionWanted) {
+                        setupWork.end()
+                        sessionStarting.set(false)
+                        retireSession()
+                        retired = true
+                    }
+                }
+            }
+            if (!retired) return@run
             appendLog(
                 "WIFI: 自动重绑车机热点 \"${target.ssid}\"——只恢复网络，" +
                     "本轮 CarPlay 会话仍需重建（旧 socket 已失效）",
             )
-            autoJoinCarWifi(target, work)
+            autoJoinCarWifi(target, work, recoverSession = true)
         }
     }
 
@@ -1927,7 +1940,7 @@ object SessionController {
      *     用户取消后不得继续跑（否则 phaseHint 被覆盖、ctrl 广播被重新拉起，表现为「取消不了」）。
      * 连接失败时回退「系统 WLAN 手动加入」指引（密码可经「去连接」复制）。
      */
-    private fun autoJoinCarWifi(wifi: Iap2SenderSession.WifiConfiguration, work: WorkEpoch.Ticket = connectionWork.capture()) {
+    private fun autoJoinCarWifi(wifi: Iap2SenderSession.WifiConfiguration, work: WorkEpoch.Ticket = connectionWork.capture(), recoverSession: Boolean = false) {
         val cancelled = { connectCancelled || !work.isCurrent }
         if (cancelled()) return
         Bg.run("wifi-auto-join") {
@@ -1950,6 +1963,11 @@ object SessionController {
                 }
 
                 WifiCarPlayConnector.JoinResult.Unavailable -> retryJoinCarWifiOnce(wifi, shellReady, work)
+            }
+            if (recoverSession) work.runIfCurrent {
+                if (!cancelled() && sessionWanted && carWifiReady(wifi.ssid) && !isStreaming()) {
+                    scheduleConnectRetry("车机网络已重绑，重建失效会话")
+                }
             }
         }
     }
@@ -2017,23 +2035,13 @@ object SessionController {
         val cancelled = { connectCancelled || !work.isCurrent }
         if (cancelled()) return WifiCarPlayConnector.JoinResult.Unavailable
         val wired = connector.currentNetwork
-        // 只认「系统仍然承认」的网络：手动断开 / 热点消失后 Network 对象仍然存在，
-        // 直接复用会让后续 socket 全部 ENONET（2026-11-04 实车：15 次重试全失败，只能杀进程）。
-        val wiredAlive =
-            wired?.let { net ->
-                runCatching {
-                    val caps =
-                        appContext?.getSystemService(android.net.ConnectivityManager::class.java)
-                            ?.getNetworkCapabilities(net)
-                    caps != null && caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)
-                }.getOrDefault(false)
-            } ?: false
-        if (boundCarSsid == wifi.ssid && wired != null && wiredAlive) {
+        val usable = connector.usableNetwork()
+        if (boundCarSsid == wifi.ssid && usable != null) {
             appendLog("WIFI: 应用专属网络已在位——跳过重复加入")
-            return WifiCarPlayConnector.JoinResult.Joined(wired)
+            return WifiCarPlayConnector.JoinResult.Joined(usable)
         }
-        if (wired != null && !wiredAlive) {
-            appendLog("WIFI: 缓存的网络已失效（系统已无该 Wi-Fi）——由新请求替换并重新加入")
+        if (wired != null && usable == null) {
+            appendLog("WIFI: 缓存的网络已失效或不再绑定——由新请求替换并重新加入")
         }
         var ownedDecision: WifiJoinGate.Decision? = null
         work.runIfCurrent {
@@ -2057,7 +2065,7 @@ object SessionController {
                         "不重复请求（再发一次会把在跑的那次 release 掉）",
                 )
                 val ok = connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.WIFI_SHARED_WAIT) { decision.ticket.await(WIFI_JOIN_SHARED_WAIT_MS) }
-                val network = connector.currentNetwork
+                val network = connector.usableNetwork()
                 if (!cancelled() && ok == true && network != null) {
                     appendLog("WIFI: 等到的结果是「已加入」——直接复用那条网络（$network）")
                     WifiCarPlayConnector.JoinResult.Joined(network)
@@ -2114,7 +2122,7 @@ object SessionController {
     private fun retryJoinCarWifiOnce(wifi: Iap2SenderSession.WifiConfiguration,
         shellReady: Boolean, work: WorkEpoch.Ticket): WifiCarPlayConnector.JoinResult {
         if (connectCancelled || !work.isCurrent) return WifiCarPlayConnector.JoinResult.Unavailable
-        if (isStreaming()) return wifiConnector?.currentNetwork?.takeIf { boundCarSsid == wifi.ssid }?.let { WifiCarPlayConnector.JoinResult.Joined(it) }
+        if (isStreaming()) return wifiConnector?.usableNetwork()?.takeIf { boundCarSsid == wifi.ssid }?.let { WifiCarPlayConnector.JoinResult.Joined(it) }
             ?: WifiCarPlayConnector.JoinResult.Unavailable
         sleepQuietly(1_000)
         if (connectCancelled || !work.isCurrent) return WifiCarPlayConnector.JoinResult.Unavailable
@@ -2189,12 +2197,8 @@ object SessionController {
     }
 
     /** 应用专属网络被系统拒绝/超时：让用户重试或转手动连接。 */
-    private fun carWifiReady(ssid: String): Boolean {
-        val net = wifiConnector?.currentNetwork ?: return false
-        if (boundCarSsid != ssid) return false
-        val caps = appContext?.getSystemService(android.net.ConnectivityManager::class.java)?.getNetworkCapabilities(net)
-        return caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
-    }
+    private fun carWifiReady(ssid: String): Boolean =
+        boundCarSsid == ssid && wifiConnector?.usableNetwork() != null
 
     private fun wifiGuidanceRequired(ssid: String, generation: Long?): Boolean =
         !connectCancelled && sessionWanted && pendingCtrlInvite.currentGeneration() == generation &&
@@ -2387,7 +2391,7 @@ object SessionController {
         var bound = false
         synchronized(wifiBindLock) {
             // 另一个路径已经绑定同一热点：别再走一遍 release+requestNetwork
-            if (boundCarSsid == ssid && wifiConnector?.currentNetwork != null) {
+            if (carWifiReady(ssid)) {
                 bound = true
             } else {
                 bound = wifiConnector?.bindCurrentWifiBlocking(WIFI_BIND_WAIT_S * 1_000L, ssid) { cancelled() } != null
@@ -5160,7 +5164,7 @@ object SessionController {
         // 里记 lastCarWifi —— 这类车型上 onCarWifiLost 永远走「没凭据，只能提示」，
         // 1.2.10 加的自动重绑对它们等于不存在（只有 0x5703 车型才生效）。
         if (!mutate { lastCarWifi = wifiConfig }) return
-        if (boundCarSsid == endpoint.ssid && wifiConnector?.currentNetwork != null) {
+        if (carWifiReady(endpoint.ssid)) {
             appendLog(">>> [$source] 已绑定车机热点 ${endpoint.ssid}，跳过重复绑定")
             continueWithNetwork(true)
         } else {
@@ -5196,7 +5200,7 @@ object SessionController {
                         WifiCarPlayConnector.JoinResult.Unavailable -> {
                             // 复用、请求宽限与建议兜底均在同一入网门禁内；仅额外重试一次。
                             retryJoinCarWifiOnce(wifiConfig, shellReady, setup)
-                            if (boundCarSsid == wifiConfig.ssid && wifiConnector?.currentNetwork != null) {
+                            if (carWifiReady(wifiConfig.ssid)) {
                                 continueWithNetwork(true)
                             } else {
                                 finishAttempt()
