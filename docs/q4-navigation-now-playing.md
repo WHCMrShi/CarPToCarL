@@ -34,3 +34,9 @@ NavigationStateTest涵盖首次/重复目的地、结束保留及空图、重复
 用户要求先Code Review，不执行assemble/package APK。仅单测与lint，脚本末尾列出的既有APK不是本次构建产物。
 
 实现提交：53c924f。最终本机验证913项JVM单测通过（0 failures/0 errors），lint 0 errors/97 warnings（既有baseline另过滤3 errors/94 warnings），git diff --check通过。仅执行testDebugUnitTest与lintDebug；未执行assemble/package，既有APK时间仍为2026-11-09 00:19:32。未安装、未Q4实车验证。
+
+## Review 后修复与打包（2026-11-09）
+
+用户随后授权修复并打包。f6f6cd7 保留合并窗口内 action1 的起始距离，并以新的 action1 重建同路同向动作基准；只对 1 秒内内容全相同的 SHOW 去重。e6bafd9 修复结束布局中新引导尚未刷出时又收到结束的竞态。0d9ab0d 复用已完整传输且收到 SUCCESS 的相同图片 ID，仍正常重传；不同内容仍保留 127 次新 ID 分配的保守边界。详见 [修复、128 限制研究及测试包记录](vehicle-tests/2026-11-09-navigation-review-fixes/repair-notes.md)。
+
+最终干净提交 0d9ab0db99bf 的完整构建通过：920 项单测、lint（0 errors/97 warnings）及 Debug APK。包内源码标识和签名已核验，未安装或实车验证；本段更新此前“先不打包”的阶段记录。
