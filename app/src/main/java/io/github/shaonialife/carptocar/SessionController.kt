@@ -4866,6 +4866,7 @@ object SessionController {
                                             frameCipher = screen.cipher,
                                             width = streamOutW,
                                             height = streamOutH,
+                                            noticeSize = if (hijackMode) io.github.shaonialife.carptocar.carlife.CarCanvasMemory.DEFAULT else null,
                                             targetFps = sessionTargetFps,
                                             log = { line -> appendLog(line) },
                                             keepAliveWithStats = setup.keepAliveSendStatsAsBody,

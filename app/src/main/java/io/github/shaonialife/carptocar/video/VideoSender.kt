@@ -69,6 +69,8 @@ class VideoSender(
      * 传 null = 不写这几个字段（旧行为，保持向后兼容）。
      */
     private val viewAreaSize: (() -> Pair<Int, Int>)? = null,
+    /** Actual local notice encoding dimensions; never override a source SPS or its config. */
+    private val noticeSize: Pair<Int, Int>? = null,
     private val uptimeMillis: () -> Long = { android.os.SystemClock.uptimeMillis() },
 ) {
     private val width: Int = (width / 2) * 2
@@ -920,9 +922,12 @@ class VideoSender(
      * 只在直通模式下有意义（此时 VideoSender 不持有编码器，画面来自外部 H.264）。
      * 编码失败一律返回 false，调用方保留「仅日志」兜底即可。
      */
-    fun pushNotice(lines: List<String>): Boolean {
+    fun pushNotice(lines: List<String>): Boolean = pushNotice(lines, NoticeFrameEncoder::encodeNotice)
+
+    internal fun pushNotice(lines: List<String>, encode: (Int, Int, List<String>) -> NoticeFrameEncoder.NoticeFrame?): Boolean {
         if (!running.get() || !passthrough || realSourceSeen.get()) return false
-        val frame = runCatching { NoticeFrameEncoder.encodeNotice(width, height, lines) }
+        val size = noticeSize ?: (width to height)
+        val frame = runCatching { encode(size.first, size.second, lines) }
             .getOrElse { error ->
                 // 带异常类型与调用栈：MediaCodec 的厂商异常 message 经常语焉不详（如"10 > -2145395697"），
                 // 只有类型+堆栈才能一次定位。
