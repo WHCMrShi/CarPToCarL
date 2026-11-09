@@ -11,10 +11,11 @@ internal class SourceKeyFrameRequest(private val intervalMs: Long = 6_000) {
         return Ticket(generation, now).also { pending = it; inFlight = true; lastAt = now }
     }
     @Synchronized fun current(ticket: Ticket, generation: Long): Boolean = pending === ticket && ticket.generation == generation
+    @Synchronized fun needsForward(ticket: Ticket, generation: Long): Boolean = current(ticket, generation) && !ticket.arrived
     @Synchronized fun forwarded(ticket: Ticket, ok: Boolean): Boolean {
         if (pending !== ticket) return false
         inFlight = false
-        if (!ok) pending = null
+        if (!ok && !ticket.arrived) pending = null
         return true
     }
     @Synchronized fun arrived(generation: Long): Ticket? = pending?.takeIf { it.generation == generation && !it.arrived }?.also { it.arrived = true }

@@ -4,6 +4,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SourceKeyFrameRequestTest {
+    @Test fun sourceArrivalCancelsDeferredCommandWithoutLosingWriteObservation() {
+        val gate = SourceKeyFrameRequest()
+        val ticket = gate.begin(1, 100)!!
+        assertTrue(gate.needsForward(ticket, 1))
+        gate.arrived(1)
+        assertFalse(gate.needsForward(ticket, 1))
+        assertTrue(gate.forwarded(ticket, false))
+        assertTrue(gate.current(ticket, 1))
+        assertSame(ticket, gate.written(1))
+    }
     @Test fun coalescesInFlightAndLimitsCompletedRequests() {
         val gate = SourceKeyFrameRequest()
         val ticket = gate.begin(1, 100)!!

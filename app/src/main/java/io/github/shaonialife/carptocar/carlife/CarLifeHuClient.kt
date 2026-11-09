@@ -183,6 +183,8 @@ class CarLifeHuClient(
     private val settleReinit: Boolean = true,
     /** true 时 PCM 数组仅在回调内有效，消费者必须同步消费/复制；默认保留独立数组 API。 */
     private val borrowPcmInput: Boolean = false,
+    private val encoderInitClock: () -> Long = { android.os.SystemClock.uptimeMillis() },
+    private val keyFrameWait: (Long) -> Unit = { Thread.sleep(it) },
 ) {
 
     private val running = AtomicBoolean(false)
@@ -1155,8 +1157,35 @@ class CarLifeHuClient(
     }
 
     /** Called on the owning CarLife scope, never on the AirPlay event reader. */
-    internal fun requestSourceKeyFrame(isCurrent: () -> Boolean): Boolean =
-        if (!running.get() || !isCurrent()) false else sendEncoderInit(force = true)
+    internal fun requestSourceKeyFrame(isCurrent: () -> Boolean): Boolean {
+        // Share the HU's actual init history with startup, resolution and recovery paths.
+        // A source IDR/retirement invalidates isCurrent and cancels this pending request.
+        val deadline = encoderInitClock() + ENCODER_INIT_DEDUPE_MS
+        var notedWait = false
+        while (running.get() && isCurrent() && !Thread.currentThread().isInterrupted) {
+            val remaining = deadline - encoderInitClock()
+            if (remaining < 0) return false
+            val wait = synchronized(this) {
+                if (!running.get() || !isCurrent()) return false
+                val sig = "${requestedWidth}x${requestedHeight}@$videoFps"
+                val cooldown = if (sig == lastEncInitSig)
+                    (ENCODER_INIT_DEDUPE_MS - (encoderInitClock() - lastEncInitAt)).coerceAtLeast(0) else 0
+                when {
+                    orderedInit && !firstInitSent -> 100L // never preempt the ordered first 98311
+                    cooldown > 0 -> cooldown
+                    else -> return sendEncoderInit() // same monitor: recheck and write cannot race another init
+                }
+            }
+            if (remaining == 0L) return false
+            if (!notedWait) {
+                log("KEYFRAME-DIAG: HU init pending/cooling down; coalescing source request for at most ${ENCODER_INIT_DEDUPE_MS}ms")
+                notedWait = true
+            }
+            try { keyFrameWait(minOf(wait, remaining, 100L)) }
+            catch (_: InterruptedException) { Thread.currentThread().interrupt(); return false }
+        }
+        return false
+    }
 
     /**
      * 车机连上后更新**申请**分辨率，并重新下发 98311 让引擎按新车机画布编码。
@@ -1348,7 +1377,7 @@ class CarLifeHuClient(
     @Synchronized
     private fun sendEncoderInit(force: Boolean = false): Boolean {
         val sig = "${requestedWidth}x${requestedHeight}@$videoFps"
-        val now = android.os.SystemClock.uptimeMillis()
+        val now = encoderInitClock()
         if (!force && sig == lastEncInitSig && now - lastEncInitAt < ENCODER_INIT_DEDUPE_MS) {
             runCatching { log("PATH-DIAG: encoderInit hu=${System.identityHashCode(this)} decision=DEDUPE force=$force previousAttemptAgeMs=${now - lastEncInitAt}") }
             log("CARLIFE: 98311 跳过重复下发（$sig 刚发过）——重复会让引擎确认值降到 20fps")
@@ -1358,7 +1387,7 @@ class CarLifeHuClient(
         lastEncInitSig = sig
         lastEncInitAt = now
         val sent = send(CarLifeProtocol.HU_VIDEO_ENC_INIT, buildEncoderInfo())
-        runCatching { log("PATH-DIAG: encoderInit hu=${System.identityHashCode(this)} decision=ATTEMPT force=$force previousAttemptAgeMs=${if (previousAttemptAt > 0) now - previousAttemptAt else null} durationMs=${android.os.SystemClock.uptimeMillis() - now} sent=$sent; not source-IDR confirmation") }
+        runCatching { log("PATH-DIAG: encoderInit hu=${System.identityHashCode(this)} decision=ATTEMPT force=$force previousAttemptAgeMs=${if (previousAttemptAt > 0) now - previousAttemptAt else null} durationMs=${encoderInitClock() - now} sent=$sent; not source-IDR confirmation") }
         // 首条一旦发出，引擎的档位就定了；此后分辨率热更新可以直接重发（见 setRequestedResolution）。
         if (sent) firstInitSent = true
         return sent

@@ -896,7 +896,7 @@ class VideoSender(
             val forward = sourceKeyFrameRequest ?: return false
             val generation = q4Handover.sourceGeneration()
             val ticket = sourceKeyFrames.begin(generation, uptimeMillis()) ?: return true
-            val alive = { running.get() && q4Handover.isSourceCurrent(generation) && sourceKeyFrames.current(ticket, generation) }
+            val alive = { running.get() && q4Handover.isSourceCurrent(generation) && sourceKeyFrames.needsForward(ticket, generation) }
             val queued = forward(ticket, alive) { ok ->
                 if (sourceKeyFrames.forwarded(ticket, ok)) log("KEYFRAME-DIAG: ${if (ok) "FORWARDED" else "NOT_FORWARDED"} generation=$generation; awaiting actual source IDR")
             }
