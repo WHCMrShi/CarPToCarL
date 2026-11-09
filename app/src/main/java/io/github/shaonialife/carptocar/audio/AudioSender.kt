@@ -555,12 +555,37 @@ class AudioSender(
     }
 
     /** 唯一真实音频消费线程；与补静音共用帧/加密状态锁，读线程不等待此锁。 */
-    @Synchronized
+    private val stageWindow = io.github.shaonialife.carptocar.util.MediaStageWindow("audio packetSample=first-per-input-block", 50_000_000L)
+    private var samplePacket = false
+    private var sampledSealNs = 0L
+    private var sampledSendNs = 0L
+
     private fun processPcm(srcPcm: ByteArray, size: Int, srcRate: Int, srcChannels: Int, gap: Boolean) {
+        val waiting = System.nanoTime()
+        var acquired = waiting
+        var finished = waiting
+        var seal = 0L
+        var send = 0L
+        try {
+            synchronized(this) {
+                acquired = System.nanoTime()
+                samplePacket = true; sampledSealNs = 0; sampledSendNs = 0
+                try { processPcmLocked(srcPcm, size, srcRate, srcChannels, gap) } finally {
+                    samplePacket = false
+                    seal = sampledSealNs; send = sampledSendNs
+                    finished = System.nanoTime()
+                }
+            }
+        } finally {
+            stageWindow.record(finished, acquired - waiting, finished - acquired, seal, send, gap)?.let(log)
+        }
+    }
+
+    private fun processPcmLocked(srcPcm: ByteArray, size: Int, srcRate: Int, srcChannels: Int, gap: Boolean) {
         if (!running.get()) return
         if (gap) {
             pcmFrames.clear(); passthroughBuffer.reset(); markerPending = true
-            log("AUDIO-DIAG: ingress discontinuity; discard partial frame, preserve RTP/nonce counters")
+            // Count discontinuities in the bounded stage summary, preserving reset semantics.
         }
         if (codec == AudioCodec.PCM) {
             // CarLife 合并音频已在源端混音；原生同格式直接组帧，不重采样、不复制整块输入。
@@ -694,6 +719,7 @@ class AudioSender(
             passthroughBuffer.reset()
         }
         continuity.summary(System.nanoTime())?.let { log("$it final=true codec=$codec") }
+        stageWindow.finish(System.nanoTime())?.let(log)
         restorePhoneMedia()
         if (syncSent > 0 && syncIcmpDeferrals > 0) {
             log(
@@ -946,12 +972,16 @@ class AudioSender(
     private fun sendPayload(payload: ByteArray, offset: Int = 0, size: Int = payload.size): Boolean {
         if (!running.get()) return false
         val client = socket ?: return false
+        val sampled = samplePacket
+        samplePacket = false
+        val sealStarted = if (sampled) System.nanoTime() else 0L
         val wire = if (codec == AudioCodec.PCM) {
             require(size == PACKET_BYTES)
             pcmPackets.seal(payload, offset, sequence, timestamp, nonceCounter, markerPending)
         } else {
             sealPacket(payload, sequence, timestamp, nonceCounter, markerPending)
         }
+        if (sampled) sampledSealNs = System.nanoTime() - sealStarted
         markerPending = false
         sequence = (sequence + 1) and 0xFFFF
         timestamp += samplesPerPacket
@@ -967,6 +997,7 @@ class AudioSender(
             packetsSent++
             bytesSent += wire.size
             val sentAt = System.nanoTime()
+            if (sampled) sampledSendNs = sentAt - sendStarted
             continuity.output(sentAt, sentAt - sendStarted)?.let {
                 log("$it codec=$codec nextSeq=$sequence nextSample=$timestamp")
             }

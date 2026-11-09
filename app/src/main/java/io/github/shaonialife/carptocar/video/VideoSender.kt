@@ -149,24 +149,36 @@ class VideoSender(
         return OwnedOutput(owner, owner.getOutputStream())
     }
 
+    private val stageWindow = io.github.shaonialife.carptocar.util.MediaStageWindow("video scope=frame-config-keepalive", 100_000_000L)
+    private var stageSealNs = 0L
+    private var stageSendNs = 0L
+
     private fun writeStream(kind: String, output: java.io.OutputStream, body: () -> Unit) {
-        val waitingAt = System.nanoTime() / 1_000_000
-        synchronized(writeLock) {
-            val owner = socket ?: throw java.io.IOException("video socket retired")
-            if ((output as? OwnedOutput)?.owner?.let { it !== owner } == true) {
-                throw java.io.IOException("stale video output")
+        val waiting = System.nanoTime()
+        var acquired = waiting
+        var finished = waiting
+        var seal = 0L
+        var send = 0L
+        try {
+            synchronized(writeLock) {
+                acquired = System.nanoTime()
+                val owner = socket ?: throw java.io.IOException("video socket retired")
+                if ((output as? OwnedOutput)?.owner?.let { it !== owner } == true) {
+                    throw java.io.IOException("stale video output")
+                }
+                stageSealNs = 0; stageSendNs = 0
+                val lease = writeDeadline.begin(owner, kind, acquired / 1_000_000)
+                try { body() } finally {
+                    writeDeadline.finish(lease)
+                    seal = stageSealNs; send = stageSendNs
+                    finished = System.nanoTime()
+                }
             }
-            val now = System.nanoTime() / 1_000_000
-            if (now - waitingAt >= 250) log("VIDEO-WRITE: kind=$kind lockWaitMs=${now - waitingAt}")
-            val lease = writeDeadline.begin(owner, kind, now)
-            try { body() } finally {
-                writeDeadline.finish(lease)
-                val elapsed = System.nanoTime() / 1_000_000 - now
-                if (elapsed >= 250) log("VIDEO-WRITE: kind=$kind elapsedMs=$elapsed")
-            }
+        } finally {
+            if (finished < acquired) finished = System.nanoTime()
+            stageWindow.record(finished, acquired - waiting, finished - acquired, seal, send)?.let(log)
         }
     }
-
     private fun startWriteWatchdog() {
         Thread({
             try {
@@ -1325,10 +1337,15 @@ class VideoSender(
                     OP_FRAME,
                     if (frameCipher is StreamFrameCipher.ChaCha) size + TAG_SIZE else size,
                 )
+            val sealStarted = System.nanoTime()
             val wire = frameWorkspace.seal(nalUnits, header, frameCounter)
+            stageSealNs = System.nanoTime() - sealStarted
             frameCounter++
-            output.write(wire, 0, frameWorkspace.size)
-            output.flush()
+            val sendStarted = System.nanoTime()
+            try {
+                output.write(wire, 0, frameWorkspace.size)
+                output.flush()
+            } finally { stageSendNs = System.nanoTime() - sendStarted }
         }
         framesSent++
         framesSinceKeepAlive++
