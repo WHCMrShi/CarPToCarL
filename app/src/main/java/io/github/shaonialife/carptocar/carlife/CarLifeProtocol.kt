@@ -379,6 +379,14 @@ internal object CarLifeProtocol {
     /** `CarlifeVideoFrameRate{frameRate = 1}`。 */
     fun videoFrameRate(fps: Int): ByteArray = pbVarint(1, fps)
 
+    /** 自动模块控制不应启动/停止用户导航：NAVI=2、EDOG=8 的 0 是空闲，不是禁用。
+     * 其余模块保留原策略：有任一零状态时才对本批非导航模块回复 1。
+     */
+    internal fun automaticModuleControlIds(modules: List<Pair<Int, Int>>): List<Int> {
+        val eligible = modules.filter { it.first != 2 && it.first != 8 }
+        return if (eligible.any { it.second == 0 }) eligible.map { it.first } else emptyList()
+    }
+
     /** 模块状态列表回复：把每个模块状态置 1（开启）。 */
     fun moduleControl(moduleIds: List<Int>): ByteArray {
         var out = pbVarint(1, moduleIds.size)

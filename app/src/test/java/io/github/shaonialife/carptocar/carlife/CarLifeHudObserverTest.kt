@@ -56,6 +56,10 @@ class CarLifeHudObserverTest {
         f.observer.versionMatched()
         f.observer.tick(30002)
         assertEquals(2, f.sent.size)
+        assertTrue(f.lines.any { it.contains("START id=") && it.contains("supportConfirmed=true") && it.contains("not a START acknowledgement") })
+        assertTrue(f.lines.any { it.contains("SUBSCRIBE_DONE") && it.contains("capability reply only") })
+        assertFalse(f.lines.any { it.contains(" confirmed=") })
+        assertTrue(f.lines.any { it.contains("activation unverified") })
     }
 
     @Test fun absentReplyGetsOneBoundedUnconfirmedStartAndPeriodicEvidence() {
@@ -68,7 +72,7 @@ class CarLifeHudObserverTest {
         f.observer.tick(30100)
         f.observer.tick(60100)
         assertEquals(2, f.sent.size)
-        assertTrue(f.lines.any { it.contains("confirmed=false") })
+        assertTrue(f.lines.any { it.contains("supportConfirmed=false") })
         assertTrue(f.lines.any { it.contains("nextTurnRx=0") })
     }
 

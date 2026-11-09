@@ -723,11 +723,11 @@ class CarLifeHuClient(
             CarLifeProtocol.MD_MODULE_STATUS -> {
                 val modules = CarLifeProtocol.parseModuleStatus(payload)
                 hudObserver.moduleStatus(modules, android.os.SystemClock.uptimeMillis())
-                if (modules.isEmpty()) return
-                if (modules.any { it.second == 0 }) {
+                val automaticIds = CarLifeProtocol.automaticModuleControlIds(modules)
+                if (automaticIds.isNotEmpty()) {
                     send(
                         CarLifeProtocol.HU_MODULE_CONTROL,
-                        CarLifeProtocol.moduleControl(modules.map { it.first }),
+                        CarLifeProtocol.moduleControl(automaticIds),
                     )
                 }
             }

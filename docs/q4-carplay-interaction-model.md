@@ -158,3 +158,15 @@ RAW 下不传 canvasSize/viewAreaSize，VideoConfig 仍携带码流解码尺寸�
 本次没有新增实车证据。APK 用于下一轮实验，不把构建成功或 RTSP 200 记为车机显示成功。
 
 本机验证：`scripts/build-local.ps1 -Tasks @(':app:testDebugUnitTest', ':app:lintDebug') -NoDaemon` 成功；823 项 JVM 单测通过，0 failures / 0 errors / 0 skipped，lint 0 errors / 97 warnings（沿用既有 baseline）。覆盖 RAW 默认、空/未知偏好回退、显式 stream/car 保留、不写视口的头部、SPS 解码尺寸、首帧接管及源代次竞态。提交后从干净工作区执行 assembleDebug，APK 源码标识对应本节所属提交；实际产物校验与交付信息在本次构建回复中提供，未安装及实车验证。
+
+## 2026-11-09 导航模块控制与订阅日志修正
+
+用户补充：实际使用 OPPO Car+，借用 CarLife 协议通道，今早在其界面内使用第三方地图完成导航。此前将数据提供者泛称为 CarLife+ 的记录不意味着使用百度 CarLife+ 内置导航。日志仍只确认 TBT 支持应答，未收到 TBT/辅助诱导数据；不能由此断言 Car+ 不支持导出。
+
+本节所属独立提交仅收窄自动 MODULE_CONTROL：NAVI=2、EDOG=8 无论空闲/活跃都不进入通用自动置 1 的列表；只含导航模块，或只有导航空闲、其他模块均非零时，不发送自动控制。其他模块沿用原批处理策略，显式 moduleControl 的序列化 API 不变，HUD 观察器仍接收原始导航状态。
+
+日志把 START 的 confirmed 改为 supportConfirmed，SUBSCRIBE_DONE 明确只代表能力应答；START 的 sent/startSent 明确仅表示本地写成功，未确认对方激活。保留已有支持判定、START 时序、一次性兜底及计数，不新增重发、frequency、4.0 应答、导航数据桥接或新握手步骤。RAW 默认和此前首帧接管不变。
+
+这是语义修复与观测澄清，不宣称解决 OPPO Car+ 的导航导出；没有新增实车证据。本次测试包供用户上车比较导航模块状态与 TBT 接收计数。
+
+本机验证：全量 828 项 JVM 单测通过（0 failures / 0 errors / 0 skipped），包含 5 项新自动控制测试及订阅日志回归；lint 0 errors / 97 warnings，沿用既有 baseline。测试覆盖 NAVI/EDOG 单独空闲、与活跃/空闲媒体混合、其他模块批处理保持，以及显式导航控制 API 保持。随后从干净提交构建 Debug APK，内嵌源码标识和交付副本由构建步骤校验；尚未安装/实车验证。

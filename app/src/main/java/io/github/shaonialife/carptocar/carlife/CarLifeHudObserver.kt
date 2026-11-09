@@ -54,13 +54,13 @@ internal class CarLifeHudObserver(
                 val ok = send(CarLifeHudProtocol.START, CarLifeHudProtocol.subscription(ids))
                 startSent = ok
                 if (!ok) log("HUD-DIAG: abandoned START after send failure; unsafe to replay a possibly partial control frame")
-                log("HUD-DIAG: START id=0x18045 modules=$ids sent=$ok confirmed=${response != null}; no-reply fallback is attempted once only")
+                log("HUD-DIAG: START id=0x18045 modules=$ids sent=$ok supportConfirmed=${response != null}; sent is local write success, not a START acknowledgement; no-reply fallback is attempted once only")
             }
         }
         if (now - lastSummary >= 30_000) {
             lastSummary = now
             log("HUD-DIAG: summary elapsedMs=${now - requestedAt!!} reply=${reply != null} startAttempted=$startAttempted startSent=$startSent nextTurnRx=$turns assistantRx=$assistants " +
-                "navigation=$navigation navigationStateAgeMs=${navigationChangedAt?.let { now - it }} lastHudAgeMs=${lastHudAt?.let { now - it }}; zero packets does not prove lack of navigation support")
+                "navigation=$navigation navigationStateAgeMs=${navigationChangedAt?.let { now - it }} lastHudAgeMs=${lastHudAt?.let { now - it }}; startSent means local write success, activation unverified; zero packets does not prove lack of navigation support")
             log("HUD-DIAG: controlRx=[${controlCounts.entries.joinToString(",") { "0x${it.key.toString(16)}:${it.value}" }}] otherControlRx=$otherControl (bounded ID histogram, not payload capture)")
         }
     }
@@ -68,7 +68,7 @@ internal class CarLifeHudObserver(
     @Synchronized fun receive(id: Int, payload: ByteArray, now: Long? = null) {
         if (id == CarLifeHudProtocol.SUBSCRIBE_DONE) {
             reply = CarLifeHudProtocol.reply(payload)
-            log("HUD-DIAG: SUBSCRIBE_DONE id=0x10044 bytes=${payload.size} modules=${reply!!.entries} parseError=${reply!!.error ?: "none"} latencyMs=${now?.let { at -> requestedAt?.let { at - it } }}")
+            log("HUD-DIAG: SUBSCRIBE_DONE id=0x10044 bytes=${payload.size} modules=${reply!!.entries} parseError=${reply!!.error ?: "none"} latencyMs=${now?.let { at -> requestedAt?.let { at - it } }}; capability reply only, not a START acknowledgement")
         } else {
             lastHudAt = now
             if (id == CarLifeHudProtocol.NEXT_TURN) turns++ else assistants++
