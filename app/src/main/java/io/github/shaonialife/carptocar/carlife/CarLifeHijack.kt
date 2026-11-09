@@ -608,6 +608,18 @@ object CarLifeHijack {
         }
         // 回放完成后才开放实时通路，防止实时新帧先于缓存旧帧写入。
         sender = videoSender
+        videoSender.sourceKeyFrameRequest = { _, current, complete ->
+            val keyFrameSource = client
+            val keyFrameScope = warmScope
+            val alive = { current() && keyFrameScope?.isClosed == false && client === keyFrameSource &&
+                sender === videoSender && projectionOwner.isCurrent(videoSender) && keyFrameSource?.isRunning == true }
+            if (keyFrameScope == null || keyFrameSource == null || !alive()) false else {
+                keyFrameScope.start("carlife-request-idr") {
+                    val ok = runCatching { if (alive()) keyFrameSource.requestSourceKeyFrame(alive) else false }.getOrDefault(false)
+                    complete(ok)
+                } != null
+            }
+        }
         startFirstFrameWatchdog(videoSender)
         // 主动催一个带 SPS 的当期 IDR；startFirstFrameWatchdog 还有 3 秒后的兜底。
         log("CARLIFE: 请求引擎重建编码器（约 1 秒后出当期首帧）")

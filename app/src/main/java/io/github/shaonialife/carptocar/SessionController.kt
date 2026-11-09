@@ -4563,7 +4563,7 @@ object SessionController {
                                         val forced = videoSender?.requestKeyFrame() == true
                                         appendLog(
                                             "EVENT: 车机请求关键帧（forceKeyFrame）→ " +
-                                                if (forced) "已强制编码 I 帧" else "编码器未就绪，等周期 I 帧",
+                                                if (forced) "请求已提交或合并，等待实际 IDR" else "当前源未就绪，请求未转交",
                                         )
                                     }
 

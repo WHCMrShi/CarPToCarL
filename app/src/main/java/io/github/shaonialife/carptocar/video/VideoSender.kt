@@ -103,6 +103,9 @@ class VideoSender(
     private val submissionLock = Any()
     private val realSourceSeen = AtomicBoolean(false)
     private val q4Handover = Q4ScreenHandover()
+    private val sourceKeyFrames = SourceKeyFrameRequest()
+    @Volatile internal var sourceKeyFrameRequest: ((SourceKeyFrameRequest.Ticket, () -> Boolean, (Boolean) -> Unit) -> Boolean)? = null
+
     @Volatile internal var onSourceHandover: ((Q4ScreenHandover.Ticket) -> Unit)? = null
 
     internal fun armSourceHandover(reason: String) = synchronized(submissionLock) { q4Handover.arm(reason) }
@@ -112,6 +115,9 @@ class VideoSender(
         q4Handover.recover(ticket, { running.get() && alive() }, modes, record)
 
     private fun sourceWritten(sourceGeneration: Long, idr: Boolean) {
+        if (idr && configSent) sourceKeyFrames.written(sourceGeneration)?.let {
+            log("KEYFRAME-DIAG: IDR_WRITTEN generation=$sourceGeneration elapsedMs=${uptimeMillis() - it.at}; decode unconfirmed")
+        }
         val ticket = q4Handover.written(sourceGeneration, idr, configSent) ?: return
         // 仅在真实 IDR 的配置和帧均写入完成后通知；通知本身不得执行网络 IO。
         runCatching { onSourceHandover?.invoke(ticket) }
@@ -503,6 +509,7 @@ class VideoSender(
 
     fun stop() {
         running.set(false)
+        sourceKeyFrames.reset()
         q4Handover.retire()
         sourceQueue?.close()
         sourceQueue = null
@@ -534,6 +541,7 @@ class VideoSender(
         if (!openDataPort()) return false
         passthrough = true
         realSourceSeen.set(false)
+        sourceKeyFrames.reset()
         q4Handover.retire()
         ended.set(false)
         running.set(true)
@@ -654,6 +662,7 @@ class VideoSender(
      */
     fun onSourceRestart(reason: String) {
         // 先使旧票据和在途帧失效，不能等阻塞写释放 submissionLock 后才作废。
+        sourceKeyFrames.reset()
         val retiredGeneration = q4Handover.retire()
         sourceQueue?.reset()
         synchronized(submissionLock) {
@@ -729,8 +738,13 @@ class VideoSender(
         return synchronized(submissionLock) {
             if (!q4Handover.isSourceCurrent(sourceGeneration)) return@synchronized false
             realSourceSeen.set(true)
+            if (splitAnnexB(data).any { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 5 }) {
+                sourceKeyFrames.arrived(sourceGeneration)?.let {
+                    log("KEYFRAME-DIAG: IDR_ARRIVED generation=$sourceGeneration elapsedMs=${uptimeMillis() - it.at}")
+                }
+            }
             val sent = submitH264Locked(data, keyFrame, sourceTimestampMs, sourceFrame = true)
-            if (sent && q4Handover.waiting()) sourceWritten(sourceGeneration,
+            if (sent) sourceWritten(sourceGeneration,
                 splitAnnexB(data).any { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 5 })
             sent
         }
@@ -745,6 +759,9 @@ class VideoSender(
         realSourceSeen.set(true)
         sourceDelivered = delivered
         val idr = splitAnnexB(data).any { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 5 }
+        if (idr) sourceKeyFrames.arrived(sourceGeneration)?.let {
+            log("KEYFRAME-DIAG: IDR_ARRIVED generation=$sourceGeneration elapsedMs=${uptimeMillis() - it.at}")
+        }
         return sourceQueue?.offer(data, idr, sourceTimestampMs, sourceGeneration) == true
     }
 
@@ -858,9 +875,21 @@ class VideoSender(
         }
     }
 
-    /** 编码器不存在时（直通模式）也允许请求关键帧：直接返回 true，由上游自行发 IDR。 */
+    /** 直通请求异步转交当前源；true 仅代表请求已排队/合并，不证明 IDR 已生成。 */
     fun requestKeyFrame(): Boolean {
-        if (passthrough) return true
+        if (passthrough) {
+            if (!running.get()) return false
+            val forward = sourceKeyFrameRequest ?: return false
+            val generation = q4Handover.sourceGeneration()
+            val ticket = sourceKeyFrames.begin(generation, uptimeMillis()) ?: return true
+            val alive = { running.get() && q4Handover.isSourceCurrent(generation) && sourceKeyFrames.current(ticket, generation) }
+            val queued = forward(ticket, alive) { ok ->
+                if (sourceKeyFrames.forwarded(ticket, ok)) log("KEYFRAME-DIAG: ${if (ok) "FORWARDED" else "NOT_FORWARDED"} generation=$generation; awaiting actual source IDR")
+            }
+            if (!queued) sourceKeyFrames.forwarded(ticket, false)
+            log("KEYFRAME-DIAG: ${if (queued) "QUEUED" else "SOURCE_UNAVAILABLE"} generation=$generation")
+            return queued
+        }
         val codec = encoder ?: return false
         return try {
             val params = android.os.Bundle()

@@ -1151,6 +1151,10 @@ class CarLifeHuClient(
         restartEncoding()
     }
 
+    /** Called on the owning CarLife scope, never on the AirPlay event reader. */
+    internal fun requestSourceKeyFrame(isCurrent: () -> Boolean): Boolean =
+        if (!running.get() || !isCurrent()) false else sendEncoderInit(force = true)
+
     /**
      * 车机连上后更新**申请**分辨率，并重新下发 98311 让引擎按新车机画布编码。
      *
@@ -1339,18 +1343,19 @@ class CarLifeHuClient(
      * （间隔 ≥ [NO_FRAME_REINIT_MS] = 10s）和视频口重连后的 [restartEncoding]。
      */
     @Synchronized
-    private fun sendEncoderInit(force: Boolean = false) {
+    private fun sendEncoderInit(force: Boolean = false): Boolean {
         val sig = "${requestedWidth}x${requestedHeight}@$videoFps"
         val now = android.os.SystemClock.uptimeMillis()
         if (!force && sig == lastEncInitSig && now - lastEncInitAt < ENCODER_INIT_DEDUPE_MS) {
             log("CARLIFE: 98311 跳过重复下发（$sig 刚发过）——重复会让引擎确认值降到 20fps")
-            return
+            return false
         }
         lastEncInitSig = sig
         lastEncInitAt = now
-        send(CarLifeProtocol.HU_VIDEO_ENC_INIT, buildEncoderInfo())
+        val sent = send(CarLifeProtocol.HU_VIDEO_ENC_INIT, buildEncoderInfo())
         // 首条一旦发出，引擎的档位就定了；此后分辨率热更新可以直接重发（见 setRequestedResolution）。
-        firstInitSent = true
+        if (sent) firstInitSent = true
+        return sent
     }
 
     /**

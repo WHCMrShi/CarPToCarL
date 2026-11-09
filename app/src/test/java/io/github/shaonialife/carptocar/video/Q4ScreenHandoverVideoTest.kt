@@ -19,6 +19,36 @@ class Q4ScreenHandoverVideoTest {
         assertTrue(sender.startPassthrough())
         return sender
     }
+    @Test fun passthroughRequestHasToReachSourceAndNoticeCannotCompleteIt() {
+        val sender = sender()
+        try {
+            assertFalse(sender.requestKeyFrame())
+            var current: (() -> Boolean)? = null
+            var forwards = 0
+            sender.sourceKeyFrameRequest = { _, alive, done -> forwards++; current = alive; done(true); true }
+            assertTrue(sender.requestKeyFrame())
+            assertTrue(sender.requestKeyFrame())
+            assertEquals(1, forwards)
+            assertTrue(current!!())
+            assertTrue(sender.submitH264(csd + idr, true))
+            assertTrue(current!!()) // local notice IDR is not source recovery
+            assertTrue(sender.submitSourceH264(csd + idr, true))
+            assertFalse(current!!())
+        } finally { sender.stop() }
+    }
+    @Test fun sourceRestartAndStopInvalidateQueuedKeyframeRequest() {
+        val sender = sender()
+        var current: (() -> Boolean)? = null
+        try {
+            sender.sourceKeyFrameRequest = { _, alive, _ -> current = alive; true }
+            assertTrue(sender.requestKeyFrame())
+            sender.onSourceRestart("test")
+            assertFalse(current!!())
+            assertTrue(sender.requestKeyFrame())
+            sender.stop()
+            assertFalse(current!!())
+        } finally { sender.stop() }
+    }
     @Test fun carlifeFirstCachedGopAndNextLiveIdrKeepExistingStartup() {
         val sender = sender()
         val calls = AtomicInteger()
