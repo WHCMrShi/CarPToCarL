@@ -132,6 +132,16 @@ class Iap2ArtworkSenderTest {
         sender.response(byteArrayOf(id.toByte(), 1))
         return id
     }
+    private fun complete(sender: Iap2ArtworkSender, value: CarPlayNowPlaying): Int {
+        val id = start(sender, value)
+        do {
+            val data = send(sender)
+            assertEquals(id.toByte(), data[0])
+        } while (data[1].toInt() and 0x40 == 0)
+        sender.response(byteArrayOf(id.toByte(), 5))
+        assertFalse(sender.pending())
+        return id
+    }
 
     @Test fun capabilityAndExplicitSubscriptionGateNeverLoadsImage() {
         ArtworkRepository().use { repo ->
@@ -177,7 +187,7 @@ class Iap2ArtworkSenderTest {
         }
     }
 
-    @Test fun singleChunkUsesFirstAndLastFlagsAndCachedSuccessNeedsNoData() {
+    @Test fun resetReusesSuccessfulContentIdButRetransmitsTheImage() {
         ArtworkRepository().use { repo ->
             val sender = Iap2ArtworkSender()
             val value = loaded(repo, size = 10)
@@ -187,9 +197,11 @@ class Iap2ArtworkSenderTest {
             sender.response(byteArrayOf(id.toByte(), 5))
             sender.reset()
             val nextId = sender.decorate(value, 26, true).artworkTransferId!!
-            assertNotEquals(id, nextId)
+            assertEquals(id, nextId)
             sender.metadataSent(nextId)
-            send(sender) // previous cancellation, if needed, then SETUP
+            assertEquals(4, send(sender)[1].toInt())
+            sender.response(byteArrayOf(nextId.toByte(), 1))
+            assertArrayEquals(data, send(sender))
             sender.response(byteArrayOf(nextId.toByte(), 5))
             assertNull(sender.poll(1024))
             assertFalse(sender.pending())
@@ -335,7 +347,7 @@ class Iap2ArtworkSenderTest {
         }
     }
 
-    @Test fun transferIdsNeverWrapToAccessoryDirectionOrReuseCachedImageIds() {
+    @Test fun distinctImagesNeverWrapToAccessoryDirectionOrReuseIds() {
         ArtworkRepository().use { repo ->
             val sender = Iap2ArtworkSender()
             val ids = mutableSetOf<Int>()
@@ -347,6 +359,59 @@ class Iap2ArtworkSenderTest {
                 sender.response(byteArrayOf(id.toByte(), 5))
             }
             assertEquals(128, sender.decorate(loaded(repo, "overflow", 200), 26, true).artworkTransferId)
+        }
+    }
+
+    @Test fun alternatingSuccessfulImagesDoNotExhaustTheLinkBudget() {
+        ArtworkRepository().use { repo ->
+            val sender = Iap2ArtworkSender()
+            val aId = complete(sender, loaded(repo, "a", 10))
+            val bId = complete(sender, loaded(repo, "b", 11))
+            assertNotEquals(aId, bId)
+            repeat(150) {
+                assertEquals(aId, complete(sender, loaded(repo, "a", 10)))
+                assertEquals(bId, complete(sender, loaded(repo, "b", 11)))
+            }
+            sender.newLink()
+            assertEquals(aId, complete(sender, loaded(repo, "b", 11))) // 新链路从 129 开始，不继承 b 的 130。
+        }
+    }
+
+    @Test fun completedImagesRemainUsableWhenDistinctImageBudgetIsExhausted() {
+        ArtworkRepository().use { repo ->
+            val sender = Iap2ArtworkSender()
+            val a = loaded(repo, "a", 10)
+            val aId = complete(sender, a)
+            repeat(126) { complete(sender, loaded(repo, "unique-$it", 11 + it)) }
+            assertEquals(128, sender.decorate(loaded(repo, "overflow", 200), 26, true).artworkTransferId)
+            assertEquals(aId, complete(sender, loaded(repo, "a", 10)))
+        }
+    }
+
+    @Test fun prematureSuccessDoesNotMakeAnUnsentImageReusable() {
+        ArtworkRepository().use { repo ->
+            val sender = Iap2ArtworkSender()
+            val a = loaded(repo, "a", 10)
+            val first = start(sender, a)
+            val blocked = sender.poll(1024)!!
+            sender.submitted(blocked, false)
+            sender.response(byteArrayOf(first.toByte(), 5))
+            complete(sender, loaded(repo, "b", 11))
+            assertNotEquals(first, complete(sender, loaded(repo, "a", 10)))
+        }
+    }
+
+    @Test fun receiverFailureInvalidatesAPreviouslySuccessfulId() {
+        ArtworkRepository().use { repo ->
+            val sender = Iap2ArtworkSender()
+            val a = loaded(repo, "a", 10)
+            val first = complete(sender, a)
+            complete(sender, loaded(repo, "b", 11))
+            val again = loaded(repo, "a", 10)
+            assertEquals(first, start(sender, again))
+            sender.response(byteArrayOf(first.toByte(), 6))
+            sender.subscribe(26)
+            assertNotEquals(first, complete(sender, again))
         }
     }
 

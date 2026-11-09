@@ -14,6 +14,8 @@ internal class Iap2ArtworkSender(
     private var transferId: Int? = null
     private var nextId = 129
     private var allocated = 0
+    // 只记已完整入队且收到 SUCCESS 的内容；不保存图片，不把同一 ID 用于不同内容。
+    private val completedIds = HashMap<String, Int>()
     private var generation = 0L
     private var offset = 0
     private var deadline = 0L
@@ -49,6 +51,7 @@ internal class Iap2ArtworkSender(
     @Synchronized fun newLink() {
         reset(); cancel = null; attribute = null; lastTrack = null
         nextId = 129; allocated = 0
+        completedIds.clear()
     }
 
     @Synchronized fun decorate(value: CarPlayNowPlaying, requestedField: Int?, supported: Boolean): CarPlayNowPlaying {
@@ -82,13 +85,15 @@ internal class Iap2ArtworkSender(
                 failed = false
                 if (phase in listOf(Phase.START, Phase.DATA, Phase.SUCCESS)) cancel = transferId
                 generation++; activePlan = null; image = nextImage; content = key
-                // 0x80 始终代表空图；其余 ID 在本连接不复用，防接收端缓存旧图。
-                transferId = if (nextImage == null || allocated >= 127) 128 else {
+                // 0x80 表示空图；成功内容复用原 ID 并重传，不依赖接收端仍保有文件。
+                // 不同内容仍分配不同 ID，避免车机按 ID 缓存时显示旧图。
+                val completedId = completedIds[key]
+                transferId = if (nextImage == null) 128 else completedId ?: if (allocated >= 127) 128 else {
                     allocated++
                     nextId++
                 }
                 if (transferId == 128) {
-                    if (nextImage != null && allocated == 127) log("ARTWORK: 本连接封面 ID 已用尽，等待重连")
+                    if (nextImage != null) log("ARTWORK: 本连接新封面 ID 已用尽，已成功内容仍可复用，等待重连")
                     image = null
                 }
                 offset = 0; announced = false; phase = Phase.SETUP
@@ -129,6 +134,9 @@ internal class Iap2ArtworkSender(
             1 -> if (phase == Phase.START) { phase = Phase.DATA; deadline = clock() + 30_000 }
             5, 6, 2 -> {
                 failed = bytes[1].toInt() != 5
+                if (!failed && phase == Phase.SUCCESS && activePlan == null && image != null && offset == image!!.size) {
+                    completedIds[content!!] = transferId!!
+                } else if (failed) forgetCompletedId()
                 if (bytes[1].toInt() != 5) log("ARTWORK: 接收端终止封面，状态=${bytes[1].toInt() and 255}")
                 phase = Phase.DONE; image = null
             }
@@ -144,6 +152,7 @@ internal class Iap2ArtworkSender(
             log("ARTWORK: 封面传输超时 id=$transferId phase=$phase sent=$offset/${image?.size ?: 0}，取消文件传输")
             cancel = transferId; phase = Phase.DONE; image = null
             failed = true
+            forgetCompletedId()
         }
         val oldPhase = phase; val oldOffset = offset; val oldDeadline = deadline
         val id = transferId
@@ -188,6 +197,9 @@ internal class Iap2ArtworkSender(
             if (plan.cancelId != null) cancel = plan.cancelId
             else { phase = Phase.entries[plan.previousPhase]; offset = plan.previousOffset; deadline = plan.previousDeadline }
         }
+    }
+    private fun forgetCompletedId() {
+        content?.let { if (completedIds[it] == transferId) completedIds.remove(it) }
     }
     @Synchronized fun pending(): Boolean = awaitingImage || cancel != null || phase !in listOf(Phase.NONE, Phase.DONE)
 
