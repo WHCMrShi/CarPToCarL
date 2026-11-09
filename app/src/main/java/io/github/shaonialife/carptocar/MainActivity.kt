@@ -1570,6 +1570,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun bindDisplayCard() {
+        val navigationSwitch = findViewById<SwitchCompat>(R.id.switchInstrumentNavigation)
+        io.github.shaonialife.carptocar.media.NavigationNowPlaying.ensure(this)
+        navigationSwitch.isChecked = io.github.shaonialife.carptocar.media.NavigationNowPlaying.isNavigation()
+        navigationSwitch.setOnCheckedChangeListener { _, enabled ->
+            io.github.shaonialife.carptocar.media.NavigationNowPlaying.select(enabled)
+        }
         val ctx = this
 
         // 本地 CarLife 劫持开关：接管手机原生 CarLife 码流（默认开；失败自动回退隐形屏）

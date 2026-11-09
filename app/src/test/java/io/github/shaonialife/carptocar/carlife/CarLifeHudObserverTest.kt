@@ -4,6 +4,20 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CarLifeHudObserverTest {
+    @Test fun fullImageFieldReachesNavigationWithoutGuessingMissingOrMalformedFields() {
+        val received = mutableListOf<io.github.shaonialife.carptocar.media.HudTurn>()
+        val observer = CarLifeHudObserver({ _, _ -> true }, {}, received::add)
+        val png = byteArrayOf(137.toByte(), 80, 78, 71, 13, 10, 26, 10)
+        val body = byteArrayOf(8, 1, 16, 7, 26, 1, 120, 32, 100, 40, 100, 50, 8) + png
+        observer.receive(CarLifeHudProtocol.NEXT_TURN, body)
+        assertEquals(1, received.size)
+        assertEquals(100, received.single().distance)
+        assertArrayEquals(png, received.single().icon)
+        observer.receive(CarLifeHudProtocol.NEXT_TURN, byteArrayOf(8, 1))
+        observer.receive(CarLifeHudProtocol.NEXT_TURN, body.copyOf(body.size - 1))
+        assertEquals(1, received.size)
+    }
+
     @Test fun failedSubscribeCannotFallThroughToUnconfirmedStart() {
         val ids = mutableListOf<Int>()
         val lines = mutableListOf<String>()

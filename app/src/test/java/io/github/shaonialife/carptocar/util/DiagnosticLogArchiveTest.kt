@@ -67,6 +67,7 @@ class DiagnosticLogArchiveTest {
             "RESOURCE-DIAG: response transportAccepted=true",
             "KEYFRAME-DIAG: IDR_WRITTEN",
             "MEDIA-STAGE: audio count=500 discontinuities=100",
+            "NAV-MEDIA: phase=guide; progress=distance-percent paused=true",
         )
         writer.write(evidence.map { "$it\n" }, 0)
         repeat(10) { writer.write(listOf("ordinary line ${"x".repeat(100)}\n"), 0) }

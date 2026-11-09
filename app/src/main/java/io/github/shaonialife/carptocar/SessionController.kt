@@ -338,6 +338,9 @@ object SessionController {
     private fun installNowPlayingBridge() {
         if (nowPlayingBridgeInstalled) return
         nowPlayingBridgeInstalled = true
+        appContext?.let { io.github.shaonialife.carptocar.media.NavigationNowPlaying.ensure(it) }
+        io.github.shaonialife.carptocar.media.NavigationNowPlaying.changed = ::pushNowPlayingAll
+        io.github.shaonialife.carptocar.media.NavigationNowPlaying.log = ::appendLog
         // Q4 的晚到真实源恢复绑定在各 VideoSender 上，不使用进程级首帧回调。
         // 数据源 A：CarLife 内置播放器（0x10035）——兜底，仅其内置播放器会推。
         CarLifeHijack.addMediaInfoListener { info ->
@@ -367,6 +370,7 @@ object SessionController {
     private val nowPlayingLog = io.github.shaonialife.carptocar.util.LogThrottle(10_000)
 
     private fun buildNowPlaying(): CarPlayNowPlaying? {
+        io.github.shaonialife.carptocar.media.NavigationNowPlaying.value()?.let { return it }
         val session = MediaSessionsState.nowPlaying
         val system = session != null && session.title != null
         val value = if (system) {
@@ -377,7 +381,8 @@ object SessionController {
         if (value != null && nowPlayingLog.allow("source")) {
             appendLog("NOWPLAYING-DIAG: source=${if (system) "MediaSession" else "CarLife"} durationMs=${value.durationMs} elapsedMs=${value.elapsedMs} status=${value.status}")
         }
-        return value
+        return value ?: if (io.github.shaonialife.carptocar.media.NavigationNowPlaying.hasSelectedNavigation)
+            CarPlayNowPlaying("暂无音乐", "", "", 0, Iap2NowPlaying.STATUS_PAUSED, 0, appName = "音乐") else null
     }
 
     /** 追加一行日志：logcat + 文件 + 进程级缓冲 + 挂屏渲染（增量行直送）。任意线程可调。 */

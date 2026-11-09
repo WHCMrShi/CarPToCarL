@@ -4,6 +4,7 @@ package io.github.shaonialife.carptocar.carlife
 internal class CarLifeHudObserver(
     private val send: (Int, ByteArray) -> Boolean,
     private val log: (String) -> Unit,
+    private val onTurn: (io.github.shaonialife.carptocar.media.HudTurn) -> Unit = {},
 ) {
     private var enabled = false
     private var requestedAt: Long? = null
@@ -73,6 +74,7 @@ internal class CarLifeHudObserver(
             lastHudAt = now
             if (id == CarLifeHudProtocol.NEXT_TURN) turns++ else assistants++
             log("HUD-DIAG: ${CarLifeHudProtocol.describe(id, payload)}")
+            if (id == CarLifeHudProtocol.NEXT_TURN) CarLifeHudProtocol.turn(payload)?.let(onTurn)
         }
     }
 

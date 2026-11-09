@@ -727,6 +727,7 @@ object CarLifeHijack {
     /** 完全停止（退出 App / 关闭开关 / 当前 CarPlay 真实结束）。 */
     @Synchronized
     fun stop() {
+        io.github.shaonialife.carptocar.media.NavigationNowPlaying.clear()
         projectionOwner.clear()
         startupPrewarmAllowed = false
         running.set(false)
@@ -793,6 +794,9 @@ object CarLifeHijack {
             val mediaState = CarLifeNowPlayingState()
             nowPlayingState = mediaState
             val sourceIdentity = Any()
+            synchronized(this) {
+                if (!scope.isClosed && running.get()) io.github.shaonialife.carptocar.media.NavigationNowPlaying.begin(sourceIdentity)
+            }
             val hu = CarLifeHuClient(
                 host = "127.0.0.1",
                 // routeAudio → sink.write → feedPcm 返回前已消费或复制；GOP 视频仍独立持有数组。
@@ -821,6 +825,7 @@ object CarLifeHijack {
                     mediaState.media(info)
                     onMediaInfo(info)
                 } },
+                onHudTurn = { event -> if (!scope.isClosed) io.github.shaonialife.carptocar.media.NavigationNowPlaying.receive(sourceIdentity, event) },
                 onMediaProgress = { value -> if (!scope.isClosed && nowPlayingState === mediaState) mediaState.progress(value) },
                 requestedFps = requestedFps,
                 initialConnectType = connectType,
@@ -885,6 +890,7 @@ object CarLifeHijack {
             }
             hu.stop()
             if (nowPlayingState === mediaState) {
+                io.github.shaonialife.carptocar.media.NavigationNowPlaying.end(sourceIdentity)
                 nowPlayingState = null
                 mediaState.reset()
             }

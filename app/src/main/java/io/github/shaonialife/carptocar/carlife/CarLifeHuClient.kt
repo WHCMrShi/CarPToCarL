@@ -88,6 +88,7 @@ class CarLifeHuClient(
     /** 收到手机推送的媒体信息（歌名/歌手/封面，0x10035）。 */
     private val onMediaInfo: (info: CarLifeMediaInfo) -> Unit = {},
     private val onMediaProgress: (Int) -> Unit = {},
+    private val onHudTurn: (io.github.shaonialife.carptocar.media.HudTurn) -> Unit = {},
     private val connectTimeoutMs: Int = 3_000,
     /**
      * 向 CarLife 引擎申请的编码帧率（98311 的 fps 字段 + 98316 帧率变更）。
@@ -188,7 +189,7 @@ class CarLifeHuClient(
 ) {
 
     private val running = AtomicBoolean(false)
-    private val hudObserver = CarLifeHudObserver(::send, log)
+    private val hudObserver = CarLifeHudObserver(::send, log, onHudTurn)
     private val playbackEvidence = CarLifePlaybackEvidence()
     private val audioExpectationLog = LogThrottle(30_000L)
     private var mediaTrack: List<String>? = null

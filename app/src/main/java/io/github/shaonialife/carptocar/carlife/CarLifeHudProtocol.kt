@@ -39,6 +39,15 @@ internal object CarLifeHudProtocol {
         return SubscriptionReply(entries, error)
     }
 
+    fun turn(payload: ByteArray): io.github.shaonialife.carptocar.media.HudTurn? {
+        val fields = parse(payload)
+        if (fields.error != null) return null
+        return io.github.shaonialife.carptocar.media.HudTurn(
+            fields.int(1) ?: return null, fields.int(2) ?: return null,
+            fields.bytes(3)?.toString(Charsets.UTF_8)?.take(512) ?: return null,
+            fields.int(4)?.takeIf { it >= 0 } ?: return null, fields.bytes(6),
+        )
+    }
     fun describe(id: Int, payload: ByteArray): String {
         val f = parse(payload)
         val body = if (id == NEXT_TURN) {
