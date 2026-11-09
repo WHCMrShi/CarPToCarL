@@ -788,6 +788,7 @@ class AirPlayClient(
     private fun isSessionAlive(): Boolean = socket?.isClosed == false
 
     fun close() = synchronized(closeLock) {
+        onResourceModesChanged = null
         log("CONNECT-DIAG: client=${System.identityHashCode(this)} close pairing=$pairingInProgress disposed=$disposed cancelled=$cancelled pending=${pendingResponses.size} eventSocket=${eventCommandSocket != null} iapLinkPresent=${iapLink != null}")
         val inFlight = pendingResponses.isNotEmpty()
         val closing = synchronized(connectionLock) {
@@ -983,36 +984,60 @@ class AirPlayClient(
         }
     }
 
-    fun assertModes(): Boolean {
-        val body =
-            BinaryPlist.encode(
-                linkedMapOf(
-                    "type" to "modesChanged",
-                    "params" to
-                        linkedMapOf(
-                            "appStates" to
-                                listOf(
-                                    linkedMapOf<String, Any?>("appStateID" to 2L, "entity" to 0L),
-                                    linkedMapOf<String, Any?>("appStateID" to 3L, "entity" to 0L),
-                                    linkedMapOf<String, Any?>("appStateID" to 1L, "entity" to 0L, "speechMode" to -1L),
-                                ),
-                            "resources" to
-                                listOf(
-                                    linkedMapOf<String, Any?>("resourceID" to 1L, "entity" to 1L, "permanentEntity" to 1L),
-                                    linkedMapOf<String, Any?>("resourceID" to 2L, "entity" to 1L, "permanentEntity" to 1L),
-                                ),
-                        ),
-                ),
-            )
+    private val resourceModes = ResourceModes()
+    private val modeWriteLock = Any()
+    private val modeUpdateQueued = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var modeAttemptedVersion = -1L
+    @Volatile internal var onResourceModesChanged: (() -> Unit)? = null
+    internal fun markRealSourceStarted() = resourceModes.markSourceStarted()
+    internal fun screenRecoveryAllowed(): Boolean = resourceModes.canRecoverScreen()
+
+    internal fun handleModeChange(command: Map<*, *>) {
+        resourceModes.change((command["params"] as? Map<*, *>) ?: command)
+        log("RESOURCE-DIAG: change version=${resourceModes.snapshot().version} screenRecoveryAllowed=${screenRecoveryAllowed()}")
+        scheduleModeUpdate()
+    }
+    internal fun handleRequestUi() {
+        resourceModes.requestUi()
+        log("RESOURCE-DIAG: requestUI version=${resourceModes.snapshot().version}; temporary borrowers retained")
+        scheduleModeUpdate()
+    }
+    private fun scheduleModeUpdate() {
+        val owner = socket ?: return
+        val generation = lifecycleGeneration
+        val scope = resources
+        if (!modeUpdateQueued.compareAndSet(false, true)) return
+        val current = { socket === owner && !owner.isClosed && !cancelled && !disposed && lifecycleGeneration == generation && !scope.isClosed }
+        val thread = scope.start("airplay-resource-modes") {
+            try {
+                while (current()) {
+                    val snapshot = synchronized(modeWriteLock) {
+                        if (!current()) return@start
+                        val latest = resourceModes.snapshot()
+                        val ok = sendModes(latest)
+                        modeAttemptedVersion = latest.version
+                        log("RESOURCE-DIAG: response version=${latest.version} transportAccepted=$ok; peer display unconfirmed")
+                        latest
+                    }
+                    if (current()) onResourceModesChanged?.invoke()
+                    if (resourceModes.snapshot().version == snapshot.version) break
+                }
+            } finally {
+                modeUpdateQueued.set(false)
+                if (current() && resourceModes.snapshot().version != modeAttemptedVersion) scheduleModeUpdate()
+            }
+        }
+        if (thread == null) modeUpdateQueued.set(false)
+    }
+    fun assertModes(): Boolean = synchronized(modeWriteLock) { sendModes(resourceModes.snapshot()) }
+    internal fun assertSourceScreenModes(): Boolean = synchronized(modeWriteLock) {
+        if (!resourceModes.prepareScreenRecovery()) false else sendModes(resourceModes.snapshot())
+    }
+    private fun sendModes(snapshot: ResourceModes.Snapshot): Boolean {
+        val body = BinaryPlist.encode(linkedMapOf("type" to "modesChanged", "params" to snapshot.params))
         return try {
-            val (statusLine, _) =
-                request(
-                    "POST",
-                    "/command",
-                    body,
-                    contentType = "application/x-apple-binary-plist",
-                )
-            log("AIRPLAY: modesChanged（声明持有主屏/主音频资源）[$statusLine]")
+            val (statusLine, _) = request("POST", "/command", body, contentType = "application/x-apple-binary-plist")
+            log("AIRPLAY: modesChanged version=${snapshot.version} resources=${snapshot.params["resources"]} [$statusLine]")
             statusLine.contains("200")
         } catch (error: IOException) {
             log("AIRPLAY: modesChanged 失败 - ${error.message}")

@@ -4573,10 +4573,12 @@ object SessionController {
                                         }.toString().take(800))
                                         // 车机请求资源仲裁（如用户在 MMI 上点了手机）：
                                         // 回 modesChanged 声明手机持有主屏/主音频
-                                        appendLog("EVENT: 车机请求 changeModes → 回 modesChanged 接管资源")
-                                        client.assertModes()
+                                        if (!attemptCancelled() && currentClient === client) client.handleModeChange(command)
                                     }
 
+                                    "requestUI" -> {
+                                        if (!attemptCancelled() && currentClient === client) client.handleRequestUi()
+                                    }
                                     else ->
                                         appendLog(
                                             // 未识别的命令必须带参数：车机的私有命令（如 requestUI）
@@ -4926,6 +4928,13 @@ object SessionController {
                                     if (target != null) {
                                         val recoveryWork = connectionWork.capture()
                                         val recoverySetup = setupWork.capture()
+                                        client.onResourceModesChanged = {
+                                            if (!connectCancelled && recoveryWork.isCurrent && recoverySetup.isCurrent &&
+                                                currentClient === client && videoSender === target && client.screenRecoveryAllowed()) {
+                                                target.resumeResourceHandover()
+                                            }
+                                        }
+                                        target.onSourceIdrWritten = { client.markRealSourceStarted() }
                                         target.onSourceHandover = { ticket ->
                                             appendLog("Q4-HANDOVER: queued generation=${ticket.generation} reason=${ticket.reason}; real IDR written, decode unconfirmed")
                                             Bg.run("q4-source-handover") {
@@ -4935,7 +4944,8 @@ object SessionController {
                                                 }
                                                 val result = runCatching {
                                                     target.recoverSourceHandover(ticket, alive,
-                                                        modes = { client.assertModes() }, record = { client.record() })
+                                                        modes = { client.assertSourceScreenModes() }, record = { client.record() },
+                                                        allowed = { client.screenRecoveryAllowed() })
                                                 }
                                                 appendLog("Q4-HANDOVER: generation=${ticket.generation} result=${result.getOrNull() ?: "FAILED:${result.exceptionOrNull()?.javaClass?.simpleName}"}; activation response is not decoder confirmation")
                                             }

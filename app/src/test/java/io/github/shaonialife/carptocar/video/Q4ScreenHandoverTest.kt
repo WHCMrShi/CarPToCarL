@@ -10,6 +10,28 @@ class Q4ScreenHandoverTest {
         policy.arm("late-source")
         return policy.written(policy.sourceGeneration(), true, true)!!
     }
+    @Test fun borrowingDefersWithoutConsumingOneShotRecovery() {
+        val policy = Q4ScreenHandover(); policy.arm("late")
+        val ticket = policy.written(policy.sourceGeneration(), true, true)!!
+        var permitted = false; var calls = 0
+        assertEquals(Q4ScreenHandover.Result.DEFERRED, policy.recover(ticket, { true }, { calls++; true }, { calls++; true }, { permitted }))
+        assertEquals(0, calls)
+        permitted = true
+        assertEquals(Q4ScreenHandover.Result.ACTIVATED, policy.recover(ticket, { true }, { calls++; true }, { calls++; true }, { permitted }))
+        assertEquals(2, calls)
+        permitted = false
+        assertEquals(Q4ScreenHandover.Result.STALE, policy.recover(ticket, { true }, { true }, { true }, { permitted }))
+    }
+    @Test fun borrowingDuringModesDefersRecordAndRetiredDeferredTicketStaysStale() {
+        val policy = Q4ScreenHandover(); policy.arm("late")
+        val ticket = policy.written(policy.sourceGeneration(), true, true)!!
+        var permitted = true; var records = 0
+        assertEquals(Q4ScreenHandover.Result.DEFERRED, policy.recover(ticket, { true }, { permitted = false; true }, { records++; true }, { permitted }))
+        assertEquals(0, records)
+        policy.retire(); permitted = true
+        assertEquals(Q4ScreenHandover.Result.STALE, policy.recover(ticket, { true }, { true }, { records++; true }, { permitted }))
+        assertEquals(0, records)
+    }
     @Test fun cachedGopAndFollowingLiveFramesDoNotArmRecovery() {
         val policy = Q4ScreenHandover()
         repeat(30) { assertNull(policy.written(policy.sourceGeneration(), true, true)) }

@@ -3,7 +3,7 @@ package io.github.shaonialife.carptocar.video
 /** Q4 分支的晚到真实源恢复；缓存起播不武装，IO 不持有状态锁。 */
 internal class Q4ScreenHandover {
     class Ticket internal constructor(internal val owner: Any, val generation: Long, val reason: String)
-    enum class Result { ACTIVATED, STALE, MODES_FAILED, RECORD_FAILED }
+    enum class Result { ACTIVATED, DEFERRED, STALE, MODES_FAILED, RECORD_FAILED }
     private var generation = 0L
     private var reason: String? = null
     private var issued = false
@@ -28,14 +28,23 @@ internal class Q4ScreenHandover {
     @Synchronized private fun current(ticket: Ticket): Boolean =
         ticket.owner === this && generation == ticket.generation && reason != null && issued
 
-    fun recover(ticket: Ticket, alive: () -> Boolean, modes: () -> Boolean, record: () -> Boolean): Result {
+    fun recover(ticket: Ticket, alive: () -> Boolean, modes: () -> Boolean, record: () -> Boolean,
+        allowed: () -> Boolean = { true }): Result {
+        if (!alive() || !current(ticket)) return Result.STALE
         synchronized(this) {
             if (!current(ticket) || started) return Result.STALE
+            if (!allowed()) return Result.DEFERRED
             started = true
         }
         if (!alive() || !current(ticket)) return Result.STALE
-        if (!modes()) return Result.MODES_FAILED
+        fun defer(): Result {
+            synchronized(this) { if (current(ticket)) started = false }
+            return Result.DEFERRED
+        }
+        if (!allowed()) return defer()
+        if (!modes()) return if (!allowed()) defer() else Result.MODES_FAILED
         if (!alive() || !current(ticket)) return Result.STALE
+        if (!allowed()) return defer()
         if (!record()) return Result.RECORD_FAILED
         return if (alive() && current(ticket)) Result.ACTIVATED else Result.STALE
     }

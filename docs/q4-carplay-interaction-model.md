@@ -192,3 +192,11 @@ RAW 下不传 canvasSize/viewAreaSize，VideoConfig 仍携带码流解码尺寸�
 forceKeyFrame 现在异步转交请求当时的 CarLife HU 和作用域，直接请求 98311 编码初始化，不重复发 98386。VideoSender 以当前源代次合并请求，最多每 6 秒一次，已有命令仍在执行时不新增工作；每次命令前检查源、投屏 owner 和 HU 存活。命令实际写出结果与源 IDR 到达、配置及 IDR 写完分别记为 KEYFRAME-DIAG；本地提示帧不能完成真实源请求。正常到达的 IDR 只能证明请求后的观测，不能单凭它确认与请求的因果关系或车机已显示。源重启/停止作废旧票据，已有晚到源一次性接管保持原契约。
 
 日志的“已强制编码 I 帧”改为请求已提交/合并，不改变音视频格式、缓存起播策略或连接预算。此项新增纯逻辑与真实 VideoSender 路径回归，实车恢复有效性待验证。
+
+## 路线 3：Q4 屏幕与音频资源仲裁
+
+资源枚举核验自 WirelessCarPlay 的 AirPlayCommon.h（51145ef），并与 E3 的 PHONE/PHONE_END、RVC/RVC_END 成对请求对照：resourceID 1/2 为屏幕/音频，entity 1/2 为 controller/accessory，transferType 1/2/3/4 为 take/untake/borrow/unborrow。每个 AirPlay client 独立保存永久意图及按 borrowID 去重的临时借用，屏幕与音频分别响应，嵌套借用须分别归还；未知/不完整项不更改已知状态。
+
+changeModes 在事件线程只更新意图，后台按最新版本合并回复，网络写串行并受 socket/生命周期代次保护；RTSP 200 仅记 transportAccepted，不宣称车机已交屏。requestUI 返回屏幕意图，不清除临时借用，也不强抢音频。
+
+真实首帧恢复在临时借用期间 DEFERRED，归还/返回 UI 后重试同一有效源票据，不消耗一次性恢复机会。为保留此前 Q4 晚到源修复，只允许真实源启动前收到的 screen native take 在该首帧恢复中重新声明；真实源启动后的 native take 保持车机归属，需返回 UI/归还意图才恢复。该区别是当前最小兼容策略，不能据此声称已完全识别用户手动退出与所有车机故障。未停止媒体连接、未改 PCM/RAW，新增资源和恢复门禁回归；未实车。
