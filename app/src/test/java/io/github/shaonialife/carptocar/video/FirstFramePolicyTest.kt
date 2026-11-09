@@ -65,4 +65,22 @@ class FirstFramePolicyTest {
         // 默认必须是「立即起播」，否则 CL3D 上又会空等 5 秒
         assertTrue(FirstFramePolicy.DEFAULT_USE_CACHED_GOP)
     }
+
+    private fun keep(replayed: Boolean = true, frames: Int = 12, written: Int = frames,
+        sameSource: Boolean = true, sourceAge: Long? = 15, gopAge: Long? = 478) =
+        FirstFramePolicy.shouldKeepEncoderAfterReplay(replayed, frames, written, sameSource, sourceAge, gopAge)
+
+    @Test fun freshFullyWrittenSameSourceKeepsEncoder() { assertTrue(keep()) }
+    @Test fun queuedOrPartialReplayStillRequestsRecovery() {
+        assertFalse(keep(written = 0)); assertFalse(keep(written = 1))
+        assertFalse(keep(frames = 0)); assertFalse(keep(replayed = false))
+    }
+    @Test fun changedOrUnprovenSourceCannotSkipInitialization() { assertFalse(keep(sameSource = false)) }
+    @Test fun staleOrUnknownFrameAndGopAgesKeepRecovery() {
+        assertFalse(keep(sourceAge = null)); assertFalse(keep(gopAge = null))
+        assertFalse(keep(sourceAge = 1_001)); assertFalse(keep(gopAge = 3_001))
+        assertFalse(keep(sourceAge = -1)); assertFalse(keep(gopAge = -1))
+    }
+    @Test fun freshnessLimitsAreInclusive() { assertTrue(keep(sourceAge = 1_000, gopAge = 3_000)) }
+
 }

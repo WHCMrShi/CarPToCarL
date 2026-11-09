@@ -331,6 +331,8 @@ object CarLifeHijack {
 
     /** 最近一个 GOP 缓存（从关键帧起），供会话建立瞬间「补历史帧」。 */
     private val gop = ArrayDeque<Pair<ByteArray, Boolean>>()
+    @Volatile private var activeSourceIdentity: Any? = null
+    private var gopSourceIdentity: Any? = null
     private var gopOriginAt = 0L // Diagnostic only; valid while the original keyframe is retained.
     private var gopBytes = 0
     private val gopLock = Any()
@@ -557,15 +559,20 @@ object CarLifeHijack {
             return
         }
         val attachAt = android.os.SystemClock.uptimeMillis()
+        val attachSource = client
+        val attachIdentity = activeSourceIdentity
         val observedSourceAt = lastSourceFrameAt
         logSink = log
         sender = null
         var cachedOriginAt = 0L
+        var cachedIdentity: Any? = null
         val pending = synchronized(gopLock) {
             cachedOriginAt = gopOriginAt
+            cachedIdentity = gopSourceIdentity
             val snapshot = gop.toList()
             gop.clear()
             gopOriginAt = 0L
+            gopSourceIdentity = null
             gopBytes = 0
             snapshot
         }
@@ -576,6 +583,7 @@ object CarLifeHijack {
             val snapshot = gop.toList()
             gop.clear()
             gopOriginAt = 0L
+            gopSourceIdentity = null
             gopBytes = 0
             snapshot
         }
@@ -586,6 +594,7 @@ object CarLifeHijack {
             firstFrameHasSps = firstPending?.let { hasSpsNal(it.first) } == true,
         )
         runCatching { log("PATH-DIAG: videoAttach cachedFrames=${pending.size} cachedBytes=${pending.sumOf { it.first.size.toLong() }} lateFrames=${late.size} replay=$replay firstKey=${firstPending?.second} firstSps=${firstPending?.let { hasSpsNal(it.first) }} lastSourceAgeMs=${if (observedSourceAt > 0) android.os.SystemClock.uptimeMillis() - observedSourceAt else null} cachedGopAgeMs=${if (cachedOriginAt > 0) android.os.SystemClock.uptimeMillis() - cachedOriginAt else null}") }
+        var cachedDelivered = 0
         if (!replay) videoSender.armSourceHandover("attach-without-cached-idr")
         if (replay) {
             log(
@@ -600,6 +609,7 @@ object CarLifeHijack {
                     noteDelivered(frame.size)
                 } else break
             }
+            cachedDelivered = pushed
             if (pushed == 0) videoSender.armSourceHandover("cached-idr-not-delivered")
             log("CARLIFE: 缓存回放已推送 $pushed/${pending.size} 帧——后续实时直通")
         } else {
@@ -628,10 +638,25 @@ object CarLifeHijack {
                 } != null
             }
         }
+        if (!running.get() || !videoSender.isRunning || !projectionOwner.isCurrent(videoSender)) return
         startFirstFrameWatchdog(videoSender)
-        // 主动催一个带 SPS 的当期 IDR；startFirstFrameWatchdog 还有 3 秒后的兜底。
-        log("CARLIFE: 请求引擎重建编码器（约 1 秒后出当期首帧）")
-        client?.requestVideoReinit("attach")
+        val checkedAt = android.os.SystemClock.uptimeMillis()
+        val sourceAt = lastSourceFrameAt
+        val keepEncoder = FirstFramePolicy.shouldKeepEncoderAfterReplay(
+            replayed = replay,
+            cachedFrames = pending.size,
+            writtenFrames = cachedDelivered,
+            sameSource = attachIdentity != null && cachedIdentity === attachIdentity &&
+                activeSourceIdentity === attachIdentity && client === attachSource && attachSource?.isRunning == true,
+            sourceAgeMs = sourceAt.takeIf { it > 0 }?.let { checkedAt - it },
+            gopAgeMs = cachedOriginAt.takeIf { it > 0 }?.let { checkedAt - it },
+        )
+        if (keepEncoder) {
+            log("CARLIFE: 同源新鲜 GOP 已完整写出——保留编码器，首帧看门狗仍有效")
+        } else {
+            log("CARLIFE: 请求引擎重建编码器（约 1 秒后出当期首帧）")
+            client?.requestVideoReinit("attach")
+        }
         runCatching { log("PATH-DIAG: videoAttach event=END durationMs=${android.os.SystemClock.uptimeMillis() - attachAt} senderRunning=${videoSender.isRunning}; write success is not display confirmation") }
     }
 
@@ -716,6 +741,7 @@ object CarLifeHijack {
         sender = null
         client?.stop()
         client = null
+        activeSourceIdentity = null
         audioSink?.stop()
         audioSink = null
         ttsSink?.stop()
@@ -730,6 +756,7 @@ object CarLifeHijack {
         synchronized(gopLock) {
             gop.clear()
             gopOriginAt = 0L
+            gopSourceIdentity = null
             gopBytes = 0
         }
     }
@@ -765,12 +792,13 @@ object CarLifeHijack {
             sink.setPlaybackPaused(scopedPlaybackSnapshot()?.let { it.matchesTrack && it.playing == false } == true)
             val mediaState = CarLifeNowPlayingState()
             nowPlayingState = mediaState
+            val sourceIdentity = Any()
             val hu = CarLifeHuClient(
                 host = "127.0.0.1",
                 // routeAudio → sink.write → feedPcm 返回前已消费或复制；GOP 视频仍独立持有数组。
                 borrowPcmInput = true,
                 log = { line -> logSink?.invoke(line) },
-                onVideoFrame = { data, key, ts -> if (!scope.isClosed) { zeroFrameRecovery.reset(); onFrame(data, key, ts) } },
+                onVideoFrame = { data, key, ts -> if (!scope.isClosed) { zeroFrameRecovery.reset(); onFrame(data, key, ts, sourceIdentity) } },
                 requestZeroFrameRecovery = { idle, hasFrame, retries ->
                     !scope.isClosed && running.get() && zeroFrameRecovery.acquire(idle, hasFrame, retries, sender != null)
                 },
@@ -827,7 +855,7 @@ object CarLifeHijack {
             }
             val adopted = connected && synchronized(this) {
                 if (!running.get() || scope.isClosed || !hu.isRunning) false
-                else { resetTouchState(); client = hu; true }
+                else { resetTouchState(); client = hu; activeSourceIdentity = sourceIdentity; true }
             }
             if (adopted) {
                 announcedWait = false
@@ -864,6 +892,7 @@ object CarLifeHijack {
             synchronized(this) {
                 if (client === hu) {
                     client = null
+                    activeSourceIdentity = null
                     resetTouchState()
                 }
             }
@@ -965,6 +994,7 @@ object CarLifeHijack {
         data: ByteArray,
         keyFrame: Boolean,
         sourceTimestampMs: Long,
+        sourceIdentity: Any,
     ) {
         recvWindowFrames++
         recvWindowBytes += data.size
@@ -999,17 +1029,21 @@ object CarLifeHijack {
             if (keyFrame) {
                 gop.clear()
                 gopOriginAt = 0L
+                gopSourceIdentity = null
                 gopBytes = 0
             } else if (gop.isEmpty()) {
                 return // 没有关键帧打头，非关键帧单独送过去也解不出画面
             }
-            if (keyFrame) gopOriginAt = now
+            if (keyFrame) {
+                gopOriginAt = now
+                gopSourceIdentity = sourceIdentity
+            } else if (gopSourceIdentity !== sourceIdentity) gopSourceIdentity = null
             gop.addLast(frame to keyFrame)
             gopBytes += frame.size
             while (gop.size > MAX_GOP_FRAMES || gopBytes > MAX_GOP_BYTES) {
                 val removed = gop.removeFirstOrNull() ?: break
                 gopBytes -= removed.first.size
-                if (removed.second) gopOriginAt = 0L
+                if (removed.second) { gopOriginAt = 0L; gopSourceIdentity = null }
             }
         }
     }

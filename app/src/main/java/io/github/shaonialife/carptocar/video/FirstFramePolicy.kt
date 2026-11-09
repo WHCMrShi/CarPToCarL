@@ -93,4 +93,17 @@ object FirstFramePolicy {
         firstFrameIsKey: Boolean,
         firstFrameHasSps: Boolean,
     ): Boolean = policyEnabled && firstFrameIsKey && firstFrameHasSps
+
+    /** Local source health only, never peer-display confirmation; watchdog recovery remains armed. */
+    internal fun shouldKeepEncoderAfterReplay(
+        replayed: Boolean,
+        cachedFrames: Int,
+        writtenFrames: Int,
+        sameSource: Boolean,
+        sourceAgeMs: Long?,
+        gopAgeMs: Long?,
+    ): Boolean = replayed && cachedFrames > 0 && writtenFrames == cachedFrames && sameSource &&
+        sourceAgeMs != null && sourceAgeMs in 0..1_000L &&
+        gopAgeMs != null && gopAgeMs in 0..3_000L
+
 }
