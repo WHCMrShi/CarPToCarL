@@ -234,6 +234,7 @@ class VideoSender(
     /** 已发出的 SPS 字节（用于识别「源换了分辨率/档位」→ 必须重发 VideoConfig）。 */
     @Volatile
     private var sentSps: ByteArray? = null
+    @Volatile private var sentPps: ByteArray? = null
 
     /**
      * 源重启后先等一个 IDR 再恢复送帧。
@@ -564,6 +565,7 @@ class VideoSender(
         // 新会话：上一轮的 csd/config 指纹一律作废。
         cachedCsd = null
         sentSps = null
+        sentPps = null
         configSent = false
         // **必须等 IDR**（2026-11-03 ID7 实测）：此前这里是 false，配合下面 attach() 后
         // `seedCsd()` 预置的 cachedCsd，submitH264 会走「用缓存 csd 重发 VideoConfig」
@@ -826,8 +828,8 @@ class VideoSender(
             }
             // 会话中途 SPS 变了（用户在车联里改分辨率 / 引擎重建编码器）：
             // 车机手里的 avcC 已经不对，必须重发一份新的。
-            if (configSent && hasSps && !spsMatchesSent(nalUnits)) {
-                log("VIDEO: 检测到 SPS 变化——重发 VideoConfig（分辨率/档位已变）")
+            if (configSent && hasSps && !csdMatchesSent(nalUnits)) {
+                log("VIDEO: 检测到 SPS/PPS 变化——重发 VideoConfig（编码参数已变）")
                 configSent = false
             }
             if (!configSent && diagRejects < 3) {
@@ -837,14 +839,14 @@ class VideoSender(
             }
             if (!configSent) {
                 if (hasSps) {
-                    sendConfigFromNals(nalUnits, output, "当期帧自带SPS")
+                    sendConfigFromNals(nalUnits, output, "当期帧自带SPS", cacheForSource = sourceFrame)
                 } else {
                     // 新源的首个 IDR 没带 SPS/PPS：用上一轮缓存的 csd 兜底重发。
                     // 没这层兜底就是「configSent 永远 false → 每帧丢弃 → 永久黑屏」。
                     val csd = cachedCsd
                     if (csd != null) {
                         log("VIDEO: 新 IDR 未携带 SPS/PPS——用缓存 csd 重发 VideoConfig")
-                        sendConfigFromNals(csd, output, "缓存csd兜底")
+                        sendConfigFromNals(csd, output, "缓存csd兜底", cacheForSource = sourceFrame)
                     } else {
                         droppedBeforeConfig++
                         return false
@@ -1053,11 +1055,12 @@ class VideoSender(
         sendConfigFromNals(splitAnnexB(annexB), output, "本机编码器输出SPS")
     }
 
-    /** 本帧携带的 SPS 是否与已发出的那份一致（true = 无需重发 config）。 */
-    private fun spsMatchesSent(nalUnits: List<NalSlice>): Boolean {
+    /** Compare owned parameter bytes, including PPS changes with an unchanged SPS. */
+    private fun csdMatchesSent(nalUnits: List<NalSlice>): Boolean {
         val sps = nalUnits.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 7 } ?: return true
-        val sent = sentSps ?: return false
-        return sps.matches(sent)
+        if (!sps.matches(sentSps ?: return false)) return false
+        val pps = nalUnits.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 8 }
+        return pps == null || pps.matches(sentPps ?: return false)
     }
 
     /** 从一组 NAL 里取 SPS/PPS 组装 avcC 并发出 VideoConfig。 */
@@ -1065,6 +1068,7 @@ class VideoSender(
         nalUnits: List<NalSlice>,
         output: java.io.OutputStream,
         csdSource: String,
+        cacheForSource: Boolean = false,
     ) {
         val sps = nalUnits.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 7 }?.copyBytes()
         val pps = nalUnits.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 8 }?.copyBytes()
@@ -1118,12 +1122,28 @@ class VideoSender(
         // 真车（Audi 4851）却黑屏（2026-10-19 用户日志）。
         val viewArea = (viewAreaSize?.invoke() ?: canvas)?.takeIf { it.first > 0 && it.second > 0 }
         val header = buildVideoConfigHeader(body.size, cfgWidth, cfgHeight, viewArea)
+        val generation = q4Handover.sourceGeneration()
+        var committed = false
         writeStream("config", output) {
             // config 帧是明文，但同样不能插在别的帧中间（否则接收端按半帧解析）。
             output.write(header)
             output.write(body)
             output.flush()
-            configSent = true
+            // No old reference frame may follow a newly written decoder configuration.
+            lastIdrNals = null
+            if (running.get() && q4Handover.isSourceCurrent(generation) &&
+                ((output as? OwnedOutput)?.owner?.let { it === socket } != false)) {
+                // sps/pps are already independent copies of the input access unit.
+                if (cacheForSource) cachedCsd = listOf(NalSlice(sps, 0, sps.size), NalSlice(pps, 0, pps.size))
+                sentSps = sps
+                sentPps = pps
+                configSent = true
+                committed = true
+            }
+        }
+        if (!committed) {
+            log("VIDEO: ignored config completion for retired source/output")
+            return
         }
         log(
             "VIDEO: ✓ VideoConfig 已发送 avcC=${body.size}B（SPS ${sps.size}B/PPS ${pps.size}B，" +
