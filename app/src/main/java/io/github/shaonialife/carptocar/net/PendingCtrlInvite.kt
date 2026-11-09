@@ -41,6 +41,13 @@ internal class PendingCtrlInvite(
         return true
     }
 
+    /** Diagnostics only: same TTL/generation checks as consume, without consuming or refreshing. */
+    @Synchronized fun peekAge(expectedGeneration: Long): Long? {
+        if (!active || generation != expectedGeneration) return null
+        val at = invitedAt ?: return null
+        return (clock() - at).takeIf { it in 0..ttlMs }
+    }
+
     /** 返回本轮有效邀请的年龄；无邀请、过期和旧轮次均返回 null。 */
     @Synchronized
     fun consume(expectedGeneration: Long): Long? {

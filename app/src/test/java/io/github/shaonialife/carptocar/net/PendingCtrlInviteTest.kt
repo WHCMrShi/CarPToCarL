@@ -10,6 +10,27 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 class PendingCtrlInviteTest {
+    @Test fun diagnosticReadDoesNotConsumeOrExtendInvite() {
+        val now = AtomicLong(100)
+        val invite = PendingCtrlInvite(now::get, ttlMs = 30_000)
+        invite.begin(); val generation = invite.currentGeneration()!!; invite.record(generation)
+        now.set(20_100)
+        assertEquals(20_000L, invite.peekAge(generation))
+        assertEquals(20_000L, invite.peekAge(generation))
+        assertEquals(20_000L, invite.consume(generation))
+        assertNull(invite.peekAge(generation))
+        invite.record(generation); now.set(50_101)
+        assertNull(invite.peekAge(generation))
+        assertNull(invite.consume(generation))
+    }
+    @Test fun diagnosticReadCannotSeeRetiredGeneration() {
+        val invite = PendingCtrlInvite({ 100 })
+        invite.begin(); val old = invite.currentGeneration()!!; invite.record(old)
+        invite.end(); invite.begin(); val current = invite.currentGeneration()!!; invite.record(current)
+        assertNull(invite.peekAge(old))
+        assertEquals(0L, invite.peekAge(current))
+        assertEquals(0L, invite.consume(current))
+    }
     @Test fun lostServiceInvalidatesOldInviteButKeepsNewInvitationUsable() {
         val invite = PendingCtrlInvite({ 100L })
         invite.begin()

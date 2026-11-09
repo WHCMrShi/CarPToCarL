@@ -888,20 +888,36 @@ object SessionController {
      * 置 [connectCancelled] 让卡在 WiFi 加入等分片检查的配对线程在 ≤200ms 内退场；
      * **不停 BT 组件**（车机大概率立刻回连，监听必须留着）。新轮次起步处会清掉本标志。
      */
+    private fun noteBtHandover(decision: String) {
+        val client = currentClient
+        val generation = pendingCtrlInvite.currentGeneration()
+        val networkVerified = boundCarSsid?.let { runCatching { carWifiReady(it) }.getOrNull() }
+        appendLog("HANDOVER-DIAG: btClosed decision=$decision uptimeMs=${android.os.SystemClock.uptimeMillis()} " +
+            "inviteGeneration=$generation pendingInviteAgeMs=${generation?.let(pendingCtrlInvite::peekAge)} " +
+            "targetConfigured=${runCatching { appContext?.let { io.github.shaonialife.carptocar.bt.TargetDevicePrefs.get(it) != null } }.getOrNull()} credentialsCached=${lastCarWifi != null} " +
+            "boundTargetCached=${boundCarSsid != null} networkCached=${wifiConnector?.currentNetwork != null} " +
+            "policyWifiReady=$networkVerified client=${client?.let(System::identityHashCode)} " +
+            "controlAlive=${client?.controlConnectionAlive == true} setupPending=${sessionStarting.get()} " +
+            "videoRunning=${videoSender?.isRunning == true} sourceStreaming=${CarLifeHijack.isStreaming} " +
+            "workCurrent=${connectionWork.capture().isCurrent} cancelled=$connectCancelled; snapshot is current state, not callback-origin proof")
+    }
+
     fun onSenderLinkClosed() {
-        if (videoSender?.isRunning == true) return
+        if (videoSender?.isRunning == true) { noteBtHandover("KEEP_VIDEO"); return }
         val client = currentClient
         if (sessionStarting.get() && client?.controlConnectionAlive == true &&
             boundCarSsid?.let(::carWifiReady) == true) {
+            noteBtHandover("KEEP_LIVE_SETUP")
             appendLog("CONNECT-DIAG: BT ended during live WiFi/AirPlay negotiation; retain bounded setup attempt client=${System.identityHashCode(client)}")
             return
         }
         if (sessionStarting.compareAndSet(true, false)) {
             connectCancelled = true
+            noteBtHandover("CANCEL_SETUP")
             appendLog(">>> 本轮蓝牙链路断开——释放「会话处理中」，等待车机重连端点接手")
             // 未推流就断链 = 这一轮没连上：报文快照落盘（成功过的轮次在 markLinked 时已丢弃）
             SessionTrace.sessionEnd("蓝牙链路断开，未进入推流")
-        }
+        } else noteBtHandover("NO_PENDING_SETUP")
     }
 
     /**

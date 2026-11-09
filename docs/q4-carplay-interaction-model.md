@@ -200,3 +200,9 @@ forceKeyFrame 现在异步转交请求当时的 CarLife HU 和作用域，直接
 changeModes 在事件线程只更新意图，后台按最新版本合并回复，网络写串行并受 socket/生命周期代次保护；RTSP 200 仅记 transportAccepted，不宣称车机已交屏。requestUI 返回屏幕意图，不清除临时借用，也不强抢音频。
 
 真实首帧恢复在临时借用期间 DEFERRED，归还/返回 UI 后重试同一有效源票据，不消耗一次性恢复机会。为保留此前 Q4 晚到源修复，只允许真实源启动前收到的 screen native take 在该首帧恢复中重新声明；真实源启动后的 native take 保持车机归属，需返回 UI/归还意图才恢复。该区别是当前最小兼容策略，不能据此声称已完全识别用户手动退出与所有车机故障。未停止媒体连接、未改 PCM/RAW，新增资源和恢复门禁回归；未实车。
+
+## 路线 4：蓝牙交接空窗的只读快照
+
+HANDOVER-DIAG 在原 onSenderLinkClosed 各分支记录原决策（KEEP_VIDEO、KEEP_LIVE_SETUP、CANCEL_SETUP、NO_PENDING_SETUP）、单调时钟、邀请代次和未消费邀请年龄、目标/凭据是否已知、缓存网络是否存在、目标网络验证结果、当前 client 标识、控制存活、建链/视频/源状态、取消和工作凭证状态。不输出 SSID/密码/地址；网络验证只读，邀请 peekAge 不消费、不刷新 TTL。
+
+这是回调发生时的当前状态快照，并非回调原始所属链路的证明；邀请年龄空值也可能是已消费/过期。targetNetworkVerified 缺失保持未知，不把 networkCached 当验证成功。不新增继续机会、不更改取消、预算或重连策略；等实车中出现 Wi-Fi 已验证但控制尚未建立的反例，再决定是否调整门禁。新增邀请观察无副作用与旧代次隔离回归。
