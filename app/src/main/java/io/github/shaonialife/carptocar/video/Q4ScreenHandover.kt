@@ -12,11 +12,16 @@ internal class Q4ScreenHandover {
     @Synchronized fun arm(reason: String) {
         generation++; this.reason = reason; issued = false; started = false
     }
-    @Synchronized fun retire() { generation++; reason = null; issued = false; started = false }
+    @Synchronized fun retire(): Long {
+        generation++; reason = null; issued = false; started = false
+        return generation
+    }
+    @Synchronized fun sourceGeneration(): Long = generation
+    @Synchronized fun isSourceCurrent(expected: Long): Boolean = generation == expected
     @Synchronized fun waiting(): Boolean = reason != null && !issued
-    @Synchronized fun written(idr: Boolean, configured: Boolean): Ticket? {
+    @Synchronized fun written(expectedGeneration: Long, idr: Boolean, configured: Boolean): Ticket? {
         val pending = reason ?: return null
-        if (issued || !idr || !configured) return null
+        if (generation != expectedGeneration || issued || !idr || !configured) return null
         issued = true
         return Ticket(this, generation, pending)
     }

@@ -111,8 +111,8 @@ class VideoSender(
         modes: () -> Boolean, record: () -> Boolean): Q4ScreenHandover.Result =
         q4Handover.recover(ticket, { running.get() && alive() }, modes, record)
 
-    private fun sourceWritten(idr: Boolean) {
-        val ticket = q4Handover.written(idr, configSent) ?: return
+    private fun sourceWritten(sourceGeneration: Long, idr: Boolean) {
+        val ticket = q4Handover.written(sourceGeneration, idr, configSent) ?: return
         // 仅在真实 IDR 的配置和帧均写入完成后通知；通知本身不得执行网络 IO。
         runCatching { onSourceHandover?.invoke(ticket) }
             .onFailure { log("Q4-HANDOVER: dispatch failed - ${it.javaClass.simpleName}") }
@@ -559,8 +559,10 @@ class VideoSender(
             synchronized(submissionLock) {
                 val current = sourceQueue
                 if (running.get() && current?.isCurrent(frame) == true &&
-                    submitH264Locked(frame.data, frame.idr, frame.timestamp, sourceFrame = true)) {
-                    sourceWritten(frame.idr)
+                    q4Handover.isSourceCurrent(frame.sourceGeneration) &&
+                    submitH264Locked(frame.data, frame.idr, frame.timestamp, sourceFrame = true) &&
+                    current.isCurrent(frame) && q4Handover.isSourceCurrent(frame.sourceGeneration)) {
+                    sourceWritten(frame.sourceGeneration, frame.idr)
                     sourceDelivered?.invoke(frame.data.size)
                 }
             }
@@ -651,9 +653,11 @@ class VideoSender(
      * 表现就是「重连后一帧都过不去」。只有换整轮会话（新 SETUP）才允许归零。
      */
     fun onSourceRestart(reason: String) {
+        // 先使旧票据和在途帧失效，不能等阻塞写释放 submissionLock 后才作废。
+        val retiredGeneration = q4Handover.retire()
         sourceQueue?.reset()
         synchronized(submissionLock) {
-            if (!running.get()) return
+            if (!running.get() || !q4Handover.isSourceCurrent(retiredGeneration)) return
             configSent = false
             q4Handover.arm("source-restart")
             beginAwaitingKeyFrame()
@@ -720,11 +724,16 @@ class VideoSender(
         submitH264Locked(data, keyFrame, sourceTimestampMs)
     }
 
-    fun submitSourceH264(data: ByteArray, keyFrame: Boolean, sourceTimestampMs: Long? = null): Boolean = synchronized(submissionLock) {
-        realSourceSeen.set(true)
-        val sent = submitH264Locked(data, keyFrame, sourceTimestampMs, sourceFrame = true)
-        if (sent && q4Handover.waiting()) sourceWritten(splitAnnexB(data).any { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 5 })
-        sent
+    fun submitSourceH264(data: ByteArray, keyFrame: Boolean, sourceTimestampMs: Long? = null): Boolean {
+        val sourceGeneration = q4Handover.sourceGeneration()
+        return synchronized(submissionLock) {
+            if (!q4Handover.isSourceCurrent(sourceGeneration)) return@synchronized false
+            realSourceSeen.set(true)
+            val sent = submitH264Locked(data, keyFrame, sourceTimestampMs, sourceFrame = true)
+            if (sent && q4Handover.waiting()) sourceWritten(sourceGeneration,
+                splitAnnexB(data).any { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 5 })
+            sent
+        }
     }
 
     @Volatile private var sourceDelivered: ((Int) -> Unit)? = null
@@ -732,10 +741,11 @@ class VideoSender(
     /** True means admitted, never proof of delivery. Completion is reported by the sender worker. */
     fun enqueueSourceH264(data: ByteArray, sourceTimestampMs: Long, delivered: (Int) -> Unit): Boolean {
         if (!running.get()) return false
+        val sourceGeneration = q4Handover.sourceGeneration()
         realSourceSeen.set(true)
         sourceDelivered = delivered
         val idr = splitAnnexB(data).any { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 5 }
-        return sourceQueue?.offer(data, idr, sourceTimestampMs) == true
+        return sourceQueue?.offer(data, idr, sourceTimestampMs, sourceGeneration) == true
     }
 
     private fun submitH264Locked(

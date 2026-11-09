@@ -84,4 +84,90 @@ class Q4ScreenHandoverVideoTest {
             assertTrue(notified.await(3, TimeUnit.SECONDS))
         } finally { release.countDown(); sender.stop() }
     }
+    private fun generation(sender: VideoSender): Long =
+        (VideoSender::class.java.getDeclaredField("q4Handover").apply { isAccessible = true }
+            .get(sender) as Q4ScreenHandover).sourceGeneration()
+
+    private fun awaitRetirement(sender: VideoSender, old: Long) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
+        while (generation(sender) == old && System.nanoTime() < deadline) Thread.sleep(1)
+        assertTrue("source retirement must not wait for a blocked video write", generation(sender) != old)
+    }
+
+    @Test fun restartDuringAsyncIdrWriteRejectsOldCompletionAndPreservesNewRecovery() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val notified = CountDownLatch(1)
+        val writes = AtomicInteger()
+        val output = object : ByteArrayOutputStream() {
+            override fun write(bytes: ByteArray, offset: Int, length: Int) {
+                if (length >= 128 && bytes[offset + 4] == 0.toByte() && writes.incrementAndGet() == 1) {
+                    entered.countDown(); check(release.await(3, TimeUnit.SECONDS))
+                }
+                super.write(bytes, offset, length)
+            }
+        }
+        val sender = sender(output)
+        val calls = AtomicInteger()
+        val oldDelivered = AtomicInteger()
+        val newDelivered = CountDownLatch(1)
+        sender.onSourceHandover = { calls.incrementAndGet(); notified.countDown() }
+        var restart: Thread? = null
+        try {
+            sender.armSourceHandover("old-source")
+            val old = generation(sender)
+            assertTrue(sender.enqueueSourceH264(csd + idr, 0L) { oldDelivered.incrementAndGet() })
+            assertTrue(entered.await(3, TimeUnit.SECONDS))
+            restart = Thread { sender.onSourceRestart("new-source") }.apply { start() }
+            awaitRetirement(sender, old)
+            release.countDown(); restart.join(3000)
+            assertFalse(restart.isAlive)
+            assertEquals(0, calls.get())
+            assertEquals(0, oldDelivered.get())
+            assertTrue(sender.enqueueSourceH264(csd + idr, 0L) { newDelivered.countDown() })
+            assertTrue(notified.await(3, TimeUnit.SECONDS))
+            assertTrue(newDelivered.await(3, TimeUnit.SECONDS))
+            assertEquals(1, calls.get())
+            assertEquals(2L, sender.framesSentTotal)
+        } finally { release.countDown(); sender.stop(); restart?.join(3000) }
+    }
+
+    @Test fun restartRetiresQueuedTicketBeforeBlockedSynchronousWriteCompletes() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val writes = AtomicInteger()
+        val output = object : ByteArrayOutputStream() {
+            override fun write(bytes: ByteArray, offset: Int, length: Int) {
+                if (length >= 128 && bytes[offset + 4] == 0.toByte() && writes.incrementAndGet() == 2) {
+                    entered.countDown(); check(release.await(3, TimeUnit.SECONDS))
+                }
+                super.write(bytes, offset, length)
+            }
+        }
+        val sender = sender(output)
+        val events = java.util.concurrent.CopyOnWriteArrayList<Q4ScreenHandover.Ticket>()
+        sender.onSourceHandover = { events += it }
+        var writing: Thread? = null
+        var restart: Thread? = null
+        try {
+            sender.armSourceHandover("old-source")
+            assertTrue(sender.submitSourceH264(csd + idr, true))
+            val oldTicket = events.single()
+            val old = generation(sender)
+            writing = Thread { sender.submitSourceH264(idr, true) }.apply { start() }
+            assertTrue(entered.await(3, TimeUnit.SECONDS))
+            restart = Thread { sender.onSourceRestart("new-source") }.apply { start() }
+            awaitRetirement(sender, old)
+            assertEquals(Q4ScreenHandover.Result.STALE, sender.recoverSourceHandover(oldTicket,
+                { true }, { error("old modes must not execute") }, { error("old RECORD must not execute") }))
+            release.countDown(); writing.join(3000); restart.join(3000)
+            assertFalse(writing.isAlive); assertFalse(restart.isAlive)
+            assertEquals(1, events.size)
+            assertTrue(sender.submitSourceH264(csd + idr, true))
+            assertEquals(2, events.size)
+            assertEquals(Q4ScreenHandover.Result.ACTIVATED, sender.recoverSourceHandover(events.last(),
+                { true }, { true }, { true }))
+        } finally { release.countDown(); sender.stop(); writing?.join(3000); restart?.join(3000) }
+    }
+
 }

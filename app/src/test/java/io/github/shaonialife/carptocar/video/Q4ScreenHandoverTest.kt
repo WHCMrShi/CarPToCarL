@@ -8,20 +8,20 @@ import java.util.concurrent.TimeUnit
 class Q4ScreenHandoverTest {
     private fun ticket(policy: Q4ScreenHandover): Q4ScreenHandover.Ticket {
         policy.arm("late-source")
-        return policy.written(true, true)!!
+        return policy.written(policy.sourceGeneration(), true, true)!!
     }
     @Test fun cachedGopAndFollowingLiveFramesDoNotArmRecovery() {
         val policy = Q4ScreenHandover()
-        repeat(30) { assertNull(policy.written(true, true)) }
+        repeat(30) { assertNull(policy.written(policy.sourceGeneration(), true, true)) }
     }
     @Test fun waitingRequiresBothRealIdrAndWrittenConfiguration() {
         val policy = Q4ScreenHandover()
         policy.arm("waiting-for-source")
-        assertNull(policy.written(false, true))
-        assertNull(policy.written(true, false))
-        val event = policy.written(true, true)!!
+        assertNull(policy.written(policy.sourceGeneration(), false, true))
+        assertNull(policy.written(policy.sourceGeneration(), true, false))
+        val event = policy.written(policy.sourceGeneration(), true, true)!!
         assertEquals("waiting-for-source", event.reason)
-        assertNull(policy.written(true, true))
+        assertNull(policy.written(policy.sourceGeneration(), true, true))
     }
     @Test fun modesThenRecordExecuteOncePerSourceGeneration() {
         val policy = Q4ScreenHandover()
@@ -76,7 +76,7 @@ class Q4ScreenHandoverTest {
         val policy = Q4ScreenHandover()
         val event = ticket(policy)
         assertEquals(Q4ScreenHandover.Result.MODES_FAILED, policy.recover(event, { true }, { false }, { error("modes failed") }))
-        assertNull(policy.written(true, true))
+        assertNull(policy.written(policy.sourceGeneration(), true, true))
         assertEquals(Q4ScreenHandover.Result.STALE, policy.recover(event, { true }, { error("retry") }, { error("retry") }))
     }
     @Test fun recordFailureIsReportedAndNewSourceCanTryAgain() {
@@ -84,4 +84,17 @@ class Q4ScreenHandoverTest {
         assertEquals(Q4ScreenHandover.Result.RECORD_FAILED, policy.recover(ticket(policy), { true }, { true }, { false }))
         assertEquals(Q4ScreenHandover.Result.ACTIVATED, policy.recover(ticket(policy), { true }, { true }, { true }))
     }
+    @Test fun obsoleteWrittenFrameCannotClaimOrConsumeNewGenerationRecovery() {
+        val policy = Q4ScreenHandover()
+        policy.arm("old-source")
+        val oldGeneration = policy.sourceGeneration()
+        val oldTicket = policy.written(oldGeneration, true, true)!!
+        policy.retire()
+        assertEquals(Q4ScreenHandover.Result.STALE, policy.recover(oldTicket, { true },
+            { error("retired ticket") }, { error("retired ticket") }))
+        policy.arm("new-source")
+        assertNull(policy.written(oldGeneration, true, true))
+        assertNotNull(policy.written(policy.sourceGeneration(), true, true))
+    }
+
 }

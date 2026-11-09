@@ -9,7 +9,7 @@ internal class VideoIngressQueue(
     private val maxFrames: Int = 32,
     private val maxAgeNs: Long = 250_000_000L,
 ) : AutoCloseable {
-    data class Frame(val data: ByteArray, val idr: Boolean, val timestamp: Long?, val at: Long, val epoch: Long, val owner: Any)
+    data class Frame(val data: ByteArray, val idr: Boolean, val timestamp: Long?, val at: Long, val epoch: Long, val owner: Any, val sourceGeneration: Long = 0L)
     private val identity = Any()
     private val lock = Object()
     private val frames = ArrayDeque<Frame>()
@@ -21,7 +21,7 @@ internal class VideoIngressQueue(
     private var lastReport = 0L
     private val worker = Thread({ run() }, "video-source-send").apply { isDaemon = true; start() }
 
-    fun offer(data: ByteArray, idr: Boolean, timestamp: Long?): Boolean = synchronized(lock) {
+    fun offer(data: ByteArray, idr: Boolean, timestamp: Long?, sourceGeneration: Long = 0L): Boolean = synchronized(lock) {
         if (closed) return false
         val now = clock()
         if (data.isEmpty() || data.size > maxBytes) {
@@ -32,7 +32,7 @@ internal class VideoIngressQueue(
         }
         if (waitingIdr && !idr) { dropped++; report(now); return false }
         if (idr) waitingIdr = false
-        frames += Frame(data.copyOf(), idr, timestamp, now, epoch, identity)
+        frames += Frame(data.copyOf(), idr, timestamp, now, epoch, identity, sourceGeneration)
         bytes += data.size
         lock.notifyAll()
         true
