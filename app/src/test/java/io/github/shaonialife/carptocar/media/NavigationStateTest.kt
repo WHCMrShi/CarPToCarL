@@ -41,6 +41,17 @@ class NavigationStateTest {
         assertEquals("100米 左转", state.display(12_200).title)
     }
 
+    @Test fun endingANewGuideBeforeItsDisplayFlushCannotResurrectIt() {
+        val state = started()
+        state.receive(owner, event(3, 24, "终点", 0), 100)
+        state.receive(owner, event(1), 200)
+        state.receive(owner, event(3, 24, "终点", 0), 300)
+        assertEquals("导航结束", state.display(600).title)
+        state.receive(owner, event(3, 24, "重复结束", 0), 1000)
+        assertEquals("暂无导航", state.display(5300).title)
+        assertEquals("暂无导航", state.display(10_000).title)
+    }
+
     @Test fun percentageIsDistanceDrivenAndDoesNotAdvanceWhenStationary() {
         val state = started()
         state.receive(owner, event(1, distance = 1000), 10); state.display(300)

@@ -54,7 +54,7 @@ internal class NavigationState {
                 reset(); active = true; destination = event.road; phase = "prepare"
                 destinationImage = event.icon?.takeIf { it.isNotEmpty() }?.copyOf()
                 setImage(destinationImage)
-            } else if (event.distance == 0 && phase != "end") {
+            } else if (event.distance == 0 && (phase != "end" || active || pending != null)) {
                 active = false; pending = null; pendingStart = null; phase = "end"; endAt = now + 5_000
                 if (destination.isBlank() && event.road.isNotBlank()) destination = event.road
                 setImage(event.icon?.takeIf { it.isNotEmpty() } ?: destinationImage)
