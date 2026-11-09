@@ -170,3 +170,7 @@ RAW 下不传 canvasSize/viewAreaSize，VideoConfig 仍携带码流解码尺寸�
 这是语义修复与观测澄清，不宣称解决 OPPO Car+ 的导航导出；没有新增实车证据。本次测试包供用户上车比较导航模块状态与 TBT 接收计数。
 
 本机验证：全量 828 项 JVM 单测通过（0 failures / 0 errors / 0 skipped），包含 5 项新自动控制测试及订阅日志回归；lint 0 errors / 97 warnings，沿用既有 baseline。测试覆盖 NAVI/EDOG 单独空闲、与活跃/空闲媒体混合、其他模块批处理保持，以及显式导航控制 API 保持。随后从干净提交构建 Debug APK，内嵌源码标识和交付副本由构建步骤校验；尚未安装/实车验证。
+
+## 后续连接优化交接入口
+
+按 [2026-11-09 优化路线](q4-connection-optimization-roadmap-20261109.md) 逐项推进，顺序为 MFi 失败分类、真实关键帧请求、资源仲裁、蓝牙交接空窗、重复等待/重建、静态保活。当前仅 MFi 分类已获修复授权；路线不是同时实施后续事项的授权。CPC 握手研究不改变 Q4 的 E/H 证据等级。
