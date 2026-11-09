@@ -144,3 +144,17 @@ Q4 晚到源接管、早到缓存 GOP 路径、0200e08 的跨源写完成隔离�
 Q4 差异：保留 SPLIT 默认，不自动采用上游 RAW；停摆仅按最后帧龄诊断，恢复默认关闭，显式开启也不强制重建 HU；麦克风上行模块未接入，不改变 PCM 下行 SETUP。
 
 本机 823 项 JVM 单测通过，lint 0 errors / 97 warnings（沿用 baseline），未构建 APK、未安装、未实车。下一轮分别记录 CarLife 先起和 CarPlay 先连；补测关联宽限内完成、取消/快速重连以及晚到源接管。H1 修复有效性仍等待这些实车结果，不因 merge 或单测通过升级为已证实。
+
+## 2026-11-09 RAW 默认声明实验
+
+本节所属独立提交只把 VideoCanvasMode.DEFAULT_MODE 从 SPLIT 改为 RAW，并同步默认策略测试及说明。该提交可整体 revert 回到上一版 SPLIT 默认；它不删除偏好、不修改已保存的 `raw/stream/car`，也不改变源分辨率协商、SPS 优先解码尺寸、H.264 数据、加密、音频或触摸映射。此前的 SPLIT 合并记录属于实验前基线。
+
+RAW 下不传 canvasSize/viewAreaSize，VideoConfig 仍携带码流解码尺寸及原有标志，但显示视口字段留零。车机如何缩放和摆放是本次要验证的假设，不能据此宣称首帧连接或画质问题已经解决。E1/E2/E3 与 H1/H2/H3 的证据等级不变。
+
+安装测试包后，应核对日志 `VideoConfig 画布声明` 为“只声明解码尺寸=码流”，以及实际 config 日志中的“视口=未声明”。如果曾显式保存 `stream` 或 `car`，默认值变更不会覆盖它，不能把仍走旧策略的结果归入 RAW 实验。此前默认值不会在 load 时自动写入偏好，正常未手改配置的安装直接使用新默认。
+
+分别记录 CarLife 先启动与 CarPlay 先连接两条路径；检查提示到真实首帧切换、四角/边缘点击、拖动、画面比例/裁剪/留边、取消后重连、通话及返回投屏后的恢复。尤其对比实际 SPS 与 1412×654 画布不同的场景。若车机默认显示矩形改变，触摸映射未变可能造成点击偏移。
+
+本次没有新增实车证据。APK 用于下一轮实验，不把构建成功或 RTSP 200 记为车机显示成功。
+
+本机验证：`scripts/build-local.ps1 -Tasks @(':app:testDebugUnitTest', ':app:lintDebug') -NoDaemon` 成功；823 项 JVM 单测通过，0 failures / 0 errors / 0 skipped，lint 0 errors / 97 warnings（沿用既有 baseline）。覆盖 RAW 默认、空/未知偏好回退、显式 stream/car 保留、不写视口的头部、SPS 解码尺寸、首帧接管及源代次竞态。提交后从干净工作区执行 assembleDebug，APK 源码标识对应本节所属提交；实际产物校验与交付信息在本次构建回复中提供，未安装及实车验证。

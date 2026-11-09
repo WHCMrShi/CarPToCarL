@@ -14,8 +14,10 @@ import org.junit.Test
 class VideoCanvasModeTest {
 
     @Test
-    fun `Q4 保留分离声明默认`() {
-        assertEquals(VideoCanvasMode.Mode.SPLIT, VideoCanvasMode.DEFAULT_MODE)
+    fun `Q4 默认只声明码流尺寸不写视口`() {
+        assertEquals(VideoCanvasMode.Mode.RAW, VideoCanvasMode.DEFAULT_MODE)
+        assertFalse(VideoCanvasMode.sizeFromCanvasFor(VideoCanvasMode.DEFAULT_MODE))
+        assertFalse(VideoCanvasMode.writeViewportFor(VideoCanvasMode.DEFAULT_MODE))
     }
 
     @Test
