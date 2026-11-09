@@ -837,6 +837,8 @@ class AirPlayClient(
 
     /** 永久退役实例；普通 close 仍允许同实例配对重试。 */
     fun dispose() {
+        onAuthenticationFailure = null
+        onAuthenticationComplete = null
         synchronized(connectionLock) {
             disposed = true
             cancelled = true
@@ -1851,10 +1853,38 @@ class AirPlayClient(
      */
     var callStateSource: (() -> Int)? = null
 
+    @Volatile internal var authenticationFailed = false
+        private set
+    @Volatile internal var onAuthenticationFailure: (() -> Unit)? = null
+    @Volatile internal var onAuthenticationComplete: (() -> Unit)? = null
+
+    private fun completeMfiIfCurrent(owner: Socket, scope: ConnectionResources, generation: Long) {
+        val notify = synchronized(closeLock) {
+            if (!owns(owner, scope) || lifecycleGeneration != generation || cancelled || disposed) return
+            onAuthenticationComplete
+        }
+        notify?.invoke()
+    }
+
+    private fun failMfiIfCurrent(owner: Socket, scope: ConnectionResources, generation: Long) {
+        val notify = synchronized(closeLock) {
+            if (!owns(owner, scope) || lifecycleGeneration != generation || cancelled || disposed || authenticationFailed) return
+            authenticationFailed = true
+            cancelled = true
+            val callback = onAuthenticationFailure
+            log("CONNECT-DIAG: MFi exhausted; retiring owning control connection, bounded session recovery required")
+            close()
+            callback
+        }
+        notify?.invoke()
+    }
+
     /** 虚拟链路唯一实例（出站路由/三形态语义见 [VirtualIap2Link]）。 */
     private fun obtainIapLink(): VirtualIap2Link =
         iapLink ?: synchronized(this) {
             val scope = resources
+            val owner = socket
+            val generation = lifecycleGeneration
             iapLink
                 ?: VirtualIap2Link(
                     log = { line -> log(line) },
@@ -1864,6 +1894,16 @@ class AirPlayClient(
                     alive = { resources === scope && !scope.isClosed && socket?.isClosed == false },
                     nowPlayingProvider = { nowPlayingSource?.invoke() },
                     callStateProvider = { callStateSource?.invoke() ?: 0 },
+                    onAuthenticationFailure = {
+                        scope.start("airplay-mfi-failure") {
+                            if (owner != null) failMfiIfCurrent(owner, scope, generation)
+                        }
+                    },
+                    onAuthenticationComplete = {
+                        scope.start("airplay-mfi-complete") {
+                            if (owner != null) completeMfiIfCurrent(owner, scope, generation)
+                        }
+                    },
                 ).also {
                     if (!scope.own(it) || resources !== scope) { it.close(); return@also }
                     it.onMediaKey = { keyCode -> onMediaKey?.invoke(keyCode) }

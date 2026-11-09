@@ -13,6 +13,104 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class AirPlayLifecycleTest {
+    @Test fun ordinaryPairingClosePreservesFailureObserverUntilDisposal() {
+        val client = client(1)
+        val observer: () -> Unit = {}
+        client.onAuthenticationFailure = observer
+        client.onAuthenticationComplete = observer
+        client.close()
+        org.junit.Assert.assertSame(observer, client.onAuthenticationFailure)
+        org.junit.Assert.assertSame(observer, client.onAuthenticationComplete)
+        client.dispose()
+        org.junit.Assert.assertNull(client.onAuthenticationFailure)
+        org.junit.Assert.assertNull(client.onAuthenticationComplete)
+    }
+    @Test fun lateMfiSuccessNotifiesCurrentParentButOldSuccessCannotResetNewAttempt() {
+        ServerSocket(0).use { server ->
+            val client = client(server.localPort)
+            val completions = AtomicInteger()
+            try {
+                assertTrue(connect(client))
+                server.accept().use {
+                    val socket = field(client, "socket") as java.net.Socket
+                    val scope = field(client, "resources") as io.github.shaonialife.carptocar.util.ConnectionResources
+                    val generation = field(client, "lifecycleGeneration") as Long
+                    client.onAuthenticationComplete = { completions.incrementAndGet() }
+                    val complete = AirPlayClient::class.java.getDeclaredMethod("completeMfiIfCurrent", java.net.Socket::class.java,
+                        io.github.shaonialife.carptocar.util.ConnectionResources::class.java, Long::class.javaPrimitiveType)
+                        .apply { isAccessible = true }
+                    complete.invoke(client, socket, scope, generation)
+                    assertEquals(1, completions.get())
+                    assertTrue(client.controlConnectionAlive)
+                    client.close()
+                    assertTrue(connect(client))
+                    server.accept().use {
+                        complete.invoke(client, socket, scope, generation)
+                        assertEquals(1, completions.get())
+                        assertTrue(client.controlConnectionAlive)
+                    }
+                }
+            } finally { client.dispose() }
+        }
+    }
+
+    @Test fun mfiExhaustionClosesLiveParentAndNotifiesOnlyOnce() {
+        ServerSocket(0).use { server ->
+            val client = client(server.localPort)
+            val failures = AtomicInteger()
+            try {
+                assertTrue(connect(client))
+                server.accept().use { peer ->
+                    val socket = field(client, "socket") as java.net.Socket
+                    val scope = field(client, "resources") as io.github.shaonialife.carptocar.util.ConnectionResources
+                    val generation = field(client, "lifecycleGeneration") as Long
+                    client.onAuthenticationFailure = { failures.incrementAndGet() }
+                    failMfi(client, socket, scope, generation)
+                    assertTrue(client.authenticationFailed)
+                    assertFalse(client.controlConnectionAlive)
+                    assertPeerClosed(peer)
+                    failMfi(client, socket, scope, generation)
+                    assertEquals(1, failures.get())
+                    assertFalse(client.reconnect())
+                }
+            } finally { client.dispose() }
+        }
+    }
+
+    @Test fun retiredMfiFailureCannotCloseReplacementConnectionOrNotify() {
+        ServerSocket(0).use { server ->
+            val client = client(server.localPort)
+            val failures = AtomicInteger()
+            try {
+                assertTrue(connect(client))
+                server.accept().use {
+                    val old = field(client, "socket") as java.net.Socket
+                    val scope = field(client, "resources") as io.github.shaonialife.carptocar.util.ConnectionResources
+                    val generation = field(client, "lifecycleGeneration") as Long
+                    client.close()
+                    assertTrue(connect(client))
+                    server.accept().use {
+                        client.onAuthenticationFailure = { failures.incrementAndGet() }
+                        failMfi(client, old, scope, generation)
+                        assertTrue(client.controlConnectionAlive)
+                        assertFalse(client.authenticationFailed)
+                        assertEquals(0, failures.get())
+                    }
+                }
+            } finally { client.dispose() }
+        }
+    }
+
+    private fun field(client: AirPlayClient, name: String): Any? =
+        AirPlayClient::class.java.getDeclaredField(name).apply { isAccessible = true }.get(client)
+
+    private fun failMfi(client: AirPlayClient, socket: java.net.Socket,
+        scope: io.github.shaonialife.carptocar.util.ConnectionResources, generation: Long) {
+        AirPlayClient::class.java.getDeclaredMethod("failMfiIfCurrent", java.net.Socket::class.java,
+            io.github.shaonialife.carptocar.util.ConnectionResources::class.java, Long::class.javaPrimitiveType)
+            .apply { isAccessible = true }.invoke(client, socket, scope, generation)
+    }
+
     @Test fun replacementControlSocketCannotValidateAnOlderSetupResult() {
         ServerSocket(0).use { server ->
             val client = client(server.localPort)

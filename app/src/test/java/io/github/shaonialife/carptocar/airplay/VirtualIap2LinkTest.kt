@@ -54,6 +54,8 @@ class VirtualIap2LinkTest {
         val eventSent = ArrayList<ByteArray>()
         val car = Iap2LinkEngine()
         var nowPlaying: CarPlayNowPlaying? = null
+        var authenticationFailures = 0
+        var authenticationCompletions = 0
         val link =
             VirtualIap2Link(
                 log = { },
@@ -70,6 +72,8 @@ class VirtualIap2LinkTest {
                 alive = { false },
                 nowMillis = { clock },
                 nowPlayingProvider = { nowPlaying },
+                onAuthenticationFailure = { authenticationFailures++ },
+                onAuthenticationComplete = { authenticationCompletions++ },
             )
         var clock = 0L
         var now = 1L
@@ -515,6 +519,7 @@ class VirtualIap2LinkTest {
         val before = h.controlFrames().count { it.second == 0xAA05 }
         h.carSends(0xAA03, Iap2Csm.param(0, ByteArray(96)))
         assertEquals(before, h.controlFrames().count { it.second == 0xAA05 })
+        assertEquals(1, h.authenticationCompletions)
         assertEquals(20, MfiLengthMemory.load(null, identity).succeeded)
     }
 
@@ -529,6 +534,7 @@ class VirtualIap2LinkTest {
         h.carSends(0xAA04); h.carSends(0xAA04)
         assertEquals(listOf(20, 20), h.challengeLengths())
         assertTrue(!h.link.controlSessionReady)
+        assertEquals(1, h.authenticationFailures)
         assertTrue(h.controlFrames().none { it.second == 0xAA05 })
         val before = h.controlFrames().size
         h.carSends(0xAA03, Iap2Csm.param(0, ByteArray(96)))
@@ -546,8 +552,10 @@ class VirtualIap2LinkTest {
         h.clock += 7_000; h.tick()
         h.clock += 7_000; h.tick()
         h.clock += 30_000; h.tick()
+        assertEquals(1, h.authenticationFailures)
         assertEquals(listOf(20, 20), h.challengeLengths())
         assertTrue(!h.link.controlSessionReady)
+        assertEquals(1, h.authenticationFailures)
         assertTrue(h.controlFrames().none { it.second == 0xAA05 })
     }
 

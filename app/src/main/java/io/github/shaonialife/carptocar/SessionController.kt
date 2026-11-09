@@ -4161,6 +4161,23 @@ object SessionController {
                                 )
                             },
                         ).also { created ->
+                            created.onAuthenticationComplete = {
+                                mutate {
+                                    if (currentClient === created && !created.authenticationFailed) {
+                                        synchronized(connectRetryLock) { connectRetryAttempt = 0 }
+                                    }
+                                }
+                            }
+                            created.onAuthenticationFailure = {
+                                // The setup finally block owns failures while bring-up is still running.
+                                // This mutation shares its work/setup locks, so completion cannot lose the signal.
+                                mutate {
+                                    if (currentClient === created && !sessionStarting.get()) {
+                                        retireSession()
+                                        scheduleConnectRetry("MFi 认证未完成")
+                                    }
+                                }
+                            }
                             // 车机媒体键（iAP2 0x6802 通路）：方向盘/面板的上一曲、下一曲。
                             // 放在这里而不是调用点，保证重连重建 client 时也挂得上。
                             created.onMediaKey = { keyCode ->
@@ -5079,6 +5096,7 @@ object SessionController {
                 } finally {
                     work.runIfCurrent {
                         setup.runIfCurrent {
+                            if (currentClient?.authenticationFailed == true) retireSession()
                             // 阶段汇总：成功也打——「这次连接一共多久、花在哪」是用户最常问的问题
                             // （2026-11-01 日志 090105 就是靠人工掐时间才拆出 29.7s 的构成）。
                             // 没推起来的一轮改用 end()：多一行「✗ 卡在哪个阶段」的结论，并把计时器
@@ -5116,7 +5134,11 @@ object SessionController {
                                 }
                             } else {
                                 // 起来了：重试计数归零，下次断链重新从 3s 起算
-                                synchronized(connectRetryLock) { connectRetryAttempt = 0 }
+                                // Starting video alone must not replenish the MFi failure budget.
+                                // A late successful response also resets it through the owner-scoped callback.
+                                if (currentClient?.controlSessionReady == true) {
+                                    synchronized(connectRetryLock) { connectRetryAttempt = 0 }
+                                }
                             }
                         }
                     }

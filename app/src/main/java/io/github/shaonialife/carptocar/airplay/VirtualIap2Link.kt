@@ -71,6 +71,9 @@ class VirtualIap2Link(
      * 由 SessionController 注入（数据源 = `AudioManager.mode`，见 `callStateOf`）。
      */
     private val callStateProvider: (() -> Int)? = null,
+    /** Must only enqueue owner-scoped recovery; invoked under the link lock, at most once. */
+    private val onAuthenticationFailure: (() -> Unit)? = null,
+    private val onAuthenticationComplete: (() -> Unit)? = null,
 ) : AutoCloseable {
     @Volatile private var closed = false
     private val pacer: Thread
@@ -505,6 +508,7 @@ class VirtualIap2Link(
             log("IAPLINK: Q4 20B 有限重试耗尽——未收到签名，不发送 0xaa05；退役当前隧道，保留成功记忆")
             mfiCurrentLength = 0
             close()
+            onAuthenticationFailure?.invoke()
             return
         }
         val challenge = mfiChallenge ?: ByteArray(Iap2SenderSession.Q4_MFI_CHALLENGE_BYTES)
@@ -705,6 +709,7 @@ class VirtualIap2Link(
                 if (mib3) {
                     mib3AuthStage = 4
                     sendMib3BurstLocked()
+                    onAuthenticationComplete?.invoke()
                 } else {
                     log("IAPLINK: 隧道 MFi 完成——等待对端订阅（随后其标记隧道就绪）")
                 }
