@@ -110,16 +110,14 @@ class VideoSender(
 
     internal fun armSourceHandover(reason: String) = synchronized(submissionLock) { q4Handover.arm(reason) }
 
-    private val deferredHandover = java.util.concurrent.atomic.AtomicReference<Q4ScreenHandover.Ticket?>()
     @Volatile internal var onSourceIdrWritten: (() -> Unit)? = null
-    internal fun resumeResourceHandover() { deferredHandover.get()?.let { onSourceHandover?.invoke(it) } }
+    internal fun resumeResourceHandover() { q4Handover.deferredTicket()?.let { onSourceHandover?.invoke(it) } }
     internal fun recoverSourceHandover(ticket: Q4ScreenHandover.Ticket, alive: () -> Boolean,
         modes: () -> Boolean, record: () -> Boolean, allowed: () -> Boolean = { true }): Q4ScreenHandover.Result {
         val result = q4Handover.recover(ticket, { running.get() && alive() }, modes, record, allowed)
-        if (result == Q4ScreenHandover.Result.DEFERRED && running.get() && alive() && q4Handover.isSourceCurrent(ticket.generation)) {
-            deferredHandover.set(ticket)
+        if (result == Q4ScreenHandover.Result.DEFERRED && running.get() && alive() && q4Handover.defer(ticket)) {
             if (allowed()) resumeResourceHandover() // grant raced the transition into deferred state
-        } else deferredHandover.compareAndSet(ticket, null)
+        } else q4Handover.clearDeferred(ticket)
         return result
     }
 
@@ -520,7 +518,6 @@ class VideoSender(
 
     fun stop() {
         running.set(false)
-        deferredHandover.set(null)
         sourceKeyFrames.reset()
         q4Handover.retire()
         sourceQueue?.close()
@@ -553,7 +550,6 @@ class VideoSender(
         if (!openDataPort()) return false
         passthrough = true
         realSourceSeen.set(false)
-        deferredHandover.set(null)
         sourceKeyFrames.reset()
         q4Handover.retire()
         ended.set(false)
@@ -675,7 +671,6 @@ class VideoSender(
      */
     fun onSourceRestart(reason: String) {
         // 先使旧票据和在途帧失效，不能等阻塞写释放 submissionLock 后才作废。
-        deferredHandover.set(null)
         sourceKeyFrames.reset()
         val retiredGeneration = q4Handover.retire()
         sourceQueue?.reset()

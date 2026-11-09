@@ -8,12 +8,13 @@ internal class Q4ScreenHandover {
     private var reason: String? = null
     private var issued = false
     private var started = false
+    private var deferred: Ticket? = null
 
     @Synchronized fun arm(reason: String) {
-        generation++; this.reason = reason; issued = false; started = false
+        generation++; this.reason = reason; issued = false; started = false; deferred = null
     }
     @Synchronized fun retire(): Long {
-        generation++; reason = null; issued = false; started = false
+        generation++; reason = null; issued = false; started = false; deferred = null
         return generation
     }
     @Synchronized fun sourceGeneration(): Long = generation
@@ -27,6 +28,15 @@ internal class Q4ScreenHandover {
     }
     @Synchronized private fun current(ticket: Ticket): Boolean =
         ticket.owner === this && generation == ticket.generation && reason != null && issued
+
+    /** Publish with the same lock as arm/retire; an old producer cannot replace a new ticket. */
+    @Synchronized fun defer(ticket: Ticket): Boolean {
+        if (!current(ticket) || started) return false
+        deferred = ticket
+        return true
+    }
+    @Synchronized fun deferredTicket(): Ticket? = deferred?.takeIf { current(it) && !started }
+    @Synchronized fun clearDeferred(ticket: Ticket) { if (deferred === ticket) deferred = null }
 
     fun recover(ticket: Ticket, alive: () -> Boolean, modes: () -> Boolean, record: () -> Boolean,
         allowed: () -> Boolean = { true }): Result {

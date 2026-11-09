@@ -10,6 +10,50 @@ class Q4ScreenHandoverTest {
         policy.arm("late-source")
         return policy.written(policy.sourceGeneration(), true, true)!!
     }
+    @Test fun retiredProducerCannotOverwriteNewDeferredRecovery() {
+        val policy = Q4ScreenHandover()
+        val old = ticket(policy)
+        val publishing = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val published = java.util.concurrent.atomic.AtomicBoolean(true)
+        val worker = Thread {
+            assertEquals(Q4ScreenHandover.Result.DEFERRED,
+                policy.recover(old, { true }, { true }, { true }, { false }))
+            publishing.countDown()
+            check(release.await(3, TimeUnit.SECONDS))
+            published.set(policy.defer(old))
+        }.apply { start() }
+        try {
+            assertTrue(publishing.await(3, TimeUnit.SECONDS))
+            val next = ticket(policy)
+            assertEquals(Q4ScreenHandover.Result.DEFERRED,
+                policy.recover(next, { true }, { true }, { true }, { false }))
+            assertTrue(policy.defer(next))
+            release.countDown(); worker.join(3000)
+            assertFalse(worker.isAlive)
+            assertFalse(published.get())
+            assertSame(next, policy.deferredTicket())
+            policy.clearDeferred(old)
+            assertSame(next, policy.deferredTicket())
+            assertEquals(Q4ScreenHandover.Result.ACTIVATED,
+                policy.recover(next, { true }, { true }, { true }))
+            policy.clearDeferred(next)
+            assertNull(policy.deferredTicket())
+        } finally { release.countDown(); worker.join(3000) }
+    }
+    @Test fun retiringOrRearmingAtomicallyClearsDeferredRecovery() {
+        val policy = Q4ScreenHandover()
+        val old = ticket(policy)
+        assertTrue(policy.defer(old))
+        policy.retire()
+        assertNull(policy.deferredTicket())
+        assertFalse(policy.defer(old))
+        val next = ticket(policy)
+        assertTrue(policy.defer(next))
+        policy.arm("another-source")
+        assertNull(policy.deferredTicket())
+        assertFalse(policy.defer(next))
+    }
     @Test fun borrowingDefersWithoutConsumingOneShotRecovery() {
         val policy = Q4ScreenHandover(); policy.arm("late")
         val ticket = policy.written(policy.sourceGeneration(), true, true)!!

@@ -19,6 +19,33 @@ class Q4ScreenHandoverVideoTest {
         assertTrue(sender.startPassthrough())
         return sender
     }
+    @Test fun borrowingAcrossSourceRestartResumesOnlyLatestVideoRecovery() {
+        val sender = sender()
+        val events = mutableListOf<Q4ScreenHandover.Ticket>()
+        sender.onSourceHandover = { events += it }
+        try {
+            sender.armSourceHandover("old")
+            assertTrue(sender.submitSourceH264(csd + idr, true))
+            val old = events.single()
+            assertEquals(Q4ScreenHandover.Result.DEFERRED,
+                sender.recoverSourceHandover(old, { true }, { true }, { true }, { false }))
+            sender.onSourceRestart("new")
+            assertTrue(sender.submitSourceH264(csd + idr, true))
+            val next = events.last()
+            assertNotSame(old, next)
+            assertEquals(Q4ScreenHandover.Result.DEFERRED,
+                sender.recoverSourceHandover(next, { true }, { true }, { true }, { false }))
+            assertEquals(Q4ScreenHandover.Result.STALE,
+                sender.recoverSourceHandover(old, { true }, { true }, { true }))
+            sender.resumeResourceHandover()
+            assertEquals(3, events.size)
+            assertSame(next, events.last())
+            assertEquals(Q4ScreenHandover.Result.ACTIVATED,
+                sender.recoverSourceHandover(next, { true }, { true }, { true }))
+            sender.resumeResourceHandover()
+            assertEquals(3, events.size)
+        } finally { sender.stop() }
+    }
     @Test fun passthroughRequestHasToReachSourceAndNoticeCannotCompleteIt() {
         val sender = sender()
         try {
