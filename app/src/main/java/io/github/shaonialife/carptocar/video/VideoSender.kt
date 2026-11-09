@@ -69,6 +69,7 @@ class VideoSender(
      * 传 null = 不写这几个字段（旧行为，保持向后兼容）。
      */
     private val viewAreaSize: (() -> Pair<Int, Int>)? = null,
+    private val uptimeMillis: () -> Long = { android.os.SystemClock.uptimeMillis() },
 ) {
     private val width: Int = (width / 2) * 2
     private val height: Int = (height / 2) * 2
@@ -101,6 +102,22 @@ class VideoSender(
     private val writeLock = Any()
     private val submissionLock = Any()
     private val realSourceSeen = AtomicBoolean(false)
+    private val q4Handover = Q4ScreenHandover()
+    @Volatile internal var onSourceHandover: ((Q4ScreenHandover.Ticket) -> Unit)? = null
+
+    internal fun armSourceHandover(reason: String) = synchronized(submissionLock) { q4Handover.arm(reason) }
+
+    internal fun recoverSourceHandover(ticket: Q4ScreenHandover.Ticket, alive: () -> Boolean,
+        modes: () -> Boolean, record: () -> Boolean): Q4ScreenHandover.Result =
+        q4Handover.recover(ticket, { running.get() && alive() }, modes, record)
+
+    private fun sourceWritten(idr: Boolean) {
+        val ticket = q4Handover.written(idr, configSent) ?: return
+        // 仅在真实 IDR 的配置和帧均写入完成后通知；通知本身不得执行网络 IO。
+        runCatching { onSourceHandover?.invoke(ticket) }
+            .onFailure { log("Q4-HANDOVER: dispatch failed - ${it.javaClass.simpleName}") }
+    }
+
     private val writeDeadline = WriteDeadline<Socket>()
     @Volatile private var sourceQueue: VideoIngressQueue? = null
 
@@ -235,7 +252,7 @@ class VideoSender(
      */
     val isVideoFlowing: Boolean
         get() = running.get() && lastFrameAtMs > 0 &&
-            android.os.SystemClock.uptimeMillis() - lastFrameAtMs < 5_000
+            uptimeMillis() - lastFrameAtMs < 5_000
 
     /**
      * 送帧闸门：帧龄（排队延迟）+ 写入耗时。
@@ -395,7 +412,7 @@ class VideoSender(
             inputSurface = surface
             ended.set(false)
             running.set(true)
-            lastKeepAliveAt = android.os.SystemClock.uptimeMillis()
+            lastKeepAliveAt = uptimeMillis()
 
             onSurfaceReady(surface)
 
@@ -486,6 +503,7 @@ class VideoSender(
 
     fun stop() {
         running.set(false)
+        q4Handover.retire()
         sourceQueue?.close()
         sourceQueue = null
         passthrough = false
@@ -516,9 +534,10 @@ class VideoSender(
         if (!openDataPort()) return false
         passthrough = true
         realSourceSeen.set(false)
+        q4Handover.retire()
         ended.set(false)
         running.set(true)
-        lastKeepAliveAt = android.os.SystemClock.uptimeMillis()
+        lastKeepAliveAt = uptimeMillis()
         // 新一轮会话：上一轮的「最后一帧」不能拿来重发（车机解码器已重建，
         // 旧 IDR 的 SPS/PPS 与本轮 avcC 可能不一致）。
         lastIdrNals = null
@@ -540,7 +559,8 @@ class VideoSender(
             synchronized(submissionLock) {
                 val current = sourceQueue
                 if (running.get() && current?.isCurrent(frame) == true &&
-                    submitH264Locked(frame.data, frame.idr, frame.timestamp)) {
+                    submitH264Locked(frame.data, frame.idr, frame.timestamp, sourceFrame = true)) {
+                    sourceWritten(frame.idr)
                     sourceDelivered?.invoke(frame.data.size)
                 }
             }
@@ -588,7 +608,7 @@ class VideoSender(
      */
     private fun maybeResendIdleFrame(output: java.io.OutputStream) {
         val nals = lastIdrNals ?: return
-        val now = android.os.SystemClock.uptimeMillis()
+        val now = uptimeMillis()
         if (lastFrameAtMs == 0L || now - lastFrameAtMs < IDLE_RESEND_AFTER_MS) return
         if (now - lastIdleResendAt < IDLE_RESEND_INTERVAL_MS) return
         lastIdleResendAt = now
@@ -635,11 +655,12 @@ class VideoSender(
         synchronized(submissionLock) {
             if (!running.get()) return
             configSent = false
+            q4Handover.arm("source-restart")
             beginAwaitingKeyFrame()
         // 不在这里清 lastIdrNals：源重启到新源出首帧之间可能有几秒空窗，
         // 旧 IDR 还能继续喂保活，避免车机因「视频静默」拆掉整轮会话。
         // 一旦真的发出新 config，sendConfigFromNals 会立刻把它作废。
-        lastFrameAtMs = android.os.SystemClock.uptimeMillis()
+        lastFrameAtMs = uptimeMillis()
         log("VIDEO: 检测到 CarLife 源重启（$reason）——重置配置、等待新 IDR（帧计数保持，nonce 不复用）")
         }
     }
@@ -652,7 +673,7 @@ class VideoSender(
      * 拿上一轮的旧时刻比较，`submitH264` 会在刚置位的瞬间就判定「已超时」把 P 帧放行。
      */
     private fun beginAwaitingKeyFrame() {
-        awaitingKeyFrameSince = android.os.SystemClock.uptimeMillis()
+        awaitingKeyFrameSince = uptimeMillis()
         awaitingKeyFrameAfterRestart = true
         droppedBeforeRestartKey = 0
         // 等 IDR = 换了一路码流的时间基准，排队延迟的基线必须跟着重来。
@@ -699,9 +720,11 @@ class VideoSender(
         submitH264Locked(data, keyFrame, sourceTimestampMs)
     }
 
-    fun submitSourceH264(data: ByteArray, keyFrame: Boolean, sourceTimestampMs: Long? = null): Boolean {
+    fun submitSourceH264(data: ByteArray, keyFrame: Boolean, sourceTimestampMs: Long? = null): Boolean = synchronized(submissionLock) {
         realSourceSeen.set(true)
-        return submitH264(data, keyFrame, sourceTimestampMs)
+        val sent = submitH264Locked(data, keyFrame, sourceTimestampMs, sourceFrame = true)
+        if (sent && q4Handover.waiting()) sourceWritten(splitAnnexB(data).any { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 5 })
+        sent
     }
 
     @Volatile private var sourceDelivered: ((Int) -> Unit)? = null
@@ -719,6 +742,7 @@ class VideoSender(
         data: ByteArray,
         keyFrame: Boolean,
         sourceTimestampMs: Long?,
+        sourceFrame: Boolean = false,
     ): Boolean {
         if (!running.get()) return false
         val output = try {
@@ -737,8 +761,13 @@ class VideoSender(
             }
             val hasSps = nalUnits.any { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 7 }
             val isIdr = nalUnits.any { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 5 }
+            if (sourceFrame && q4Handover.waiting()) {
+                // 提示帧的 config 不能证明真实源已配置；接管必须从真实 IDR 和其配置开始。
+                if (!isIdr) return false
+                configSent = false
+            }
             if (awaitingKeyFrameAfterRestart) {
-                val waitedMs = android.os.SystemClock.uptimeMillis() - awaitingKeyFrameSince
+                val waitedMs = uptimeMillis() - awaitingKeyFrameSince
                 if (!isIdr && waitedMs < WAIT_KEY_FRAME_TIMEOUT_MS) {
                     droppedBeforeRestartKey++
                     if (droppedBeforeRestartKey == 1L || droppedBeforeRestartKey % 30 == 0L) {
@@ -786,9 +815,10 @@ class VideoSender(
                     }
                 }
             }
-            val writeStartMs = android.os.SystemClock.uptimeMillis()
+            if (sourceFrame && q4Handover.waiting() && !configSent) return false
+            val writeStartMs = uptimeMillis()
             sendFrameFromNals(nalUnits, keyFrame, output)
-            val writtenAtMs = android.os.SystemClock.uptimeMillis()
+            val writtenAtMs = uptimeMillis()
             // 写入耗时本身就是背压指标：socket 写不动时会直接阻塞在这里，
             // 而这条调用链跑在 CarLife 的读线程上，一卡就是一整条视频通路在卡。
             val verdict = deliveryGate.onFrame(
@@ -858,7 +888,11 @@ class VideoSender(
         // SPS/PPS + IDR 拼成一段 AnnexB 一次提交：submitH264 会先发 VideoConfig 再发帧，
         // 并把这一帧记成 lastIdrNals，空闲保活会持续重发维持显示，直到 CarLife 接管。
         val sent = synchronized(submissionLock) {
-            if (realSourceSeen.get()) false else submitH264Locked(frame.csd + frame.idr, true, null)
+            if (realSourceSeen.get()) false else {
+                submitH264Locked(frame.csd + frame.idr, true, null).also {
+                    if (it) q4Handover.arm("notice-to-real-source")
+                }
+            }
         }
         if (sent) {
             log("VIDEO: 已向车机推送提示帧（${lines.firstOrNull() ?: ""}）")
@@ -936,7 +970,7 @@ class VideoSender(
      */
     private fun maybeSendKeepAlive(output: java.io.OutputStream) {
         if (!running.get()) return
-        val now = android.os.SystemClock.uptimeMillis()
+        val now = uptimeMillis()
         if (now - lastKeepAliveAt < KEEPALIVE_INTERVAL_MS) return
         val elapsedNanos = (now - lastKeepAliveAt).coerceAtLeast(1L) * 1_000_000.0
         val frames = framesSinceKeepAlive

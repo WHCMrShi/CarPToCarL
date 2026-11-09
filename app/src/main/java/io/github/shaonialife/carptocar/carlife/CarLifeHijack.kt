@@ -163,29 +163,6 @@ object CarLifeHijack {
     private val zeroFrameRecovery = ZeroFrameRecoveryBudget()
 
     /**
-     * 「当期首帧已送达 → 需要补一次 RECORD」的一次性标记。
-     *
-     * 车机让屏判据是「解码成功使 VideoState=active」。若 RECORD 之后先喂了一批旧帧
-     * 或长时间没有画面，屏幕会话可能已被 `badFramesThreshold` 判进错误态；此后即使
-     * 码流恢复健康，也需要在**真正写出当期第一帧之后**再补一次 RECORD 重新仲裁让屏。
-     * 每轮会话只补一次（attach / 源重启置位，首帧送达后清位）。
-     */
-    @Volatile
-    private var screenReactivateNeeded = false
-
-    /** 当期首帧写进车机通道时回调上层（SessionController 补发 RECORD）。 */
-    @Volatile
-    var onVideoSourceRecovered: (() -> Unit)? = null
-
-    /** 首帧成功送达后触发一次屏激活补发；回调在 CarLife 读线程上，投递由上层负责。 */
-    private fun maybeReactivateScreen() {
-        if (!screenReactivateNeeded) return
-        screenReactivateNeeded = false
-        logSink?.invoke("CARLIFE: 当期首帧已送达车机——通知上层补发 RECORD 重建屏激活")
-        onVideoSourceRecovered?.invoke()
-    }
-
-    /**
      * 当前会话的音频 sink。
      *
      * 写方是 carlife-hijack 线程（[start] 里创建），读方是**媒体通知线程**
@@ -595,13 +572,13 @@ object CarLifeHijack {
             gopBytes = 0
             snapshot
         }
-        screenReactivateNeeded = true
         val firstPending = pending.firstOrNull()
         val replay = FirstFramePolicy.shouldReplay(
             policyEnabled = FirstFramePolicy.useCachedGop,
             firstFrameIsKey = firstPending?.second == true,
             firstFrameHasSps = firstPending?.let { hasSpsNal(it.first) } == true,
         )
+        if (!replay) videoSender.armSourceHandover("attach-without-cached-idr")
         if (replay) {
             log(
                 "CARLIFE: 回放缓存 ${pending.size} 帧立即起播（首帧自带 SPS，" +
@@ -615,6 +592,7 @@ object CarLifeHijack {
                     noteDelivered(frame.size)
                 } else break
             }
+            if (pushed == 0) videoSender.armSourceHandover("cached-idr-not-delivered")
             log("CARLIFE: 缓存回放已推送 $pushed/${pending.size} 帧——后续实时直通")
         } else {
             log(
@@ -844,7 +822,6 @@ object CarLifeHijack {
                 // 并等到新 IDR 再送帧，否则「CarPlay 不掉、CarLife 重连后永久没画面」
                 // （2026-10-25 用户实测）。首次劫持时 sender 还是 null，这里是空操作。
                 if (sender != null) {
-                    screenReactivateNeeded = true
                     sender?.onSourceRestart("CarLife 会话重建（引擎重连）")
                     startSourceRestartWatchdog(hu)
                 }
@@ -1001,7 +978,6 @@ object CarLifeHijack {
             target.enqueueSourceH264(frame, sourceTimestampMs) { size ->
                 if (sender === target && running.get()) {
                     noteDelivered(size)
-                    maybeReactivateScreen()
                 }
             }
             return

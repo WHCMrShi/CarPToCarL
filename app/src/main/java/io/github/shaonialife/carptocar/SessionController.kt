@@ -342,19 +342,7 @@ object SessionController {
     private fun installNowPlayingBridge() {
         if (nowPlayingBridgeInstalled) return
         nowPlayingBridgeInstalled = true
-        // 首帧后**不再**补发 assertModes + RECORD（2026-11-08，按宝马 fork 的实车结论）。
-        //
-        // 这段原本是给奥迪 4580 修的（81e75a6「首帧送达后重建屏激活」）：建屏阶段喂过
-        // 旧帧或长时间无画面时，屏幕会话可能已进错误态（固件 badFramesThreshold=4），
-        // 需要在合法当期帧到达后重新触发一次让屏仲裁。
-        //
-        // 但宝马 NBT EVO 上这一步是**反向的**：首帧之后重发 RECORD，车机会直接关掉
-        // 视频通道（fork 实测：补发即 Broken pipe / 通道关闭）。而宝马的画面对它自己的
-        // 建屏时序是够用的，不需要这一脚。
-        //
-        // 取舍：全局关掉（用户 2026-11-08 决定）。代价是奥迪 4580 那种「连接成功但黑屏」
-        // 的老症若复现，需要把下面这段接回去——原始实现见 git show 81e75a6。
-        // CarLifeHijack.onVideoSourceRecovered = { ... assertModes(); record() }
+        // Q4 的晚到真实源恢复绑定在各 VideoSender 上，不使用进程级首帧回调。
         // 数据源 A：CarLife 内置播放器（0x10035）——兜底，仅其内置播放器会推。
         CarLifeHijack.addMediaInfoListener { info ->
             appendLog(
@@ -4980,6 +4968,24 @@ object SessionController {
                                     // 码流在 App 启动时（CarLifeHijack.prewarm）就已开始接收并
                                     // 缓存 GOP，这里只需把数据端口接上再把缓存帧灌进去。
                                     val target = videoSender
+                                    if (target != null) {
+                                        val recoveryWork = connectionWork.capture()
+                                        val recoverySetup = setupWork.capture()
+                                        target.onSourceHandover = { ticket ->
+                                            appendLog("Q4-HANDOVER: queued generation=${ticket.generation} reason=${ticket.reason}; real IDR written, decode unconfirmed")
+                                            Bg.run("q4-source-handover") {
+                                                val alive = {
+                                                    !connectCancelled && recoveryWork.isCurrent && recoverySetup.isCurrent &&
+                                                        currentClient === client && videoSender === target && client.controlConnectionAlive
+                                                }
+                                                val result = runCatching {
+                                                    target.recoverSourceHandover(ticket, alive,
+                                                        modes = { client.assertModes() }, record = { client.record() })
+                                                }
+                                                appendLog("Q4-HANDOVER: generation=${ticket.generation} result=${result.getOrNull() ?: "FAILED:${result.exceptionOrNull()?.javaClass?.simpleName}"}; activation response is not decoder confirmation")
+                                            }
+                                        }
+                                    }
                                     if (target == null) {
                                         appendLog("MODE: 视频通道未创建，本轮无画面")
                                     } else if (target.startPassthrough()) {
