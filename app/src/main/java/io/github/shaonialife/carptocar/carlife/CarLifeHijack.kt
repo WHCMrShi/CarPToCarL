@@ -331,6 +331,7 @@ object CarLifeHijack {
 
     /** 最近一个 GOP 缓存（从关键帧起），供会话建立瞬间「补历史帧」。 */
     private val gop = ArrayDeque<Pair<ByteArray, Boolean>>()
+    private var gopOriginAt = 0L // Diagnostic only; valid while the original keyframe is retained.
     private var gopBytes = 0
     private val gopLock = Any()
 
@@ -555,11 +556,16 @@ object CarLifeHijack {
             log("CONNECT-DIAG: skipped attachment of ended or retired video owner")
             return
         }
+        val attachAt = android.os.SystemClock.uptimeMillis()
+        val observedSourceAt = lastSourceFrameAt
         logSink = log
         sender = null
+        var cachedOriginAt = 0L
         val pending = synchronized(gopLock) {
+            cachedOriginAt = gopOriginAt
             val snapshot = gop.toList()
             gop.clear()
+            gopOriginAt = 0L
             gopBytes = 0
             snapshot
         }
@@ -569,6 +575,7 @@ object CarLifeHijack {
         val late = synchronized(gopLock) {
             val snapshot = gop.toList()
             gop.clear()
+            gopOriginAt = 0L
             gopBytes = 0
             snapshot
         }
@@ -578,6 +585,7 @@ object CarLifeHijack {
             firstFrameIsKey = firstPending?.second == true,
             firstFrameHasSps = firstPending?.let { hasSpsNal(it.first) } == true,
         )
+        runCatching { log("PATH-DIAG: videoAttach cachedFrames=${pending.size} cachedBytes=${pending.sumOf { it.first.size.toLong() }} lateFrames=${late.size} replay=$replay firstKey=${firstPending?.second} firstSps=${firstPending?.let { hasSpsNal(it.first) }} lastSourceAgeMs=${if (observedSourceAt > 0) android.os.SystemClock.uptimeMillis() - observedSourceAt else null} cachedGopAgeMs=${if (cachedOriginAt > 0) android.os.SystemClock.uptimeMillis() - cachedOriginAt else null}") }
         if (!replay) videoSender.armSourceHandover("attach-without-cached-idr")
         if (replay) {
             log(
@@ -623,7 +631,8 @@ object CarLifeHijack {
         startFirstFrameWatchdog(videoSender)
         // 主动催一个带 SPS 的当期 IDR；startFirstFrameWatchdog 还有 3 秒后的兜底。
         log("CARLIFE: 请求引擎重建编码器（约 1 秒后出当期首帧）")
-        client?.requestVideoReinit()
+        client?.requestVideoReinit("attach")
+        runCatching { log("PATH-DIAG: videoAttach event=END durationMs=${android.os.SystemClock.uptimeMillis() - attachAt} senderRunning=${videoSender.isRunning}; write success is not display confirmation") }
     }
 
     /**
@@ -663,7 +672,7 @@ object CarLifeHijack {
             }
             if (sender !== videoSender || framesDelivered > base) return@Thread
             logSink?.invoke("CARLIFE: 接上通道 3 秒零帧——再请求一次编码器重建")
-            client?.requestVideoReinit()
+            client?.requestVideoReinit("first-frame-watchdog")
         }.apply { isDaemon = true }.start()
     }
 
@@ -720,6 +729,7 @@ object CarLifeHijack {
         stallSince = 0L
         synchronized(gopLock) {
             gop.clear()
+            gopOriginAt = 0L
             gopBytes = 0
         }
     }
@@ -884,7 +894,7 @@ object CarLifeHijack {
             }
             if (!running.get() || client !== hu || framesDelivered > base) return@Thread
             logSink?.invoke("CARLIFE: 源重启后 4 秒零帧——请求引擎重建编码器（约 1 秒后出 SPS+IDR）")
-            hu.requestVideoReinit()
+            hu.requestVideoReinit("zero-delivery-recovery")
         }.apply { isDaemon = true }.start()
     }
 
@@ -943,7 +953,7 @@ object CarLifeHijack {
                         if (lastReinit == Long.MIN_VALUE) Long.MAX_VALUE else now - lastReinit) &&
                     !scope.isClosed && client === hu && hu.isRunning) {
                     lastReinit = now
-                    hu.requestVideoReinit()
+                    hu.requestVideoReinit("stall-watchdog")
                     logSink?.invoke("CARLIFE: Q4 停摆轻量恢复：请求编码器 IDR；不强制重建 HU")
                 }
             }
@@ -988,15 +998,18 @@ object CarLifeHijack {
         synchronized(gopLock) {
             if (keyFrame) {
                 gop.clear()
+                gopOriginAt = 0L
                 gopBytes = 0
             } else if (gop.isEmpty()) {
                 return // 没有关键帧打头，非关键帧单独送过去也解不出画面
             }
+            if (keyFrame) gopOriginAt = now
             gop.addLast(frame to keyFrame)
             gopBytes += frame.size
             while (gop.size > MAX_GOP_FRAMES || gopBytes > MAX_GOP_BYTES) {
                 val removed = gop.removeFirstOrNull() ?: break
                 gopBytes -= removed.first.size
+                if (removed.second) gopOriginAt = 0L
             }
         }
     }

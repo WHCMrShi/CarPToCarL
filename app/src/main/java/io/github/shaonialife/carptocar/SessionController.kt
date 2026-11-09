@@ -1600,11 +1600,16 @@ object SessionController {
         }
     }
 
+    private val connectionTimeline = io.github.shaonialife.carptocar.util.ConnectionTimeline(
+        { android.os.SystemClock.uptimeMillis() }, ::appendLog,
+    )
+
     /**
      * 「启动连接」主体（权限检查由 Activity 完成后调用）：前台保活服务 + 双向蓝牙。
      * 幂等：已有会话时 BT 组件的 start() 自行短路，不会双开。
      */
     fun startConnection(context: Context) {
+        connectionTimeline.begin()
         connectionWork.begin()
         wifiConnector?.clearReceiverEvidence()
         io.github.shaonialife.carptocar.bt.CarIdleGuard.beginStartup(context)
@@ -1687,6 +1692,7 @@ object SessionController {
         // All terminal callers must cancel in-flight WiFi work, not only the UI cancel button.
         connectCancelled = true
         pendingCtrlInvite.end()
+        connectionTimeline.end()
         // 兼容模式的常开监听也一并停在这里；记下「用户叫停过」，
         // 否则看门狗 30 秒后又把监听挂回来（用户会以为断开没生效）
         compatSuppressed = true
@@ -2050,7 +2056,7 @@ object SessionController {
                     "WIFI: \"${wifi.ssid}\" 已有一次入网请求在跑——等它的结果，" +
                         "不重复请求（再发一次会把在跑的那次 release 掉）",
                 )
-                val ok = decision.ticket.await(WIFI_JOIN_SHARED_WAIT_MS)
+                val ok = connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.WIFI_SHARED_WAIT) { decision.ticket.await(WIFI_JOIN_SHARED_WAIT_MS) }
                 val network = connector.currentNetwork
                 if (!cancelled() && ok == true && network != null) {
                     appendLog("WIFI: 等到的结果是「已加入」——直接复用那条网络（$network）")
@@ -2066,7 +2072,7 @@ object SessionController {
                 // 确认框，而车上没人点屏——等到超时整轮就失败了，现场表现正是「卡在加入热点」。
                 // 复用只是 bindProcessToNetwork，不发请求、不弹框。
                 val adopted =
-                    connector.adoptIfAlreadyConnected(wifi.ssid, WIFI_REUSE_BIND_WAIT_MS) { cancelled() }
+                    connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.WIFI_REUSE) { connector.adoptIfAlreadyConnected(wifi.ssid, WIFI_REUSE_BIND_WAIT_MS) { cancelled() } }
                 val result =
                     if (adopted != null) {
                         WifiCarPlayConnector.JoinResult.Joined(adopted)
@@ -2075,21 +2081,23 @@ object SessionController {
                             ">>> 以应用专属网络加入 \"${wifi.ssid}\"（不保存为系统 WiFi，其它应用继续走 4G/5G）",
                         )
                         try {
-                            connector.joinCarPlayNetwork(
-                                ssid = wifi.ssid,
-                                passphrase = wifi.passphrase,
-                                securityType = wifi.securityType,
-                                timeoutMillis = SPECIFIER_JOIN_TIMEOUT_MS,
-                                graceMillis = SPECIFIER_JOIN_GRACE_MS,
-                                isCancelled = { cancelled() },
-                            )
+                            connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.WIFI_SPECIFIER) {
+                                connector.joinCarPlayNetwork(
+                                    ssid = wifi.ssid,
+                                    passphrase = wifi.passphrase,
+                                    securityType = wifi.securityType,
+                                    timeoutMillis = SPECIFIER_JOIN_TIMEOUT_MS,
+                                    graceMillis = SPECIFIER_JOIN_GRACE_MS,
+                                    isCancelled = { cancelled() },
+                                )
+                            }
                         } catch (error: Exception) {
                             appendLog("WIFI: 入网请求异常 - ${error.message ?: error.javaClass.simpleName}")
                             WifiCarPlayConnector.JoinResult.Unavailable
                         }
                     }
                 val joined = if (result == WifiCarPlayConnector.JoinResult.Unavailable && !cancelled()) {
-                    val network = connector.bindCurrentWifiBlocking(SUGGESTION_JOIN_WAIT_MS, wifi.ssid) { cancelled() }
+                    val network = connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.WIFI_SUGGESTION) { connector.bindCurrentWifiBlocking(SUGGESTION_JOIN_WAIT_MS, wifi.ssid) { cancelled() } }
                     if (network != null) WifiCarPlayConnector.JoinResult.Joined(network) else result
                 } else result
                 wifiJoinGate.finish(
@@ -2895,7 +2903,7 @@ object SessionController {
             var chosen: AudioProfile? = null
             var streamInfo: AirPlayClient.AudioStreamInfo? = null
             for (candidate in ordered) {
-                val result = client.runAudioStream(sharedSecret, candidate, tuning)
+                val result = connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.AUDIO_SETUP) { client.runAudioStream(sharedSecret, candidate, tuning) }
                 if (!audioEpoch.isCurrent(lease)) return false
                 if (result != null) {
                     chosen = candidate
@@ -3002,7 +3010,7 @@ object SessionController {
         appendLog("AUDIO: $reason → 重建音频流（接收端音频输出在通话期间被释放，需新建流才会重开）")
         val info =
             try {
-                client.runAudioStream(secret, profile, AudioTuning.RAW_SPF)
+                connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.AUDIO_SETUP) { client.runAudioStream(secret, profile, AudioTuning.RAW_SPF) }
             } catch (error: Exception) {
                 appendLog("AUDIO: 重建协商异常 - ${error.message}")
                 null
@@ -3035,7 +3043,7 @@ object SessionController {
         startCallWatcher()
         // 新流是在「会话已激活」之后加入的：按 AirPlay 语义必须补发 RECORD 纳入会话，
         // 否则车机对 SETUP 回 200、给端口，但不排播（见 startAudioChannel 同名注释）。
-        client.record()
+        connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.RECORD) { client.record() }
         appendLog(
             "AUDIO: 音频流重建完成（新 dataPort=${info.dataPort} " +
                 "controlPort=${info.controlPort}）——若仍无声，说明卡在车机音源选择而非本机",
@@ -3107,7 +3115,7 @@ object SessionController {
         )
         val info =
             try {
-                client.runAudioStream(secret, target, AudioTuning.RAW_SPF)
+                connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.AUDIO_SETUP) { client.runAudioStream(secret, target, AudioTuning.RAW_SPF) }
             } catch (error: Exception) {
                 appendLog("AUDIO: 切换协商异常 - ${error.message}")
                 null
@@ -3141,7 +3149,7 @@ object SessionController {
         }
         // 新流是在「会话已激活」之后加入的：按 AirPlay 语义必须补发 RECORD 纳入会话，
         // 否则车机对 SETUP 回 200、给端口，但不排播。
-        client.record()
+        connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.RECORD) { client.record() }
         appendLog(
             "AUDIO: 音频流已切到 ${target.label}（dataPort=${info.dataPort} " +
                 "controlPort=${info.controlPort}）——音源不变，只换了接收端输出通路",
@@ -3632,7 +3640,7 @@ object SessionController {
         plainSession: Boolean,
         noPairing: Boolean,
     ): AirPlayClient.SetupInfo? {
-        val first = client.runSetup()
+        val first = connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.INITIAL_SETUP) { client.runSetup() }
         if (first != null || !plainSession) return first
         val deadline = android.os.SystemClock.uptimeMillis() + INITIAL_SETUP_WINDOW_MS
         var attempt = 1
@@ -3647,7 +3655,7 @@ object SessionController {
             if (connectCancelled) return null
             client.close()
             if (!client.reconnect(2_000)) continue
-            val retried = client.runSetup()
+            val retried = connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.INITIAL_SETUP) { client.runSetup() }
             if (retried != null) {
                 appendLog("AIRPLAY: ✓ 明文 SETUP 在第 $attempt 次尝试成功")
                 return retried
@@ -4262,7 +4270,7 @@ object SessionController {
                             client.reconnect()
                             null
                         } else {
-                            client.runPairing()
+                            connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.PAIRING) { client.runPairing() }
                         }
                     // 审计：画像说「该配对」，接收端却根本没有 /pair-setup（404/不可用）。
                     // 这是 SPEC §3.3 特征位与实测不符的硬证据（多见于自称新代的老固件），
@@ -4309,7 +4317,7 @@ object SessionController {
                         if (attemptCancelled()) { client.dispose(); return@run }
                     if (!mutate { currentClient = client }) { client.dispose(); return@run }
                         drainPendingEndpoint(client)
-                        keys = client.runPairing()
+                        keys = connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.PAIRING) { client.runPairing() }
                         if (attemptCancelled()) {
                             mutate { retireSession() }
                             appendLog("AIRPLAY: 用户已取消——中止配对")
@@ -4395,7 +4403,7 @@ object SessionController {
                                 // 立刻清掉，下一轮不必再走明文。
                                 PairingMemory.clear(context)
                                 sessionKey = upgraded.sharedSecret
-                                setup = client.runSetup()
+                                setup = connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.INITIAL_SETUP) { client.runSetup() }
                             }
                         }
                         if (setup == null && pairedKeys != null && client.lastSetupFailureStatus == 403) {
@@ -4406,7 +4414,7 @@ object SessionController {
                             client.retryWithoutEncryption("配对已完成但 SETUP 被 403 拒绝")
                             if (client.reconnect(5_000)) {
                                 sessionKey = null
-                                setup = client.runSetup()
+                                setup = connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.INITIAL_SETUP) { client.runSetup() }
                                 if (setup != null) {
                                     appendLog("AIRPLAY: ✓ 明文会话建立成功——接收端不接受加密会话")
                                 }
@@ -4664,7 +4672,7 @@ object SessionController {
                             setup.hidDeviceUuids.forEach { uuid ->
                                 client.sendHidSetInputMode(uuid, mode = 0)
                             }
-                            val screen = client.runScreenStream(sessionKey, setup.displayUuid)
+                            val screen = connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.SCREEN_SETUP) { client.runScreenStream(sessionKey, setup.displayUuid) }
                             if (screen != null) {
                                 // 地址取 client 真正连通的那个（配对期间可能被 mDNS 刷新过）：
                                 // 视频数据端口与 keepAlive 都按它建 socket；IPv6 端点也算
@@ -4907,7 +4915,7 @@ object SessionController {
                                 // 返回同一毫秒、且 5 次实测全部复现。故顺序改为：
                                 //   屏幕 SETUP → 连数据端口 → RECORD → 起编码器（出帧）→ 音频 SETUP
                                 // 音频 SETUP 失败只丢声音，视频会话保持。
-                                client.record()
+                                connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.RECORD) { client.record() }
                                 // 4580（AUDI 3810 / DELPHI MIB3）：车机 HMI 要等 iAP2 控制会话
                                 // （链路 NORMAL + MFi 应答）就绪才激活 CarPlay——固件
                                 // `CCarPlayTestController` 在那之前一直是
@@ -4920,7 +4928,7 @@ object SessionController {
                                     if (client.awaitControlSession(MIB3_REACTIVATE_WAIT_MS)) {
                                         appendLog("MIB3: 控制会话已就绪 → 重新声明主屏资源并补发 RECORD")
                                         client.assertModes()
-                                        client.record()
+                                        connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.RECORD) { client.record() }
                                         setup.hidDeviceUuids.forEach { uuid ->
                                             client.sendHidSetInputMode(uuid, mode = 0)
                                         }
@@ -4960,7 +4968,7 @@ object SessionController {
                                                 }
                                                 val result = runCatching {
                                                     target.recoverSourceHandover(ticket, alive,
-                                                        modes = { client.assertSourceScreenModes() }, record = { client.record() },
+                                                        modes = { client.assertSourceScreenModes() }, record = { connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.RECORD) { client.record() } },
                                                         allowed = { client.screenRecoveryAllowed() })
                                                 }
                                                 appendLog("Q4-HANDOVER: generation=${ticket.generation} result=${result.getOrNull() ?: "FAILED:${result.exceptionOrNull()?.javaClass?.simpleName}"}; activation response is not decoder confirmation")
@@ -5039,7 +5047,7 @@ object SessionController {
                                     // 并给 dataPort，但不会真正播放（2026-10-17 奥迪实测：
                                     // 音频包持续发送、采集内容非零，车机无声）。
                                     appendLog("AUDIO: 音频流已加入——补发 RECORD 激活（流后加入会话）")
-                                    client.record()
+                                    connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.RECORD) { client.record() }
                                 }
                             } else {
                                 // 屏幕流 SETUP 失败：会话已经死了，但旧实现到这里什么都不说，

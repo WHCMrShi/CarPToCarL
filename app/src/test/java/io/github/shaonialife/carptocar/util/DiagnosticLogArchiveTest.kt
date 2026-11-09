@@ -62,6 +62,10 @@ class DiagnosticLogArchiveTest {
             "CARLIFE: 控制通道断开 - Connection reset",
             "CARLIFE: 版本握手失败 reason=control-read elapsedMs=2100",
             "EVENT-DIAG: changeModes request={resources=[]}",
+            "PATH-DIAG: stage=PAIRING event=END durationMs=500",
+            "HANDOVER-DIAG: decision=CANCEL_SETUP",
+            "RESOURCE-DIAG: response transportAccepted=true",
+            "KEYFRAME-DIAG: IDR_WRITTEN",
         )
         writer.write(evidence.map { "$it\n" }, 0)
         repeat(10) { writer.write(listOf("ordinary line ${"x".repeat(100)}\n"), 0) }

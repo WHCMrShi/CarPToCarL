@@ -1145,8 +1145,11 @@ class CarLifeHuClient(
      * 重建后引擎必然补一个「SPS + PPS + IDR」，车机侧就能拿到 VideoConfig 配置解码器。
      * 用于「会话接上但一帧都送不出去」的死锁场景。
      */
-    fun requestVideoReinit() {
+    private val observedReinitRequests = java.util.concurrent.atomic.AtomicLong()
+
+    fun requestVideoReinit(reason: String = "unspecified") {
         if (!running.get()) return
+        runCatching { log("PATH-DIAG: videoReinit hu=${System.identityHashCode(this)} reason=$reason request=${observedReinitRequests.incrementAndGet()} lastInitAttemptAgeMs=${if (lastEncInitAt > 0) android.os.SystemClock.uptimeMillis() - lastEncInitAt else null}; request only") }
         log("CARLIFE: 请求引擎重建编码器（补 SPS/PPS 关键帧）")
         restartEncoding()
     }
@@ -1347,12 +1350,15 @@ class CarLifeHuClient(
         val sig = "${requestedWidth}x${requestedHeight}@$videoFps"
         val now = android.os.SystemClock.uptimeMillis()
         if (!force && sig == lastEncInitSig && now - lastEncInitAt < ENCODER_INIT_DEDUPE_MS) {
+            runCatching { log("PATH-DIAG: encoderInit hu=${System.identityHashCode(this)} decision=DEDUPE force=$force previousAttemptAgeMs=${now - lastEncInitAt}") }
             log("CARLIFE: 98311 跳过重复下发（$sig 刚发过）——重复会让引擎确认值降到 20fps")
             return false
         }
+        val previousAttemptAt = lastEncInitAt
         lastEncInitSig = sig
         lastEncInitAt = now
         val sent = send(CarLifeProtocol.HU_VIDEO_ENC_INIT, buildEncoderInfo())
+        runCatching { log("PATH-DIAG: encoderInit hu=${System.identityHashCode(this)} decision=ATTEMPT force=$force previousAttemptAgeMs=${if (previousAttemptAt > 0) now - previousAttemptAt else null} durationMs=${android.os.SystemClock.uptimeMillis() - now} sent=$sent; not source-IDR confirmation") }
         // 首条一旦发出，引擎的档位就定了；此后分辨率热更新可以直接重发（见 setRequestedResolution）。
         if (sent) firstInitSent = true
         return sent

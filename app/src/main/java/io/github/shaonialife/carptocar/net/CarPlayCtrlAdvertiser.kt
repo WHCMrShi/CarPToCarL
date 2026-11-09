@@ -135,8 +135,15 @@ class CarPlayCtrlAdvertiser(
         force: Boolean = false,
         network: android.net.Network? = null,
     ): Boolean {
+        val observedAt = SystemClock.uptimeMillis()
         val sameNetwork = network == null || network == registeredNetwork
-        if (registered && registeredSsid == ssid && !force && !macPlaceholder && sameNetwork) return true
+        fun observe(decision: String) {
+            runCatching { log("PATH-DIAG: ctrlBroadcast=$decision force=$force sameNetwork=$sameNetwork registered=$registered registrationAgeMs=${if (registeredAtMillis > 0) SystemClock.uptimeMillis() - registeredAtMillis else null} durationMs=${SystemClock.uptimeMillis() - observedAt}") }
+        }
+        if (registered && registeredSsid == ssid && !force && !macPlaceholder && sameNetwork) {
+            observe("REUSE")
+            return true
+        }
         // force 冷却：绑定后的一连串「确保」调用（bindCarWifiAndRegister → 端点交接）
         // 常在同一秒内发生，逐次 unregister+register 会撞 NsdManager 的
         // listener-already-in-use 并吃 1.2s 重试，反而拖慢连接。
@@ -148,6 +155,7 @@ class CarPlayCtrlAdvertiser(
             sameNetwork &&
             SystemClock.uptimeMillis() - registeredAtMillis < FORCE_COOLDOWN_MILLIS
         ) {
+            observe("FORCE_COOLDOWN")
             log("$TAG: 跳过重复的强制重注册（${SystemClock.uptimeMillis() - registeredAtMillis}ms 前刚注册）")
             return true
         }
@@ -159,8 +167,10 @@ class CarPlayCtrlAdvertiser(
         }
         registeredSsid = ssid
         registeredNetwork = network ?: registeredNetwork
+        observe("REGISTER_BEGIN")
         var ok = start()
         if (!ok) {
+            observe("RETRY_WAIT_1200")
             // 注销是异步的：极端情况下 registerService 会遇到 "listener already in use"，
             // 稍候重试一次（真车实测 10-11：300ms 不够，需要更长）
             try {
@@ -169,6 +179,7 @@ class CarPlayCtrlAdvertiser(
             }
             ok = start()
         }
+        observe(if (ok) "REGISTER_ACCEPTED" else "REGISTER_FAILED")
         return ok
     }
 
