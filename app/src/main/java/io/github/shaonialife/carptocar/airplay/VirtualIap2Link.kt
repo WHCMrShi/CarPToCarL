@@ -8,6 +8,7 @@ import io.github.shaonialife.carptocar.iap2.Iap2CapabilityReport
 import io.github.shaonialife.carptocar.iap2.Iap2Csm
 import io.github.shaonialife.carptocar.iap2.Iap2LinkEngine
 import io.github.shaonialife.carptocar.iap2.Iap2MessageIds
+import io.github.shaonialife.carptocar.iap2.Iap2SenderSession
 import io.github.shaonialife.carptocar.iap2.Iap2NowPlaying
 import io.github.shaonialife.carptocar.iap2.Iap2SubscriptionReplies
 import io.github.shaonialife.carptocar.iap2.MfiLengthMemory
@@ -158,12 +159,10 @@ class VirtualIap2Link(
     /** 已打印的参数明细帧数（只打前几帧，之后按需打动作）。 */
     private var hidReportFrames = 0
 
-    // ---- MIB3 隧道 MFi 挑战（按车机持久化记忆；与蓝牙链路**独立记**——同一台车
-    // 两条链路的认证后端可能不同，实测 MMI 0000 蓝牙认 32B 而 Frida 隧道是 20B） ----
+    // Q4 固定 20B；每个隧道独立生成随机挑战，有限重传同一份，保留跨链路身份隔离。
     private var mfiIdentity: String? = null
-    private var mfiMemory = MfiLengthMemory.Entry()
-    private var mfiOrder: List<Int> = emptyList()
-    private var mfiPosition = -1
+    private var mfiChallenge: ByteArray? = null
+    private var mfiSends = 0
     private var mfiCurrentLength = 0
     private var mfiWindowMillis = 0L
     private var mfiChallengeSentAtMs = 0L
@@ -492,56 +491,31 @@ class VirtualIap2Link(
         log("IAPLINK: 链路状态 → $state（NORMAL 才可能收到车机 0x6800/0x6802 媒体键）")
     }
 
-    /** MFi 挑战静默超时：记入该车机的记忆并换下一档重试（节拍线程每 200ms 驱动一次）。 */
+    /** 固定 20B 的冷启动超时兜底，不学习长度失败。 */
     private fun checkMfiTimeoutLocked() {
-        val identity = mfiIdentity ?: return
         if (mfiFinished || mfiCurrentLength == 0) return
         if (nowMillis() - mfiChallengeSentAtMs < mfiWindowMillis) return
-        val failed = mfiCurrentLength
-        MfiLengthMemory.recordSilent(mfiContext, identity, failed)
-        log("IAPLINK: 隧道 MFi ${failed}B 静默 ${mfiWindowMillis}ms——记入记忆，换下一档重试")
-        mfiCurrentLength = 0
+        log("IAPLINK: Q4 20B 响应超时——有限重传同一挑战，保留成功记忆")
         startNextMfiChallengeLocked()
     }
 
-    /**
-     * 下一档 MFi 挑战（顺序=按车机记忆重排，冷启动基线 20B 优先——Frida 真机值）。
-     * 全部档位无应答时与蓝牙路径同语义：跳过校验直接 0xAA05，由车机后续行为判定。
-     */
     private fun startNextMfiChallengeLocked() {
-        val identity = mfiIdentity ?: return
-        if (mfiOrder.isEmpty()) {
-            mfiMemory = MfiLengthMemory.load(mfiContext, identity)
-            mfiOrder = MfiLengthMemory.orderAttempts(TUNNEL_MFI_BASELINE, mfiMemory)
-            if (!mfiMemory.isEmpty) {
-                log(
-                    "IAPLINK: 隧道 MFi 按车机记忆：${MfiLengthMemory.describe(mfiMemory)}" +
-                        " → 本轮顺序 ${mfiOrder.joinToString("/")}B",
-                )
-            }
-        }
-        mfiPosition += 1
-        if (mfiPosition >= mfiOrder.size) {
-            log("IAPLINK: 隧道 MFi 挑战全部无应答——跳过校验直接 0xaa05（由车机后续行为判定）")
-            mfiFinished = true
-            mib3AuthStage = 4
-            sendCsmLocked(Iap2MessageIds.MFI_AUTHENTICATION_SUCCEEDED)
-            sendMib3BurstLocked()
+        if (closed || mfiFinished || mfiIdentity == null) return
+        if (mfiSends >= Iap2SenderSession.Q4_MFI_MAX_SENDS) {
+            log("IAPLINK: Q4 20B 有限重试耗尽——未收到签名，不发送 0xaa05；退役当前隧道，保留成功记忆")
+            mfiCurrentLength = 0
+            close()
             return
         }
-        mfiCurrentLength = mfiOrder[mfiPosition]
-        val base = TUNNEL_MFI_WINDOWS[mfiCurrentLength] ?: TUNNEL_MFI_SILENT_WINDOW_MS
-        mfiWindowMillis =
-            if (mfiCurrentLength in mfiMemory.silent && mfiCurrentLength != mfiMemory.succeeded) {
-                minOf(base, TUNNEL_MFI_SILENT_WINDOW_MS)
-            } else {
-                base
-            }
+        val challenge = mfiChallenge ?: ByteArray(Iap2SenderSession.Q4_MFI_CHALLENGE_BYTES)
+            .also { SecureRandom().nextBytes(it); mfiChallenge = it }
+        mfiSends++
+        mfiCurrentLength = Iap2SenderSession.Q4_MFI_CHALLENGE_BYTES
+        mfiWindowMillis = Iap2SenderSession.Q4_MFI_WINDOW_MS
         mfiChallengeSentAtMs = nowMillis()
-        val challenge = ByteArray(mfiCurrentLength).also { SecureRandom().nextBytes(it) }
         sendCsmLocked(Iap2MessageIds.MFI_REQUEST_CHALLENGE, Iap2Csm.param(0, challenge))
         mib3AuthStage = 3
-        log("IAPLINK: 隧道 tx=0xaa02 challenge=${mfiCurrentLength}B（第 ${mfiPosition + 1} 次，窗口 ${mfiWindowMillis}ms）")
+        log("IAPLINK: 隧道 tx=0xaa02 challenge=20B（Q4 固定，第 $mfiSends/${Iap2SenderSession.Q4_MFI_MAX_SENDS} 次；重试复用同一挑战）")
     }
 
     /**
@@ -699,21 +673,20 @@ class VirtualIap2Link(
             }
 
             ids.MFI_AUTHENTICATION_FAILED -> {
-                if (!mib3 || mfiFinished) return
-                mfiIdentity?.let { MfiLengthMemory.recordRejected(mfiContext, it, mfiCurrentLength) }
-                log("IAPLINK: 隧道 MFi ${mfiCurrentLength}B 被拒（0xaa04）——记入记忆，换下一档")
-                mfiCurrentLength = 0
+                if (!mib3 || mfiFinished || mfiCurrentLength == 0) return
+                log("IAPLINK: Q4 隧道 20B 收到 0xaa04——有限重传同一挑战，保留成功记忆")
                 startNextMfiChallengeLocked()
             }
 
             ids.MFI_CERTIFICATE -> {
                 if (mib3) {
-                    // 长度按车机记忆（冷启动 20B 优先，Frida 真机值；详见 startNextMfiChallengeLocked）
+                    // Q4 固定 20B；重复证书不消耗冷启动重试次数。
+                    if (mib3AuthStage == 3 || mfiFinished) return
                     startNextMfiChallengeLocked()
                 } else {
-                    // DiPlay CARLINKIT 身份只接受精确 32B（长度不符直接断链）
+                    // 本 Q4 专用构建固定 20B，不做其他车型长度探测。
                     val challenge =
-                        ByteArray(32).also { SecureRandom().nextBytes(it) }
+                        ByteArray(Iap2SenderSession.Q4_MFI_CHALLENGE_BYTES).also { SecureRandom().nextBytes(it) }
                     sendCsmLocked(ids.MFI_REQUEST_CHALLENGE, Iap2Csm.param(0, challenge))
                     mib3AuthStage = 3
                 }
@@ -721,6 +694,8 @@ class VirtualIap2Link(
 
             ids.MFI_RESPONSE -> {
                 if (mib3) {
+                    // 退役/完成后的迟到或重复应答不更新记忆，也不重复发成功突发。
+                    if (closed || mfiFinished || mfiCurrentLength == 0) return
                     mfiIdentity?.let { MfiLengthMemory.recordSuccess(mfiContext, it, mfiCurrentLength) }
                     log("IAPLINK: 隧道 rx=0xaa03 签名 ${frame.body.size}B（${mfiCurrentLength}B 挑战成功，已记忆）")
                     mfiCurrentLength = 0
@@ -1075,11 +1050,6 @@ class VirtualIap2Link(
 
     companion object {
 
-
-        /** 隧道 MFi 冷启动基线（Frida 真机 20B 优先；顺序会被按车机记忆重排）。 */
-        val TUNNEL_MFI_BASELINE = listOf(20, 32, 16)
-        val TUNNEL_MFI_WINDOWS = mapOf(20 to 6_000L, 32 to 3_000L, 16 to 3_000L)
-        const val TUNNEL_MFI_SILENT_WINDOW_MS = 1_500L
 
         /**
          * 车机在事件通道上连续发到第几个 SYN marker 才判定「它在等我们回 marker」。

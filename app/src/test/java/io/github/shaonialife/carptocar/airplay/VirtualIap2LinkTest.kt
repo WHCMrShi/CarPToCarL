@@ -373,7 +373,7 @@ class VirtualIap2LinkTest {
         // 0xAA06（auth serial）→ 再发 0xAA00
         assertEquals(listOf(0xAA00), h.carSends(0xAA06, Iap2Csm.string(0, "serial")))
 
-        // 0xAA01（证书）→ 0xAA02 挑战 20B（MIB3 真机长度；DiPlay 形态为 32B）
+        // 0xAA01（证书）→ 0xAA02 挑战 20B（本 Q4 构建两条路径固定长度）
         val challengeFrames = h.carSends(0xAA01, Iap2Csm.param(0, ByteArray(642)))
         assertEquals(listOf(0xAA02), challengeFrames)
         val challengeBody =
@@ -498,7 +498,61 @@ class VirtualIap2LinkTest {
     }
 
     @Test
-    fun tunnelMfiUsesRememberedLengthPerCar() {
+    fun coldRejectionRetriesTwentyBytesAndDuplicateReplyIsIgnored() {
+        val identity = "ColdCar ColdModel ColdMfr tunnel"
+        MfiLengthMemory.recordSuccess(null, identity, 20)
+        val h = Harness()
+        h.link.armMib3(); h.car.start(0); h.exchangeUntilNormal()
+        h.carSends(0x1D01, Iap2Csm.string(0, "ColdCar") + Iap2Csm.string(1, "ColdModel") + Iap2Csm.string(2, "ColdMfr"))
+        h.carSends(0xAA01, Iap2Csm.param(0, ByteArray(642)))
+        h.carSends(0xAA04)
+        assertEquals(listOf(20, 20), h.challengeLengths())
+        val challenges = h.controlFrames().filter { it.second == 0xAA02 }
+        assertTrue(challenges[0].first.contentEquals(challenges[1].first))
+        assertEquals(20, MfiLengthMemory.load(null, identity).succeeded)
+        h.carSends(0xAA03, Iap2Csm.param(0, ByteArray(96)))
+        assertTrue(h.link.controlSessionReady)
+        val before = h.controlFrames().count { it.second == 0xAA05 }
+        h.carSends(0xAA03, Iap2Csm.param(0, ByteArray(96)))
+        assertEquals(before, h.controlFrames().count { it.second == 0xAA05 })
+        assertEquals(20, MfiLengthMemory.load(null, identity).succeeded)
+    }
+
+    @Test
+    fun repeatedColdRejectionRetiresTunnelAndIgnoresLateResponse() {
+        val identity = "FailCar FailModel FailMfr tunnel"
+        MfiLengthMemory.recordSuccess(null, identity, 20)
+        val h = Harness()
+        h.link.armMib3(); h.car.start(0); h.exchangeUntilNormal()
+        h.carSends(0x1D01, Iap2Csm.string(0, "FailCar") + Iap2Csm.string(1, "FailModel") + Iap2Csm.string(2, "FailMfr"))
+        h.carSends(0xAA01, Iap2Csm.param(0, ByteArray(642)))
+        h.carSends(0xAA04); h.carSends(0xAA04)
+        assertEquals(listOf(20, 20), h.challengeLengths())
+        assertTrue(!h.link.controlSessionReady)
+        assertTrue(h.controlFrames().none { it.second == 0xAA05 })
+        val before = h.controlFrames().size
+        h.carSends(0xAA03, Iap2Csm.param(0, ByteArray(96)))
+        h.clock += 30_000; h.tick()
+        assertEquals(before, h.controlFrames().size)
+        assertEquals(MfiLengthMemory.Entry(succeeded = 20), MfiLengthMemory.load(null, identity))
+    }
+
+    @Test
+    fun coldSilenceStopsAfterTwoTwentyByteSendsWithoutFalseSuccess() {
+        val h = Harness()
+        h.link.armMib3(); h.car.start(0); h.exchangeUntilNormal()
+        h.carSends(0x1D01, Iap2Csm.string(0, "TimeoutCar"))
+        h.carSends(0xAA01, Iap2Csm.param(0, ByteArray(642)))
+        h.clock += 7_000; h.tick()
+        h.clock += 7_000; h.tick()
+        h.clock += 30_000; h.tick()
+        assertEquals(listOf(20, 20), h.challengeLengths())
+        assertTrue(!h.link.controlSessionReady)
+        assertTrue(h.controlFrames().none { it.second == 0xAA05 })
+    }
+
+    @Test
+    fun tunnelMfiStaysTwentyBytesDespiteOldOtherLengthMemory() {
         // 与其它测试不同身份，避免进程内记忆串扰
         val identity = "MemCar MemModel MemMfr tunnel"
         MfiLengthMemory.recordSuccess(null, identity, 32)
@@ -508,12 +562,12 @@ class VirtualIap2LinkTest {
         h.exchangeUntilNormal()
         h.carSends(0x1D01, Iap2Csm.string(0, "MemCar") + Iap2Csm.string(1, "MemModel") + Iap2Csm.string(2, "MemMfr"))
         h.carSends(0xAA01, Iap2Csm.param(0, ByteArray(642)))
-        // 记忆命中：32B 直接排第一，不再从 20B 试起
-        assertEquals(listOf(32), h.challengeLengths())
+        // Q4 固定 20B，历史其他长度记忆不参与选择。
+        assertEquals(listOf(20), h.challengeLengths())
     }
 
     @Test
-    fun silentChallengeRetriesNextLengthWithinSession() {
+    fun silentChallengeRetriesSameTwentyBytePayloadWithinSession() {
         val h = Harness()
         h.link.armMib3()
         h.car.start(0)
@@ -521,11 +575,13 @@ class VirtualIap2LinkTest {
         h.carSends(0x1D01, Iap2Csm.string(0, "SilCar") + Iap2Csm.string(1, "SilMfr"))
         h.carSends(0xAA01, Iap2Csm.param(0, ByteArray(642)))
         assertEquals(listOf(20), h.challengeLengths())
-        // 20B 静默：推进时钟越过 6s 窗口，喂一个 marker 触发节拍检查（drainLocked）
+        // 冷启动静默：越过 6s 后只重传同一份 20B，不切换到其他长度。
         h.clock += 7_000
         h.link.onCarBytes(Iap2LinkEngine.MARKER)
-        assertEquals(listOf(20, 32), h.challengeLengths())
-        // 32B 得到应答 → 0xAA05 + 突发照常
+        assertEquals(listOf(20, 20), h.challengeLengths())
+        val challenges = h.controlFrames().filter { it.second == 0xAA02 }
+        assertTrue(challenges[0].first.contentEquals(challenges[1].first))
+        // 首次或重传的应答都归属同一逻辑挑战 → 0xAA05 + 突发照常
         val after = h.controlFrames().size
         h.carSends(0xAA03, Iap2Csm.param(0, ByteArray(96)))
         assertTrue(

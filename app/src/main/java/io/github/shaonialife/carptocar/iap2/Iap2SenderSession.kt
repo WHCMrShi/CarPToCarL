@@ -326,14 +326,11 @@ class Iap2SenderSession(
         /** 催问上限（20 × 15s = 5 分钟，与主控的空端点等待窗口一致）。 */
         const val NUDGE_MAX_TIMES = 20
 
-        /**
-         * 已知「静默过」的档位重试窗口。首次试探保留原窗口（可能是慢车机），
-         * 但已经失败过一次的档位没必要再等满 6 秒——真 iPhone 应答在 100ms 级。
-         */
-        const val MFI_SILENT_RETRY_WINDOW_MS = 1_500L
+        /** Q4 已验证固定长度；每条链路最多两次发送，每次最多等待 6 秒。 */
+        const val Q4_MFI_CHALLENGE_BYTES = 20
+        const val Q4_MFI_MAX_SENDS = 2
+        const val Q4_MFI_WINDOW_MS = 6_000L
 
-        /** 挑战档位（长度, 首次试探窗口）：顺序与窗口由 DiPlay/Audi 双端实测决定。 */
-        private val MFI_ATTEMPTS = listOf(32 to 3_000L, 20 to 6_000L, 16 to 3_000L)
 
         /** 真车系接收端特征（0x1D01 name/model/manufacturer 子串，小写比对）。 */
         private val LEGACY_RECEIVER_MARKERS = listOf("audi", "delphi", "mib", "harman", "porsche")
@@ -427,7 +424,7 @@ class Iap2SenderSession(
         //    32B→20B 的会话全部卡死，20B→（记忆命中）的会话全部秒通。
         //  - 测试台 DiPlay（Carlinkit AuthV3 EC 身份）：**只接受精确 32B**，长度不符直接断链。
         // 全部无应答也不中止——我们不校验签名（0xAA05 自报），由 0x5702 是否应答判定放行。
-        runMfiChallenge(deadline, prefer20First = legacyCar, receiverKey = identityText)
+        runMfiChallenge(deadline, receiverKey = identityText)
         send(Iap2MessageIds.MFI_AUTHENTICATION_SUCCEEDED)
         log("iap2 tx=0xaa05 authentication-succeeded（自报）")
 
@@ -1146,110 +1143,52 @@ class Iap2SenderSession(
     // ---- 帧收发 ----
 
     /**
-     * MFi 挑战应答：按「对端可接受的长度」依次尝试，每次失败（0xAA04 / 静默超时 / 断链）换下一档。
-     * 基础顺序与窗口由两端实测决定（2026-10-09/10，缺一不可）：
-     *  - **32B 优先**：测试台 DiPlay（Carlinkit AuthV3 EC 身份）**只接受精确 32B**，
-     *    长度不对会直接断开链路（实测 70~350ms 内断链）；其应答快（~0.2s），3s 窗口足够。
-     *  - **20B 次之**：真车 Audi MIB3 对 20B 秒答（catplay/extractor 真车实录同款）；
-     *    对 32B 的处置两种都出现过——10-09 静默不断链、10-11 拆链。
-     *  - **16B 兜底**：部分旧配件。
-     *
-     * 顺序**以按车机持久化的记忆为准**（[MfiLengthMemory]，基线只作冷启动与兜底）：
-     * 2026-10-19 奥迪 MMI 0000 实测 20B 静默 6 秒、32B 0.64 秒应答——只靠基线
-     * 「真车都 20B 优先」每次连接都白等 6 秒。记忆命中后直接把上次成功的长度排第一。
-     * 全部无应答时不抛异常直接返回——我们跳过签名校验，由后续 0x5702 是否获得应答
-     * 判定对端是否放行（真车实测无应答后 0xaa05 仍可推进）。
+     * Q4 已多次实测只接受 20B。每条链路生成一份随机挑战，最多发送两次。
+     * 冷启动静默/拒绝只重传同一份挑战，迟到签名仍属于同一逻辑请求；不试其他长度。
+     * 失败不改写长度记忆；只有收到本链路响应才记录 20B 成功。耗尽后由现有连接恢复重试。
      */
-    private fun runMfiChallenge(
-        deadline: Long,
-        prefer20First: Boolean = false,
-        receiverKey: String,
-    ) {
-        val baselineLengths =
-            if (prefer20First) {
-                listOf(MFI_ATTEMPTS[1].first, MFI_ATTEMPTS[0].first, MFI_ATTEMPTS[2].first)
-            } else {
-                MFI_ATTEMPTS.map { it.first }
-            }
-        val windowOf = MFI_ATTEMPTS.associate { it.first to it.second }
-        val memory = MfiLengthMemory.load(context, receiverKey)
-        val order = MfiLengthMemory.orderAttempts(baselineLengths, memory)
-        if (!memory.isEmpty) {
-            log(
-                "iap2 MFi 按车机记忆（$receiverKey）：${MfiLengthMemory.describe(memory)}" +
-                    " → 本轮顺序 ${order.joinToString("/")}B",
-            )
-        }
-        for ((position, size) in order.withIndex()) {
-            // 已知「静默过」的档位缩短窗口：它已经失败过一次，没必要再等满。
-            val baseWindow = windowOf[size] ?: MFI_ATTEMPTS.last().second
-            val windowMillis =
-                if (size in memory.silent && size != memory.succeeded) {
-                    minOf(baseWindow, MFI_SILENT_RETRY_WINDOW_MS)
-                } else {
-                    baseWindow
-                }
-            val challenge = ByteArray(size).also(random::nextBytes)
+    private fun runMfiChallenge(deadline: Long, receiverKey: String) {
+        val challenge = ByteArray(Q4_MFI_CHALLENGE_BYTES).also(random::nextBytes)
+        for (attempt in 1..Q4_MFI_MAX_SENDS) {
+            if (!channel.isAlive) throw IOException("MFi 传输中断，保留成功记忆")
+            if (Thread.currentThread().isInterrupted) throw IOException("MFi 等待被中断，保留成功记忆")
+            if (System.nanoTime() >= deadline) break
             send(Iap2MessageIds.MFI_REQUEST_CHALLENGE, Iap2Csm.param(0, challenge))
-            log("iap2 tx=0xaa02 challenge=${size}B（第 ${position + 1} 次，窗口 ${windowMillis}ms）")
-            val window = minOf(System.nanoTime() + windowMillis * 1_000_000L, deadline)
-            var gotResponse = false
-            var gotFailure = false
+            log("iap2 tx=0xaa02 challenge=20B（Q4 固定，第 $attempt/$Q4_MFI_MAX_SENDS 次；重试复用同一挑战）")
+            val window = minOf(System.nanoTime() + Q4_MFI_WINDOW_MS * 1_000_000L, deadline)
+            var rejected = false
             while (true) {
+                if (Thread.currentThread().isInterrupted) throw IOException("MFi 等待被中断，保留成功记忆")
                 val remaining = (window - System.nanoTime()) / 1_000_000L
                 if (remaining <= 0) break
                 val frame = recvFrame(remaining)
                 if (frame == null) {
                     if (!channel.isAlive) {
-                        // 挑战期间被对端断开 = **强证据**，走硬拒绝：即使该长度曾被记成
-                        // 「成功」也要推翻（迟到应答的归属歧义，见 MfiLengthMemory.recordHardRejected）。
-                        log("iap2 MFi 挑战期间链路断开（${size}B，对端不接受该长度）——记入该车机被拒档位（硬拒绝，可推翻旧的成功记忆）")
-                        MfiLengthMemory.recordHardRejected(context, receiverKey, size)
-                        return
+                        log("iap2 MFi 传输中断（20B）——结束本轮，保留成功记忆；不作为长度拒绝")
+                        throw IOException("MFi 传输中断，保留成功记忆")
                     }
                     continue
                 }
                 when (frame.messageId) {
                     Iap2MessageIds.MFI_RESPONSE -> {
-                        log("iap2 rx=0xaa03 signature bytes=${frame.body.size}（跳过校验）")
-                        gotResponse = true
+                        MfiLengthMemory.recordSuccess(context, receiverKey, Q4_MFI_CHALLENGE_BYTES)
+                        log("iap2 rx=0xaa03 signature bytes=${frame.body.size}（Q4 20B 响应，已记忆；沿用现有不验签行为）")
+                        return
                     }
-
                     Iap2MessageIds.MFI_AUTHENTICATION_FAILED -> {
-                        log("iap2 rx=0xaa04 挑战 ${size}B 被拒")
-                        gotFailure = true
+                        rejected = true
+                        log("iap2 rx=0xaa04 认证拒绝（Q4 20B，第 $attempt 次）——保留成功记忆，不推断长度不兼容")
+                        break
                     }
-
-                    else ->
-                        log(
-                            "iap2 rx=0x${frame.messageId.toString(16).padStart(4, '0')} " +
-                                "(${Iap2MessageIds.nameOf(frame.messageId)})",
-                        )
+                    else -> log("iap2 rx=0x${frame.messageId.toString(16).padStart(4, '0')} (${Iap2MessageIds.nameOf(frame.messageId)})")
                 }
-                if (gotResponse || gotFailure) break
             }
-            if (gotResponse) {
-                MfiLengthMemory.recordSuccess(context, receiverKey, size)
-                return
-            }
-            if (gotFailure) {
-                MfiLengthMemory.recordRejected(context, receiverKey, size)
-                // 审计留档：挑战长度被车机明确拒绝（0xAA04）。规范说「接受任意长度」
-                // （SPEC §2.9），真车却各有偏好——这条是「为什么本轮要换档重试」的依据。
-                ProtocolAudit.record(
-                    ProtocolAudit.Code.MFI_LENGTH_REJECTED,
-                    detail = "0xAA04 拒绝 ${size}B 挑战",
-                    evidence = "已试 $order，命中第 ${position + 1} 档",
-                )
-            } else {
-                MfiLengthMemory.recordSilent(context, receiverKey, size)
-            }
-            if (position < order.size - 1) {
-                log("iap2 MFi ${size}B 无应答，改用 ${order[position + 1]}B 重试")
-            } else {
-                log("iap2 MFi 挑战全部无应答——跳过校验直接发 0xaa05（由 0x5702 判定车机是否放行）")
+            if (attempt < Q4_MFI_MAX_SENDS) {
+                log("iap2 MFi ${if (rejected) "冷启动拒绝" else "响应超时"}——有限重传同一份 20B 挑战")
             }
         }
+        log("iap2 MFi 20B 有限重试耗尽——未收到签名，不发送 0xaa05；保留成功记忆，交由现有连接恢复")
+        throw IOException("Q4 MFi 20B 认证未完成（有限重试耗尽）")
     }
 
     @Synchronized
