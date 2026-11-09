@@ -17,7 +17,10 @@ class ArtworkEncodingInstrumentation : Instrumentation() {
             opaqueThumbnail()
             transparentThumbnail()
             smallNativeJpeg()
-            results.putString("result", "3 Android Bitmap fixtures passed")
+            navigationTransparentPlaceholder()
+            navigationNativeIcon()
+            navigationOversizedIcon()
+            results.putString("result", "6 Android Bitmap fixtures passed")
             finish(Activity.RESULT_OK, results)
         } catch (error: Throwable) {
             results.putString("failure", "${error.javaClass.simpleName}: ${error.message}")
@@ -66,5 +69,50 @@ class ArtworkEncodingInstrumentation : Instrumentation() {
             val original = encoded(bitmap, Bitmap.CompressFormat.JPEG)
             check(original.contentEquals(checkNotNull(ArtworkEncoder.loadBytes(original))))
         } finally { bitmap.recycle() }
+    }
+
+    private fun navigationTransparentPlaceholder() {
+        val bytes = NavigationIcon.render(null)
+        check(bytes.contentEquals(NavigationIcon.render(byteArrayOf(1, 2, 3))))
+        val image = checkNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+        try {
+            check(image.width == 256 && image.height == 256)
+            val pixels = IntArray(256 * 256)
+            image.getPixels(pixels, 0, 256, 0, 0, 256, 256)
+            check(pixels.all { it ushr 24 == 0 })
+        } finally { image.recycle() }
+    }
+
+    private fun navigationNativeIcon() {
+        val source = Bitmap.createBitmap(64, 32, Bitmap.Config.ARGB_8888)
+        try {
+            source.eraseColor(0x80ff0000.toInt())
+            val bytes = NavigationIcon.render(encoded(source, Bitmap.CompressFormat.PNG))
+            val image = checkNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+            try {
+                check(image.width == 256 && image.height == 256)
+                check(image.getPixel(95, 112) ushr 24 == 0)
+                check(image.getPixel(96, 111) ushr 24 == 0)
+                check(image.getPixel(96, 112) ushr 24 in 126..130)
+                check(image.getPixel(159, 143) ushr 24 in 126..130)
+                check(image.getPixel(160, 143) ushr 24 == 0)
+                check(image.getPixel(159, 144) ushr 24 == 0)
+            } finally { image.recycle() }
+        } finally { source.recycle() }
+    }
+
+    private fun navigationOversizedIcon() {
+        val source = Bitmap.createBitmap(1024, 512, Bitmap.Config.ARGB_8888)
+        try {
+            source.eraseColor(0xff00ff00.toInt())
+            val bytes = NavigationIcon.render(encoded(source, Bitmap.CompressFormat.PNG))
+            val image = checkNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+            try {
+                check(image.getPixel(128, 63) ushr 24 == 0)
+                check(image.getPixel(0, 64) == 0xff00ff00.toInt())
+                check(image.getPixel(255, 191) == 0xff00ff00.toInt())
+                check(image.getPixel(128, 192) ushr 24 == 0)
+            } finally { image.recycle() }
+        } finally { source.recycle() }
     }
 }
