@@ -191,15 +191,9 @@ object SessionController {
      */
     private const val WIFI_REBIND_MIN_INTERVAL_MS = 15_000L
 
-    /**
-     * 等应用专属网络（`WifiNetworkSpecifier`）确认框的上限。
-     *
-     * **必须与车机的等待窗口对齐**：BMW iD9（IDC23）实测在交出 0x4301 后约 27 秒
-     * 就拆蓝牙链（2026-10-29，连续 6 轮 25~28s）。旧值 120s 意味着每轮都要白等到
-     * 车机先放弃，期间还会叠上下一轮的新请求（旧线程仍在 latch 上转），表现成
-     * 「连上就闪退 + 后续越连越连不上」。15s 留出车机窗口内再试一次的余地。
-     */
+    /** Q4: 同一个系统请求等待 15 秒，再保留 20 秒关联/DHCP 宽限；明确拒绝或取消立即结束。 */
     private const val SPECIFIER_JOIN_TIMEOUT_MS = 15_000L
+    private const val SPECIFIER_JOIN_GRACE_MS = 20_000L
 
     /**
      * 建议网络（[registerSuggestion]）生效后，等系统自动关联车机热点的上限。
@@ -214,6 +208,8 @@ object SessionController {
      * 关联、网络还没上报的那一瞬。超时就退回 specifier 路径，不影响原有流程。
      */
     private const val WIFI_REUSE_BIND_WAIT_MS = 5_000L
+
+    private const val WIFI_JOIN_SHARED_WAIT_MS = WIFI_REUSE_BIND_WAIT_MS + SPECIFIER_JOIN_TIMEOUT_MS + SPECIFIER_JOIN_GRACE_MS + SUGGESTION_JOIN_WAIT_MS + 5_000L
 
     /**
      * 同 SSID 入网请求的去重窗口（毫秒）。
@@ -1931,18 +1927,12 @@ object SessionController {
                     legacyJoinCarWifi(wifi, shellReady)
                 }
 
-                WifiCarPlayConnector.JoinResult.Unavailable -> promptSpecifierFailed(wifi, shellReady)
+                WifiCarPlayConnector.JoinResult.Unavailable -> retryJoinCarWifiOnce(wifi, shellReady, work)
             }
         }
     }
 
-    /**
-     * 用应用专属网络（`WifiNetworkSpecifier`）加入车机热点，成功后进程网络已绑定。
-     *
-     * 先清掉系统里保存的同名热点：旧版本用 `cmd wifi connect-network` 存过它，
-     * 只要还在系统配置里，系统就会自动全局连接——无互联网热点于是被当成默认网络，
-     * 部分 ROM 连带断掉移动数据，正是本次要解决的场景。
-     */
+    /** 复用目标网络 → 系统专属网络请求（含宽限）→ 已授权建议网络兜底；不删除用户保存的热点。 */
     private fun joinCarWifiSpecifier(
         wifi: Iap2SenderSession.WifiConfiguration,
         shellReady: Boolean,
@@ -1952,12 +1942,6 @@ object SessionController {
         val cancelled = { connectCancelled || !work.isCurrent }
         if (cancelled()) return WifiCarPlayConnector.JoinResult.Unavailable
         val connector = wifiConnector ?: return WifiCarPlayConnector.JoinResult.Unavailable
-        // 已保存到系统配置里才询问是否清除：不擅自删用户网络（有的场景就是要用
-        // 车机流量/互联网，或用户希望系统自动连）。选择保留不影响本轮连接。
-        if (shellReady) {
-            promptForgetSavedNetworkIfAny(wifi.ssid)
-            if (cancelled()) return WifiCarPlayConnector.JoinResult.Unavailable
-        }
         phaseHint = "正在加入车机热点 ${wifi.ssid}…（不影响移动数据）"
         val result = joinCarWifiOnce(connector, wifi, force, work)
         if (cancelled() || compatSuppressed) {
@@ -2050,7 +2034,7 @@ object SessionController {
                     "WIFI: \"${wifi.ssid}\" 已有一次入网请求在跑——等它的结果，" +
                         "不重复请求（再发一次会把在跑的那次 release 掉）",
                 )
-                val ok = decision.ticket.await(SPECIFIER_JOIN_TIMEOUT_MS + 5_000L)
+                val ok = decision.ticket.await(WIFI_JOIN_SHARED_WAIT_MS)
                 val network = connector.currentNetwork
                 if (!cancelled() && ok == true && network != null) {
                     appendLog("WIFI: 等到的结果是「已加入」——直接复用那条网络（$network）")
@@ -2080,6 +2064,7 @@ object SessionController {
                                 passphrase = wifi.passphrase,
                                 securityType = wifi.securityType,
                                 timeoutMillis = SPECIFIER_JOIN_TIMEOUT_MS,
+                                graceMillis = SPECIFIER_JOIN_GRACE_MS,
                                 isCancelled = { cancelled() },
                             )
                         } catch (error: Exception) {
@@ -2087,65 +2072,35 @@ object SessionController {
                             WifiCarPlayConnector.JoinResult.Unavailable
                         }
                     }
+                val joined = if (result == WifiCarPlayConnector.JoinResult.Unavailable && !cancelled()) {
+                    val network = connector.bindCurrentWifiBlocking(SUGGESTION_JOIN_WAIT_MS, wifi.ssid) { cancelled() }
+                    if (network != null) WifiCarPlayConnector.JoinResult.Joined(network) else result
+                } else result
                 wifiJoinGate.finish(
                     decision.ticket,
-                    result is WifiCarPlayConnector.JoinResult.Joined,
+                    joined is WifiCarPlayConnector.JoinResult.Joined,
                     android.os.SystemClock.uptimeMillis(),
                 )
-                result
+                joined
             }
         }
     }
 
-    /**
-     * 系统里已保存同名热点时，询问用户是否清除（**不擅自删除**）。
-     *
-     * 为什么要问而不是直接删：保留也有正当用途——用户可能就想让系统自动连车机、
-     * 或车机热点确实带互联网（部分车型提供流量）。删除只影响「系统会不会全局
-     * 自动连它」，与本轮连接无关；选择「保留」时继续正常连接。
-     *
-     * 每个 SSID 每个进程只问一次：配对失败重试、端点交接重入都会再次走到这里，
-     * 重复弹窗会挡住连接（2026-10-18 实测）。用户的选择在本次进程内记忆。
-     *
-     * 阻塞直到用户选择（[JOIN_DIALOG_TIMEOUT_S] 超时按「保留」处理——不做破坏性动作）。
-     */
-    private fun promptForgetSavedNetworkIfAny(ssid: String) {
-        if (!forgetPromptHandled.add(ssid)) return
-        val ids = savedNetworkIds(ssid)
-        if (ids.isEmpty()) return
-        appendLog(
-            "WIFI: 系统里已保存热点 \"$ssid\"（netId=${ids.joinToString(",")}）" +
-                "——询问用户是否清除（保留也能正常连接）",
-        )
-        val forget =
-            askWifiJoinChoice(
-                DialogSpec(
-                    title = "已保存该车机热点",
-                    message =
-                        "系统里保存过 \"$ssid\"。保留会让手机在进入范围时自动连接它，" +
-                            "若该热点没有互联网，可能导致手机无法使用移动数据。\n\n" +
-                            "「清除」只是不再自动连接，不影响本次使用；" +
-                            "如果车机热点本身提供网络，选「保留」。",
-                    positive = "清除保存",
-                    negative = "保留",
-                ),
-            )
-        if (connectCancelled) return
-        when (forget) {
-            true -> {
-                ids.forEach { id ->
-                    val result = SysShell.exec("cmd wifi forget-network $id", 5_000L)
-                    appendLog(
-                        "WIFI: 已按用户选择清除系统级保存的热点 \"$ssid\"（netId=$id ok=${result.ok}）",
-                    )
-                }
-            }
-
-            false -> appendLog("WIFI: 用户选择保留系统保存的 \"$ssid\"——继续以应用专属网络连接")
-
-            // 无人应答（UI 不在前台）：按「保留」处理，绝不在用户未确认时删网络
-            null -> appendLog("WIFI: 无人应答是否清除保存的网络——按保留处理（不改用户配置）")
+    /** 本轮额外自动重试一次；沿用原工作凭证及入网门禁，不恢复已取消/退役的连接。 */
+    private fun retryJoinCarWifiOnce(wifi: Iap2SenderSession.WifiConfiguration,
+        shellReady: Boolean, work: WorkEpoch.Ticket): WifiCarPlayConnector.JoinResult {
+        if (connectCancelled || !work.isCurrent) return WifiCarPlayConnector.JoinResult.Unavailable
+        if (isStreaming()) return wifiConnector?.currentNetwork?.takeIf { boundCarSsid == wifi.ssid }?.let { WifiCarPlayConnector.JoinResult.Joined(it) }
+            ?: WifiCarPlayConnector.JoinResult.Unavailable
+        sleepQuietly(1_000)
+        if (connectCancelled || !work.isCurrent) return WifiCarPlayConnector.JoinResult.Unavailable
+        appendLog("WIFI: 入网未完成，有限自动重试一次；不绕过系统授权")
+        val retry = joinCarWifiSpecifier(wifi, shellReady, force = true, work = work)
+        work.runIfCurrent {
+            if (!connectCancelled && !isStreaming() && !carWifiReady(wifi.ssid) && retry == WifiCarPlayConnector.JoinResult.Unavailable)
+                phaseHint = "未能加入车机热点，可从系统 WLAN 手动处理后重试"
         }
+        return retry
     }
 
     /** 查系统已保存的、SSID 与目标完全一致的网络 id（`cmd wifi list-networks`）。 */
@@ -4872,7 +4827,7 @@ object SessionController {
                                             // （2026-11-04 奥迪 3810：画布 1412×654、直通码流
                                             // 被引擎降档成 1280×720，照码流声明 → 整屏黑）。
                                             canvasSize =
-                                                if (VideoCanvasMode.declareStream) {
+                                                if (!VideoCanvasMode.sizeFromCanvas) {
                                                     // 分离声明模式：params[1] 交给码流尺寸（见下方 liveSize），
                                                     // 画布改由 viewAreaSize 走 40/44 那两个字段。
                                                     null
@@ -4884,7 +4839,7 @@ object SessionController {
                                             // 所以码流只能 720p 时，正确做法是让视口仍是 1412×654
                                             // 由车机缩放，而不是把解码尺寸改成画布值（会与 SPS 打架）。
                                             viewAreaSize =
-                                                if (VideoCanvasMode.declareStream) {
+                                                if (VideoCanvasMode.writeViewport) {
                                                     carCanvas?.let { size -> { size } }
                                                 } else {
                                                     null
@@ -5183,33 +5138,8 @@ object SessionController {
                         }
 
                         WifiCarPlayConnector.JoinResult.Unavailable -> {
-                            // specifier 没进来时，建议网络可能已经在后台把手机连上了
-                            // （用户授权过 suggestion，但系统关联比我们的 15s 窗口慢）。
-                            // 这里再给建议通道一个短窗口：真连上了就直接绑，省掉弹窗。
-                            val bySuggestion =
-                                if (connector != null && !attemptCancelled()) {
-                                    connector.bindCurrentWifiBlocking(SUGGESTION_JOIN_WAIT_MS, wifiConfig.ssid) { attemptCancelled() }
-                                } else {
-                                    null
-                                }
-                            if (bySuggestion != null) {
-                                mutate {
-                                    boundCarSsid = wifiConfig.ssid
-                                    phaseHint = "已加入车机热点"
-                                    ctrlAdvertiser?.ensureForNetwork(
-                                        wifiConfig.ssid,
-                                        force = true,
-                                        network = connector?.currentNetwork,
-                                    )
-                                    appendLog(">>> WiFi 由系统自动连上（热点建议生效，无需确认框），ctrl 广播已重新注册")
-                                }
-                                continueWithNetwork(true)
-                                return@run
-                            }
-                            promptSpecifierFailed(wifiConfig, shellReady)
-                            // promptSpecifierFailed 内部可能已重试/转手动；两者都会
-                            // 通过 joinCarWifiSpecifier → continueWithNetwork 续上流程，
-                            // 这里只在彻底失败时结束本轮
+                            // 复用、请求宽限与建议兜底均在同一入网门禁内；仅额外重试一次。
+                            retryJoinCarWifiOnce(wifiConfig, shellReady, setup)
                             if (boundCarSsid == wifiConfig.ssid && wifiConnector?.currentNetwork != null) {
                                 continueWithNetwork(true)
                             } else {

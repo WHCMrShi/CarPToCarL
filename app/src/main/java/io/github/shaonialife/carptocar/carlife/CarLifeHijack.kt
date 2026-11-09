@@ -909,40 +909,31 @@ object CarLifeHijack {
      */
     private fun startStallWatchdog(scope: ConnectionResources) {
         scope.start("carlife-stall-watch") {
-            var previous = frameSeq
-            var lowRateSince = 0L
+            val recover = appContext?.let { io.github.shaonialife.carptocar.video.StallRecoveryPrefs.recoveryEnabled(it) } ?: false
+            var owner: CarLifeHuClient? = null
+            var lastReinit = Long.MIN_VALUE
             while (running.get() && !scope.isClosed) {
-                try {
-                    Thread.sleep(STALL_POLL_MILLIS)
-                } catch (_: InterruptedException) {
-                    return@start
-                }
+                try { Thread.sleep(STALL_POLL_MILLIS) } catch (_: InterruptedException) { return@start }
                 if (!running.get() || scope.isClosed) return@start
+                val hu = client ?: continue
+                if (owner !== hu) { owner = hu; lastReinit = Long.MIN_VALUE }
+                if (sender == null || !hasVideo) continue
                 val now = android.os.SystemClock.uptimeMillis()
-                val current = frameSeq
-                val delta = current - previous
-                previous = current
-                if (sender == null) {
-                    lowRateSince = 0L
-                    continue
+                val age = io.github.shaonialife.carptocar.video.StallJudge.frameAgeMs(lastSourceFrameAt, now)
+                if (age < STALL_LOG_MILLIS) continue
+                if (stallSince == 0L) {
+                    stallSince = lastSourceFrameAt
+                    logSink?.invoke("CARLIFE: 画面源停摆 ${age / 1000}s（最后帧龄，低帧率心跳不判停摆）")
                 }
-                // 注意不能按「一帧都没有」判：来电期间引擎仍会发 0.8fps 的心跳帧，
-                // 只是没有新 IDR。这里按窗口帧数判（2 秒内少于 4 帧 ≈ 低于 2fps）。
-                if (delta >= 4) {
-                    lowRateSince = 0L
-                    continue
+                val mode = runCatching { appContext?.getSystemService(android.media.AudioManager::class.java)?.mode }.getOrNull()
+                val inCall = mode == null || mode == android.media.AudioManager.MODE_IN_CALL || mode == android.media.AudioManager.MODE_IN_COMMUNICATION || mode == android.media.AudioManager.MODE_RINGTONE
+                if (io.github.shaonialife.carptocar.video.StallJudge.q4ShouldReinit(age, recover, inCall,
+                        if (lastReinit == Long.MIN_VALUE) Long.MAX_VALUE else now - lastReinit) &&
+                    !scope.isClosed && client === hu && hu.isRunning) {
+                    lastReinit = now
+                    hu.requestVideoReinit()
+                    logSink?.invoke("CARLIFE: Q4 停摆轻量恢复：请求编码器 IDR；不强制重建 HU")
                 }
-                if (lowRateSince == 0L) {
-                    lowRateSince = now - STALL_POLL_MILLIS
-                    continue
-                }
-                if (stallSince > 0 || now - lowRateSince < STALL_LOG_MILLIS) continue
-                stallSince = lowRateSince
-                logSink?.invoke(
-                    "CARLIFE: 画面源停摆 ${(now - lowRateSince) / 1000} 秒（帧率 <2fps，零个新 IDR）" +
-                        "——引擎这段时间几乎不出帧（来电/锁屏时手机侧画面被占用，车机会黑屏；" +
-                        "恢复后会补关键帧）",
-                )
             }
         }
     }

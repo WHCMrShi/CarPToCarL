@@ -178,6 +178,7 @@ class WifiCarPlayConnector(
         passphrase: String,
         securityType: Int,
         timeoutMillis: Long = 120_000L,
+        graceMillis: Long = 0L,
         isCancelled: () -> Boolean = { false },
     ): JoinResult {
         val specifier =
@@ -241,8 +242,13 @@ class WifiCarPlayConnector(
             return JoinResult.Unavailable
         }
         val startedAt = SystemClock.uptimeMillis()
-        val deadline = startedAt + timeoutMillis
-        while (SystemClock.uptimeMillis() < deadline) {
+        val window = WifiJoinWindow(startedAt, timeoutMillis, graceMillis)
+        var graceLogged = false
+        while (callback.get() === newCallback && window.waiting(SystemClock.uptimeMillis(), unavailable.get(), isCancelled())) {
+            if (!graceLogged && window.inGrace(SystemClock.uptimeMillis())) {
+                graceLogged = true
+                log("WIFI: specifier pending; extending current owned request by ${graceMillis}ms")
+            }
             if (isCancelled()) {
                 release(newCallback)
                 return JoinResult.Unavailable

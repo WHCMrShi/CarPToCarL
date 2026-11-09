@@ -7,20 +7,22 @@ import android.content.Context
  *
  * 头里有两组尺寸，含义不同，不能混：
  *
- * - `params[1]`（偏移 16）：**解码器**尺寸，必须与码流 SPS 一致；
- * - `params[3]`/`params[4]`（偏移 32/40）：**显示视口** x,y / 宽,高，4580 按它
- *   决定把画面贴到屏幕哪块矩形（缩放由车机做）。
+ * - `params[1]`（偏移 16）：**解码器**尺寸；
+ * - `params[3]`/`params[4]`（偏移 32/40）：**显示视口** x,y / 宽,高。
  *
- * 两种策略：
+ * 三种形态：
  *
- * - **[declareStream] = true（默认，分离声明）**：解码尺寸报码流实际值
- *   （通常 1280×720，与 SPS 一致），视口报车机画布（1412×654）。CarLife 引擎
- *   拒绝按画布编码时，这条路不需要转码，缩放交给车机；
- * - **[declareStream] = false（旧行为）**：把解码尺寸直接写成车机画布，不写视口。
- *   只在「码流真的等于画布」时才成立；降档后必然与 SPS 打架
- *   （2026-11-04 13:48 实测被判 invalid header）。
+ * - **[Mode.RAW]（上游默认，Q4 保留为实验选项）**：只写解码尺寸 = 码流尺寸（引擎上报/SPS），
+ *   **视口整段留 0**，画布尺寸完全不参与声明。这是参考实现
+ *   `AMCar`（`explicitVideoGeometry=false`）的做法：它只声明一个尺寸、且跟随实际码流，
+ *   不猜车机画布、不写 40/44，把缩放与贴图交给车机默认行为。少写一个字段就少一处
+ *   和车机固件理解不一致的地方——这是它「保守」的全部含义，性能上没有代价
+ *   （视口只是元数据，不改变编码尺寸与帧率）。
+ * - **[Mode.SPLIT]**：解码尺寸 = 码流，视口 = 车机画布（Q4 已验证默认）。RAW 仅作独立 A/B，不在本次合并改变实车声明方式。
+ * - **[Mode.CAR]**：解码尺寸直接写成车机画布，不写视口。只在「码流真的等于画布」
+ *   时成立，降档后必与 SPS 打架（2026-11-04 13:48 实测被判 invalid header）。
  *
- * 偏好 `videoconfig_canvas_mode`：`stream` / `car`（默认随构建常量）。
+ * 偏好 `videoconfig_canvas_mode`：`raw` / `stream` / `car`（默认随构建常量）。
  * 纯实验开关，改完需重连（会话建立时读取一次）。
  */
 object VideoCanvasMode {
@@ -28,54 +30,84 @@ object VideoCanvasMode {
     private const val PREFS = "video_canvas_mode_v1"
     private const val KEY = "declare"
 
+    /** 尺寸声明形态。见类注释。 */
+    enum class Mode {
+        RAW,
+        SPLIT,
+        CAR,
+    }
+
     /**
-     * true = 声明码流尺寸（等于 SPS）；false = 声明车机画布。
+     * 本 Q4 构建保留已验证的 SPLIT 默认；RAW 仅供独立 A/B。
+     *
+     * 上游 2026-11-08 切到 RAW；Q4 保留既有 stream 偏好及 SPLIT 默认，避免改变已验证视口。
+     */
+    internal val DEFAULT_MODE = Mode.SPLIT
+
+    /**
+     * 当前形态。
      *
      * 进程启动时从偏好加载一次；会话建立时读取，不随会话中途变化。
      */
     @Volatile
-    var declareStream: Boolean = false
+    var mode: Mode = DEFAULT_MODE
         private set
+
+    /** 解码尺寸（`params[1]`）是否取车机画布（只有 [Mode.CAR] 是）。 */
+    val sizeFromCanvas: Boolean
+        get() = sizeFromCanvasFor(mode)
+
+    /** 是否写显示视口（`params[3]`/`params[4]`，只有 [Mode.SPLIT] 写）。 */
+    val writeViewport: Boolean
+        get() = writeViewportFor(mode)
+
+    /** 纯函数版本，给单测用（不依赖全局 [mode]）。 */
+    internal fun sizeFromCanvasFor(value: Mode): Boolean = value == Mode.CAR
+
+    internal fun writeViewportFor(value: Mode): Boolean = value == Mode.SPLIT
 
     fun load(context: Context) {
         val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null)
-        declareStream = parse(raw ?: DEFAULT_MODE)
+        mode = parse(raw)
     }
 
-    fun save(context: Context, mode: String) {
-        val normalized = if (parse(mode)) MODE_STREAM else MODE_CAR
+    fun save(context: Context, value: String) {
+        val normalized = parse(value)
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
-            .putString(KEY, normalized)
+            .putString(KEY, nameOf(normalized))
             .apply()
-        declareStream = parse(normalized)
+        mode = normalized
     }
 
     /** 给运行日志用的一句话。 */
     fun describe(): String =
-        if (declareStream) {
-            "分离声明（解码=码流尺寸 / 视口=车机画布，40-44 字段由车机缩放）"
-        } else {
-            "车机画布（解码尺寸直接写成 /info 通告值，不写视口字段）"
+        when (mode) {
+            Mode.RAW ->
+                "只声明解码尺寸=码流（不写视口，对齐 AMCar 默认；画布不参与声明）"
+            Mode.SPLIT ->
+                "分离声明（解码=码流尺寸 / 视口=车机画布，40-44 字段由车机缩放）"
+            Mode.CAR ->
+                "车机画布（解码尺寸直接写成 /info 通告值，不写视口字段）"
         }
 
-    /** 解析偏好值；无法识别时回退到默认（车机画布）。 */
-    internal fun parse(raw: String?): Boolean =
+    /** 解析偏好值；无法识别时回退到默认。 */
+    internal fun parse(raw: String?): Mode =
         when (raw?.trim()?.lowercase()) {
-            MODE_STREAM -> true
-            MODE_CAR -> false
-            else -> DEFAULT_MODE == MODE_STREAM
+            MODE_RAW -> Mode.RAW
+            MODE_STREAM -> Mode.SPLIT
+            MODE_CAR -> Mode.CAR
+            else -> DEFAULT_MODE
         }
 
+    internal fun nameOf(value: Mode): String =
+        when (value) {
+            Mode.RAW -> MODE_RAW
+            Mode.SPLIT -> MODE_STREAM
+            Mode.CAR -> MODE_CAR
+        }
+
+    internal const val MODE_RAW = "raw"
     internal const val MODE_STREAM = "stream"
     internal const val MODE_CAR = "car"
-
-    /**
-     * 本构建的默认值。
-     *
-     * 2026-11-04 实验：引擎已证实不肯按 1412×654 编码（65544 回显≠SPS），
-     * 「画布 1412×654 + 码流 720p」必然对不上，所以这一版默认改成声明码流尺寸，
-     * 让车机自己去缩放——用一次实车连接就能判断这条路通不通。
-     */
-    internal const val DEFAULT_MODE = MODE_STREAM
 }
