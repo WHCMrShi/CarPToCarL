@@ -1,0 +1,264 @@
+# Sanitized selected events from two overlapping exports; exact timestamp/text duplicates removed.
+# Addresses/names/identifiers redacted; payload frames excluded; NOT suitable for byte replay.
+[23:05:30.568] CONNECT-DIAG: schema=20261108-v9 revision=1ad8dacdf27f version=1.2.31-q4-debug sdk=36; export includes bounded early/recent diagnostics, idle deadlines and network leases
+[23:05:31.028] BT: 监听 iAP2，等待接收端回连…
+[23:05:31.281] PATH-DIAG: round=1 event=BEGIN
+[23:05:31.290] CONNECT-DIAG: start requested running=false phase=null; default media=48k PCM
+[23:05:31.296] CARLIFE: 等待本机引擎；请打开 CarLife+ 的无线连接（接管线程不会主动启动应用）
+[23:05:31.309] BT-C: 启动——将主动连入车机的无线 iAP2 服务（…caff），目标：「[CAR_TARGET]」[MAC]（只连该设备）
+[23:05:42.909] BT-C: 连接 [CAR_TARGET] 失败（A Bluetooth Socket failure occurred）——车机未就绪或不在无线配对窗口，16 秒后重试…
+[23:05:45.639] BT: 接收端已连入 name=[CAR_TARGET]，开始 iAP2 发送端会话
+[23:05:46.597] CARLIFE: 劫持成功，已接管本机 CarLife 码流（等待连接车机）
+[23:05:48.474] PATH-DIAG: encoderInit hu=248548377 decision=ATTEMPT force=true previousAttemptAgeMs=null durationMs=0 sent=true; not source-IDR confirmation
+[23:05:48.727] iap2 tx=0x5702
+[23:05:49.167] CARLIFE: ✓ 收到 CarLife 首帧（4398B，keyFrame=true）
+[23:05:49.727] iap2 并行兜底：0x5702 在 1000ms 内无应答（车机不走旧协议）——不再死等 0x5703，同时发出 0x4300
+[23:05:54.052] WIFI: 系统事件 onAvailable → wifi=[wlan0/[OTHER_WIFI_LOCAL]] car=- default=rmnet_data4/[IP] ssid=-（上次 wifi=[] car=- default=rmnet_data4/[IP] ssid=-）
+[23:05:55.345] CTRL: ✓ 车机 ctrl 邀请（第 1 次，receiver=[RECEIVER]）——AirPlay 窗口已开启
+[23:05:55.348] CTRL: 车机邀请到达（receiver=[RECEIVER]）——但还没有热点端点；已挂起待决邀请（catplay cache_miss 自愈），端点晚到时直接接续，不再空等
+[23:06:08.671] LINK closed: bt socket closed, read return: -1
+[23:06:08.673] HANDOVER-DIAG: btClosed decision=NO_PENDING_SETUP uptimeMs=765991192 inviteGeneration=1 pendingInviteAgeMs=13325 targetConfigured=true credentialsCached=false boundTargetCached=false networkCached=false policyWifiReady=null client=null controlAlive=false setupPending=false videoRunning=false sourceStreaming=true workCurrent=true cancelled=false; snapshot is current state, not callback-origin proof
+[23:06:08.673] SESSION 失败: 未拿到车机热点凭据：本轮 0x5702/0x4301 都没给出 AP 信息，且车机没有声明会发 0x4301（请先在车机上重新选择本机）
+[23:06:10.442] BT-C: ✓ 已连入 [CAR_TARGET] 的无线 iAP2 服务（RFCOMM 建立）
+[23:06:13.729] iap2 tx=0x5702
+[23:06:14.207] PATH-DIAG: ctrlBroadcast=REGISTER_BEGIN force=false sameNetwork=true registered=false registrationAgeMs=42896 durationMs=1
+[23:06:14.209] PATH-DIAG: ctrlBroadcast=REGISTER_ACCEPTED force=false sameNetwork=true registered=true registrationAgeMs=0 durationMs=2
+[23:06:14.253] PATH-DIAG: round=1 active=true stage=WIFI_REUSE attempt=1 event=BEGIN elapsedMs=42972
+[23:06:14.256] PATH-DIAG: round=1 active=true stage=WIFI_REUSE attempt=1 event=END durationMs=3 elapsedMs=42975 outcome=NULL
+[23:06:14.257] PATH-DIAG: round=1 active=true stage=WIFI_SPECIFIER attempt=1 event=BEGIN elapsedMs=42976
+[23:06:14.259] CONNECT-DIAG: requesting system WiFi selection request=56472390
+[23:06:14.271] STAGE: 本轮开始（主动连车机）——预算：等端点 5min / 热点 60s / 配对 120s / SETUP 30s / 首帧 20s
+[23:06:14.273] STAGE: 加入车机热点开始（上段 等车机连接信息（0x4301） 用时 0.0s，本轮累计 0.0s）
+[23:06:14.484] PATH-DIAG: round=1 active=true stage=WIFI_SHARED_WAIT attempt=1 event=BEGIN elapsedMs=43204
+[23:06:14.591] WIFI: 系统事件 onLost → wifi=[wlan0/[OTHER_WIFI_LOCAL]] car=- default=rmnet_data4/[IP] ssid=-（上次 wifi=[wlan0/[OTHER_WIFI_LOCAL]] car=- default=wlan0/[OTHER_WIFI_LOCAL] ssid=-）
+[23:06:15.934] CONNECT-DIAG: specifier available request=56472390 bound=true
+[23:06:15.946] WIFI: 系统事件 onAvailable → wifi=[wlan0/[CAR_LOCAL],wlan0/[OTHER_WIFI_LOCAL]] car=wlan0/[CAR_LOCAL] default=rmnet_data4/[IP] ssid=-（上次 wifi=[wlan0/[OTHER_WIFI_LOCAL]] car=- default=rmnet_data4/[IP] ssid=-）
+[23:06:15.950] PATH-DIAG: round=1 active=true stage=WIFI_SPECIFIER attempt=1 event=END durationMs=1693 elapsedMs=44669 outcome=RETURNED
+[23:06:15.952] PATH-DIAG: round=1 active=true stage=WIFI_SHARED_WAIT attempt=1 event=END durationMs=1467 elapsedMs=44671 outcome=true
+[23:06:15.957] PATH-DIAG: ctrlBroadcast=REGISTER_BEGIN force=true sameNetwork=false registered=false registrationAgeMs=1748 durationMs=5
+[23:06:15.961] PATH-DIAG: ctrlBroadcast=REGISTER_ACCEPTED force=true sameNetwork=false registered=true registrationAgeMs=1 durationMs=9
+[23:06:15.961] PATH-DIAG: ctrlBroadcast=FORCE_COOLDOWN force=true sameNetwork=true registered=true registrationAgeMs=2 durationMs=0
+[23:06:15.962] CONNECT-DIAG: network-bound result=true source=主动连车机 inviteGeneration=1
+[23:06:15.962] PATH-DIAG: ctrlBroadcast=FORCE_COOLDOWN force=true sameNetwork=true registered=true registrationAgeMs=3 durationMs=0
+[23:06:15.968] CTRL: [等邀请窗口] 接续 20620ms 前本轮车机邀请——不再空等邀请窗口
+[23:06:16.343] CONNECT-DIAG: endpoint resolved source=主动连车机 addressCount=1 port=7000 cancelled=false
+[23:06:16.344] CONNECT-DIAG: retire temporary media pipelines; clientPresent=false videoPresent=false audioPresent=false
+[23:06:16.345] STAGE: AirPlay 配对开始（上段 加入车机热点 用时 2.1s，本轮累计 2.1s）
+[23:06:16.435] PATH-DIAG: round=1 active=true stage=PAIRING attempt=1 event=BEGIN elapsedMs=45154
+[23:06:16.436] CONNECT-DIAG: client=199213561 pairing-start budgetMs=120000 addressCount=1 port=7000
+[23:06:16.473] PATH-DIAG: ctrlBroadcast=FORCE_COOLDOWN force=true sameNetwork=true registered=true registrationAgeMs=514 durationMs=0
+[23:06:16.474] AIRPLAY: 重试 #1 —— 已重新公告 ctrl；车机邀请=1 次，mDNS _airplay._tcp=[CAR_PEER]:7000
+[23:06:16.475] CONNECT-DIAG: client=199213561 close pairing=true disposed=false cancelled=false pending=0 eventSocket=false iapLinkPresent=false
+[23:06:16.492] AIRPLAY: TCP 已连通 [CAR_PEER]:7000（本机 [CAR_LOCAL]）
+[23:06:17.137] pair-setup: M4 SRP 互验通过
+[23:06:17.234] pair-setup: ✓ M6 完成，接收端已保存我们的长期公钥
+[23:06:17.601] pair-verify: ✓ 完成，派生控制通道密钥
+[23:06:17.628] AIRPLAY: 控制通道加密已启用
+[23:06:17.640] CONNECT-DIAG: client=199213561 pairing-result keysPresent=true unsupported=false
+[23:06:17.643] CONNECT-DIAG: client=199213561 pairing-exit elapsedMs=1207 cancelled=false unsupported=false
+[23:06:17.646] PATH-DIAG: round=1 active=true stage=PAIRING attempt=1 event=END durationMs=1211 elapsedMs=46365 outcome=RETURNED
+[23:06:17.658] STAGE: 会话建立（SETUP）开始（上段 AirPlay 配对 用时 1.3s，本轮累计 3.4s）
+[23:06:17.662] PATH-DIAG: round=1 active=true stage=INITIAL_SETUP attempt=1 event=BEGIN elapsedMs=46380
+[23:06:17.666] CONNECT-DIAG: client=199213561 setup-start encrypted=true cancelled=false disposed=false
+[23:06:19.477] CTRL: ✓ 车机 ctrl 邀请（第 2 次，receiver=[RECEIVER]）——AirPlay 窗口已开启
+[23:06:19.478] CONNECT-DIAG: fresh ctrl invite delivered to live attempt; not cached for a later retry
+[23:06:19.543] PATH-DIAG: round=1 active=true stage=INITIAL_SETUP attempt=1 event=END durationMs=1883 elapsedMs=48263 outcome=RETURNED
+[23:06:19.545] STAGE: 等首帧开始（上段 会话建立（SETUP） 用时 1.9s，本轮累计 5.3s）
+[23:06:19.563] PATH-DIAG: round=1 active=true stage=SCREEN_SETUP attempt=1 event=BEGIN elapsedMs=48282
+[23:06:19.601] PATH-DIAG: round=1 active=true stage=SCREEN_SETUP attempt=1 event=END durationMs=38 elapsedMs=48320 outcome=RETURNED
+[23:06:19.630] PATH-DIAG: round=1 active=true stage=RECORD attempt=1 event=BEGIN elapsedMs=48349
+[23:06:19.751] PATH-DIAG: round=1 active=true stage=RECORD attempt=1 event=END durationMs=121 elapsedMs=48470 outcome=true
+[23:06:21.580] PATH-DIAG: round=1 active=true stage=RECORD attempt=2 event=BEGIN elapsedMs=50299
+[23:06:21.598] PATH-DIAG: round=1 active=true stage=RECORD attempt=2 event=END durationMs=18 elapsedMs=50317 outcome=true
+[23:06:21.607] CARLIFE: 回放缓存 1 帧立即起播（首帧自带 SPS，策略=缓存关键帧立即起播（RECORD 后立刻有画面；仅当缓存 IDR 自带 SPS）；丢弃 attach 期间 0 帧）
+[23:06:21.607] PATH-DIAG: videoAttach cachedFrames=1 cachedBytes=88846 lateFrames=0 replay=true firstKey=true firstSps=true lastSourceAgeMs=57 cachedGopAgeMs=57
+[23:06:21.654] CARLIFE: ✓ 已开始向车机送帧（首帧 88846B）
+[23:06:21.654] CARLIFE: 同源新鲜 GOP 已完整写出——保留编码器，首帧看门狗仍有效
+[23:06:21.655] PATH-DIAG: videoAttach event=END durationMs=51 senderRunning=true; write success is not display confirmation
+[23:06:21.658] STAGE: ✓ 首帧已到达，开始推流（本轮累计 7.4s）
+[23:06:21.670] PATH-DIAG: round=1 active=true stage=AUDIO_SETUP attempt=1 event=BEGIN elapsedMs=50389
+[23:06:21.812] PATH-DIAG: round=1 active=true stage=AUDIO_SETUP attempt=1 event=END durationMs=143 elapsedMs=50532 outcome=RETURNED
+[23:06:21.819] PATH-DIAG: round=1 active=true stage=RECORD attempt=3 event=BEGIN elapsedMs=50539
+[23:06:21.831] PATH-DIAG: round=1 active=true stage=RECORD attempt=3 event=END durationMs=11 elapsedMs=50550 outcome=true
+[23:06:21.832] STAGE: 本轮小结（主动连车机）共 7.6s：等车机连接信息（0x4301） 0.0s → 加入车机热点 2.1s → AirPlay 配对 1.3s → 会话建立（SETUP） 1.9s → 等首帧 2.1s → 推流中 0.2s
+[23:06:24.658] PATH-DIAG: videoReinit hu=248548377 reason=first-frame-watchdog request=1 lastInitAttemptAgeMs=36184; request only
+[23:06:25.569] PATH-DIAG: encoderInit hu=248548377 decision=ATTEMPT force=false previousAttemptAgeMs=37094 durationMs=1 sent=true; not source-IDR confirmation
+[23:06:37.930] STAGE: 车机接管屏幕有回落信号（首帧后 12s 内 18 条事件命令：hidSendReport、iAPSendMessage；车机未回报收帧统计（该固件没有 statsDictionary））
+[23:10:58.207] LINK closed: bt socket closed, read return: -1
+[23:10:58.213] HANDOVER-DIAG: btClosed decision=KEEP_VIDEO uptimeMs=766280730 inviteGeneration=1 pendingInviteAgeMs=null targetConfigured=true credentialsCached=true boundTargetCached=true networkCached=true policyWifiReady=true client=199213561 controlAlive=true setupPending=false videoRunning=true sourceStreaming=true workCurrent=true cancelled=false; snapshot is current state, not callback-origin proof
+[23:10:58.214] BT-C: CarPlay 会话仍在，但 iAP2 控制链路已断（[MAC]）——只对它单独补连，最长 180 秒
+[23:10:58.214] BT-C: 本轮会话结束（客户端仍在运行，将自动重连）
+[23:10:58.547] CONNECT-DIAG: control-reader ended reason=EOF generation=2 pending=0
+[23:10:58.548] CONNECT-DIAG: client=199213561 close pairing=false disposed=false cancelled=false pending=0 eventSocket=true iapLinkPresent=true
+[23:10:58.662] CONNECT-DIAG: receiver service lost; cached endpoint and pending invitation invalidated; live stream unchanged
+[23:10:59.910] CONNECT-DIAG: video terminal reason=frame-write-recovery-exhausted after bounded data-port recovery
+[23:10:59.911] CONNECT-DIAG: CarPlay owner ended; stopping attached CarLife session
+[23:11:17.367] WIFI: 系统事件 onLost → wifi=[wlan0/[OTHER_WIFI_LOCAL]] car=wlan0/[CAR_LOCAL] default=rmnet_data4/[IP] ssid=[CAR_TARGET]（上次 wifi=[wlan0/[CAR_LOCAL],wlan0/[OTHER_WIFI_LOCAL]] car=wlan0/[CAR_LOCAL] default=rmnet_data4/[IP] ssid=[CAR_TARGET]）
+[23:11:22.087] BT-C: 连接 [CAR_TARGET] 失败（A Bluetooth Socket failure occurred）——车机未就绪或不在无线配对窗口，16 秒后重试…
+[23:11:31.955] CONNECT-DIAG: final-disconnect requested phase=配对完成，建立 CarPlay 会话…; will stop CarLife and retire network resources
+[23:11:31.956] PATH-DIAG: round=1 event=END elapsedMs=360675
+[23:11:31.956] CONNECT-DIAG: retire temporary media pipelines; clientPresent=true videoPresent=true audioPresent=false
+[23:11:31.959] CONNECT-DIAG: client=199213561 close pairing=false disposed=true cancelled=true pending=0 eventSocket=false iapLinkPresent=false
+[23:11:31.964] BT: 监听已停止
+[23:11:31.965] BT-C: 已停止
+[23:11:31.995] BT-C: 客户端已停止
+[23:11:52.699] PATH-DIAG: round=3 event=BEGIN
+[23:11:52.703] CONNECT-DIAG: start requested running=false phase=null; default media=48k PCM
+[23:11:52.706] CARLIFE: 等待本机引擎；请打开 CarLife+ 的无线连接（接管线程不会主动启动应用）
+[23:11:52.712] BT-C: 启动——将主动连入车机的无线 iAP2 服务（…caff），目标：「[CAR_TARGET]」[MAC]（只连该设备）
+[23:11:52.717] BT: 监听 iAP2，等待接收端回连…
+[23:11:52.731] WIFI: 系统事件 onAvailable → wifi=[wlan0/[CAR_LOCAL],wlan0/[OTHER_WIFI_LOCAL]] car=- default=rmnet_data4/[IP] ssid=-（上次 wifi=[wlan0/[OTHER_WIFI_LOCAL]] car=- default=rmnet_data4/[IP] ssid=-）
+[23:11:53.559] CONNECT-DIAG: start requested running=true phase=蓝牙就绪，等待车机回连…; default media=48k PCM
+[23:11:54.280] BT-C: 连接 [CAR_TARGET] 失败（read failed, socket might closed or timeout, read ret: -1）——车机未就绪或不在无线配对窗口，16 秒后重试…
+[23:11:54.421] BT: 接收端已连入 name=[CAR_TARGET]，开始 iAP2 发送端会话
+[23:11:54.452] CARLIFE: 劫持成功，已接管本机 CarLife 码流（等待连接车机）
+[23:11:56.320] PATH-DIAG: encoderInit hu=89154981 decision=ATTEMPT force=true previousAttemptAgeMs=null durationMs=2 sent=true; not source-IDR confirmation
+[23:11:56.942] CARLIFE: ✓ 收到 CarLife 首帧（4270B，keyFrame=true）
+[23:11:57.450] iap2 tx=0x5702
+[23:11:57.716] PATH-DIAG: ctrlBroadcast=REGISTER_BEGIN force=false sameNetwork=true registered=false registrationAgeMs=5002 durationMs=7
+[23:11:57.723] PATH-DIAG: ctrlBroadcast=REGISTER_ACCEPTED force=false sameNetwork=true registered=true registrationAgeMs=1 durationMs=15
+[23:11:57.866] PATH-DIAG: round=3 active=true stage=WIFI_REUSE attempt=1 event=BEGIN elapsedMs=5167
+[23:11:57.867] STAGE: 本轮开始（车机回连）——预算：等端点 5min / 热点 60s / 配对 120s / SETUP 30s / 首帧 20s
+[23:11:57.878] PATH-DIAG: round=3 active=true stage=WIFI_REUSE attempt=1 event=END durationMs=13 elapsedMs=5180 outcome=NULL
+[23:11:57.883] PATH-DIAG: round=3 active=true stage=WIFI_SPECIFIER attempt=1 event=BEGIN elapsedMs=5185
+[23:11:57.884] CONNECT-DIAG: requesting system WiFi selection request=174725260
+[23:11:57.891] STAGE: 加入车机热点开始（上段 等车机连接信息（0x4301） 用时 0.0s，本轮累计 0.0s）
+[23:11:58.020] PATH-DIAG: round=3 active=true stage=WIFI_SHARED_WAIT attempt=1 event=BEGIN elapsedMs=5321
+[23:11:58.943] WIFI: 系统事件 onLost → wifi=[wlan0/[OTHER_WIFI_LOCAL]] car=- default=rmnet_data4/[IP] ssid=-（上次 wifi=[wlan0/[CAR_LOCAL],wlan0/[OTHER_WIFI_LOCAL]] car=- default=rmnet_data4/[IP] ssid=-）
+[23:12:01.742] CTRL: ✓ 车机 ctrl 邀请（第 1 次，receiver=[RECEIVER]）——AirPlay 窗口已开启
+[23:12:01.743] CTRL: 车机邀请到达——本轮已有会话在处理中，交给它（不并行再起一轮）
+[23:12:01.782] CONNECT-DIAG: specifier available request=174725260 bound=true
+[23:12:01.800] PATH-DIAG: round=3 active=true stage=WIFI_SPECIFIER attempt=1 event=END durationMs=3916 elapsedMs=9101 outcome=RETURNED
+[23:12:01.804] PATH-DIAG: round=3 active=true stage=WIFI_SHARED_WAIT attempt=1 event=END durationMs=3783 elapsedMs=9104 outcome=true
+[23:12:01.858] WIFI: 系统事件 onAvailable → wifi=[wlan0/[CAR_LOCAL],wlan0/[OTHER_WIFI_LOCAL]] car=wlan0/[CAR_LOCAL] default=rmnet_data4/[IP] ssid=[CAR_TARGET]（上次 wifi=[wlan0/[OTHER_WIFI_LOCAL]] car=- default=rmnet_data4/[IP] ssid=-）
+[23:12:01.886] PATH-DIAG: ctrlBroadcast=REGISTER_BEGIN force=true sameNetwork=false registered=false registrationAgeMs=4149 durationMs=68
+[23:12:01.973] PATH-DIAG: ctrlBroadcast=REGISTER_ACCEPTED force=true sameNetwork=false registered=true registrationAgeMs=16 durationMs=170
+[23:12:01.993] PATH-DIAG: ctrlBroadcast=FORCE_COOLDOWN force=true sameNetwork=true registered=true registrationAgeMs=18 durationMs=0
+[23:12:02.081] CONNECT-DIAG: network-bound result=true source=车机回连 inviteGeneration=3
+[23:12:02.083] PATH-DIAG: ctrlBroadcast=FORCE_COOLDOWN force=true sameNetwork=true registered=true registrationAgeMs=125 durationMs=0
+[23:12:02.183] CTRL: [等邀请窗口] 接续 380ms 前本轮车机邀请——不再空等邀请窗口
+[23:12:02.773] CONNECT-DIAG: endpoint resolved source=车机回连 addressCount=1 port=7000 cancelled=false
+[23:12:02.789] CONNECT-DIAG: retire temporary media pipelines; clientPresent=false videoPresent=false audioPresent=false
+[23:12:02.872] STAGE: AirPlay 配对开始（上段 加入车机热点 用时 5.0s，本轮累计 5.0s）
+[23:12:02.928] LINK closed: bt socket closed, read return: -1
+[23:12:03.516] HANDOVER-DIAG: btClosed decision=CANCEL_SETUP uptimeMs=766345450 inviteGeneration=3 pendingInviteAgeMs=null targetConfigured=true credentialsCached=true boundTargetCached=true networkCached=true policyWifiReady=false client=127639871 controlAlive=false setupPending=false videoRunning=false sourceStreaming=true workCurrent=true cancelled=true; snapshot is current state, not callback-origin proof
+[23:12:04.958] PATH-DIAG: round=3 active=true stage=PAIRING attempt=1 event=BEGIN elapsedMs=12259
+[23:12:05.042] CONNECT-DIAG: client=127639871 pairing-start budgetMs=120000 addressCount=1 port=7000
+[23:12:05.227] PATH-DIAG: ctrlBroadcast=REGISTER_BEGIN force=true sameNetwork=true registered=false registrationAgeMs=3270 durationMs=174
+[23:12:05.230] PATH-DIAG: ctrlBroadcast=REGISTER_ACCEPTED force=true sameNetwork=true registered=true registrationAgeMs=1 durationMs=176
+[23:12:05.230] AIRPLAY: 重试 #1 —— 已重新公告 ctrl；车机邀请=1 次，mDNS _airplay._tcp=[CAR_PEER]:7000
+[23:12:05.230] CONNECT-DIAG: client=127639871 close pairing=true disposed=false cancelled=false pending=0 eventSocket=false iapLinkPresent=false
+[23:12:05.252] AIRPLAY: TCP 已连通 [CAR_PEER]:7000（本机 [CAR_LOCAL]）
+[23:12:05.973] pair-setup: M4 SRP 互验通过
+[23:12:05.998] pair-setup: ✓ M6 完成，接收端已保存我们的长期公钥
+[23:12:06.567] pair-verify: ✓ 完成，派生控制通道密钥
+[23:12:06.570] AIRPLAY: 控制通道加密已启用
+[23:12:06.571] CONNECT-DIAG: client=127639871 pairing-result keysPresent=true unsupported=false
+[23:12:06.573] CONNECT-DIAG: client=127639871 pairing-exit elapsedMs=1614 cancelled=false unsupported=false
+[23:12:06.574] PATH-DIAG: round=3 active=true stage=PAIRING attempt=1 event=END durationMs=1616 elapsedMs=13875 outcome=RETURNED
+[23:12:06.574] CONNECT-DIAG: retire temporary media pipelines; clientPresent=true videoPresent=false audioPresent=false
+[23:12:06.575] CONNECT-DIAG: client=127639871 close pairing=false disposed=true cancelled=true pending=0 eventSocket=false iapLinkPresent=false
+[23:12:06.578] AIRPLAY: 用户已取消——中止配对
+[23:12:06.601] STAGE: ✗ 本轮未连上，卡在「AirPlay 配对」：AirPlay 配对中…｜关键词：SETUP / /info / 配对 / 事件通道
+[23:12:06.607] STAGE: 本轮小结（车机回连）共 8.7s：等车机连接信息（0x4301） 0.0s → 加入车机热点 5.0s → AirPlay 配对 3.7s
+[23:12:13.557] CONNECT-DIAG: receiver service lost; cached endpoint and pending invitation invalidated; live stream unchanged
+[23:12:17.999] BT-C: 连接 [CAR_TARGET] 失败（read failed, socket might closed or timeout, read ret: -1）——车机未就绪或不在无线配对窗口，16 秒后重试…
+[23:12:18.241] BT: 接收端已连入 name=[CAR_TARGET]，开始 iAP2 发送端会话
+[23:12:21.553] iap2 tx=0x5702
+[23:12:21.882] PATH-DIAG: ctrlBroadcast=REUSE force=false sameNetwork=true registered=true registrationAgeMs=16653 durationMs=0
+[23:12:21.890] STAGE: 本轮开始（车机回连）——预算：等端点 5min / 热点 60s / 配对 120s / SETUP 30s / 首帧 20s
+[23:12:21.894] CONNECT-DIAG: network-bound result=true source=车机回连 inviteGeneration=3
+[23:12:21.895] PATH-DIAG: ctrlBroadcast=REGISTER_BEGIN force=true sameNetwork=true registered=false registrationAgeMs=16666 durationMs=1
+[23:12:21.896] PATH-DIAG: ctrlBroadcast=REGISTER_ACCEPTED force=true sameNetwork=true registered=true registrationAgeMs=0 durationMs=2
+[23:12:23.113] CTRL: 等待车机 ctrl 邀请…（已等 1215ms）
+[23:12:23.923] CTRL: 2s 未收到邀请——强制重新公告一次（catplay 同款 force_announce）
+[23:12:23.926] PATH-DIAG: ctrlBroadcast=REGISTER_BEGIN force=true sameNetwork=true registered=false registrationAgeMs=2030 durationMs=2
+[23:12:23.931] PATH-DIAG: ctrlBroadcast=REGISTER_ACCEPTED force=true sameNetwork=true registered=true registrationAgeMs=0 durationMs=7
+[23:12:24.336] CTRL: 等待车机 ctrl 邀请…（已等 2437ms）
+[23:12:25.551] CTRL: 等待车机 ctrl 邀请…（已等 3654ms）
+[23:12:25.913] CTRL: 4000ms 未收到邀请——按超时继续连接（可能车机走旧发现路径）
+[23:12:28.947] CONNECT-DIAG: endpoint resolved source=车机回连 addressCount=1 port=7000 cancelled=false
+[23:12:28.949] CONNECT-DIAG: retire temporary media pipelines; clientPresent=false videoPresent=false audioPresent=false
+[23:12:28.951] STAGE: AirPlay 配对开始（上段 等车机连接信息（0x4301） 用时 7.1s，本轮累计 7.1s）
+[23:12:28.953] PATH-DIAG: round=3 active=true stage=PAIRING attempt=2 event=BEGIN elapsedMs=36254
+[23:12:28.953] CONNECT-DIAG: client=133785721 pairing-start budgetMs=120000 addressCount=1 port=7000
+[23:12:28.959] PATH-DIAG: ctrlBroadcast=REGISTER_BEGIN force=true sameNetwork=true registered=false registrationAgeMs=5028 durationMs=1
+[23:12:28.960] AIRPLAY: 重试 #1 —— 已重新公告 ctrl；车机邀请=1 次，mDNS _airplay._tcp=未发现
+[23:12:28.960] PATH-DIAG: ctrlBroadcast=REGISTER_ACCEPTED force=true sameNetwork=true registered=true registrationAgeMs=0 durationMs=2
+[23:12:28.961] CONNECT-DIAG: client=133785721 close pairing=true disposed=false cancelled=false pending=0 eventSocket=false iapLinkPresent=false
+[23:12:28.967] AIRPLAY: 连接失败 - [CAR_PEER]（failed to connect to /[CAR_PEER] (port 7000) from /[CAR_LOCAL] (port 40120) after 2000ms: isConnected failed: ECONNREFUSED (Connection refused)）
+[23:12:28.968] AIRPLAY: 车机 AirPlay 端口未开（等待你点车机上的手机图标 / 车机发 ctrl 邀请）…第 1 次重试
+[23:12:30.970] CONNECT-DIAG: client=133785721 close pairing=true disposed=false cancelled=false pending=0 eventSocket=false iapLinkPresent=false
+[23:12:30.978] AIRPLAY: 连接失败 - [CAR_PEER]（failed to connect to /[CAR_PEER] (port 7000) from /[CAR_LOCAL] (port 40122) after 2000ms: isConnected failed: ECONNREFUSED (Connection refused)）
+[23:12:32.980] CONNECT-DIAG: client=133785721 close pairing=true disposed=false cancelled=false pending=0 eventSocket=false iapLinkPresent=false
+[23:12:32.994] AIRPLAY: 连接失败 - [CAR_PEER]（failed to connect to /[CAR_PEER] (port 7000) from /[CAR_LOCAL] (port 40124) after 2000ms: isConnected failed: ECONNREFUSED (Connection refused)）
+[23:12:33.000] iap2 叫醒车机（7000 已连续拒绝 3 次）：重发 0x4e0e + 0x4300——车机没起 AirPlay 服务（7000 拒绝），用可用性请求把它从「等 IAP2 信息」里叫出来
+[23:12:33.002] PATH-DIAG: ctrlBroadcast=REGISTER_BEGIN force=true sameNetwork=true registered=false registrationAgeMs=4043 durationMs=2
+[23:12:33.004] PATH-DIAG: ctrlBroadcast=REGISTER_ACCEPTED force=true sameNetwork=true registered=true registrationAgeMs=0 durationMs=3
+[23:12:33.004] AIRPLAY: 7000 已连续拒绝 3 次（车机没起 AirPlay 服务）——第 1/3 次叫醒：重发 0x4e0e+0x4300 + 重新公告 ctrl；若仍不开，请在车机上点本机图标或重启 CarPlay
+[23:12:35.005] CONNECT-DIAG: client=133785721 close pairing=true disposed=false cancelled=false pending=0 eventSocket=false iapLinkPresent=false
+[23:12:35.018] AIRPLAY: 连接失败 - [CAR_PEER]（failed to connect to /[CAR_PEER] (port 7000) from /[CAR_LOCAL] (port 40140) after 2000ms: isConnected failed: ECONNREFUSED (Connection refused)）
+[23:12:37.019] CONNECT-DIAG: client=133785721 close pairing=true disposed=false cancelled=false pending=0 eventSocket=false iapLinkPresent=false
+[23:12:37.037] AIRPLAY: 连接失败 - [CAR_PEER]（failed to connect to /[CAR_PEER] (port 7000) from /[CAR_LOCAL] (port 40146) after 2000ms: isConnected failed: ECONNREFUSED (Connection refused)）
+[23:12:37.038] AIRPLAY: 车机 AirPlay 端口未开（等待你点车机上的手机图标 / 车机发 ctrl 邀请）…第 5 次重试
+[23:12:39.039] CONNECT-DIAG: client=133785721 close pairing=true disposed=false cancelled=false pending=0 eventSocket=false iapLinkPresent=false
+[23:12:39.047] AIRPLAY: 连接失败 - [CAR_PEER]（failed to connect to /[CAR_PEER] (port 7000) from /[CAR_LOCAL] (port 44570) after 2000ms: isConnected failed: ECONNREFUSED (Connection refused)）
+[23:12:41.049] CONNECT-DIAG: client=133785721 close pairing=true disposed=false cancelled=false pending=0 eventSocket=false iapLinkPresent=false
+[23:12:41.100] AIRPLAY: 连接失败 - [CAR_PEER]（failed to connect to /[CAR_PEER] (port 7000) from /[CAR_LOCAL] (port 44578) after 2000ms: isConnected failed: ECONNREFUSED (Connection refused)）
+[23:12:43.103] CONNECT-DIAG: client=133785721 close pairing=true disposed=false cancelled=false pending=0 eventSocket=false iapLinkPresent=false
+[23:12:43.128] AIRPLAY: 连接失败 - [CAR_PEER]（failed to connect to /[CAR_PEER] (port 7000) from /[CAR_LOCAL] (port 44590) after 2000ms: isConnected failed: ECONNREFUSED (Connection refused)）
+[23:12:45.131] CONNECT-DIAG: client=133785721 close pairing=true disposed=false cancelled=false pending=0 eventSocket=false iapLinkPresent=false
+[23:12:45.143] AIRPLAY: 连接失败 - [CAR_PEER]（failed to connect to /[CAR_PEER] (port 7000) from /[CAR_LOCAL] (port 44594) after 2000ms: isConnected failed: ECONNREFUSED (Connection refused)）
+[23:12:45.149] iap2 叫醒车机（7000 已连续拒绝 9 次）：重发 0x4e0e + 0x4300——车机没起 AirPlay 服务（7000 拒绝），用可用性请求把它从「等 IAP2 信息」里叫出来
+[23:12:45.153] PATH-DIAG: ctrlBroadcast=REGISTER_BEGIN force=true sameNetwork=true registered=false registrationAgeMs=12149 durationMs=3
+[23:12:45.155] PATH-DIAG: ctrlBroadcast=REGISTER_ACCEPTED force=true sameNetwork=true registered=true registrationAgeMs=1 durationMs=6
+[23:12:45.156] AIRPLAY: 7000 已连续拒绝 9 次（车机没起 AirPlay 服务）——第 2/3 次叫醒：重发 0x4e0e+0x4300 + 重新公告 ctrl；若仍不开，请在车机上点本机图标或重启 CarPlay
+[23:12:47.159] PATH-DIAG: ctrlBroadcast=REGISTER_BEGIN force=true sameNetwork=true registered=false registrationAgeMs=2004 durationMs=2
+[23:12:47.160] PATH-DIAG: ctrlBroadcast=REGISTER_ACCEPTED force=true sameNetwork=true registered=true registrationAgeMs=1 durationMs=4
+[23:12:47.161] AIRPLAY: 重试 #10 —— 已重新公告 ctrl；车机邀请=1 次，mDNS _airplay._tcp=未发现
+[23:12:47.162] CONNECT-DIAG: client=133785721 close pairing=true disposed=false cancelled=false pending=0 eventSocket=false iapLinkPresent=false
+[23:12:47.167] AIRPLAY: 连接失败 - [CAR_PEER]（failed to connect to /[CAR_PEER] (port 7000) from /[CAR_LOCAL] (port 44596) after 2000ms: isConnected failed: ECONNREFUSED (Connection refused)）
+[23:12:47.168] AIRPLAY: 车机 AirPlay 端口未开（等待你点车机上的手机图标 / 车机发 ctrl 邀请）…第 10 次重试
+[23:12:48.098] CTRL: ✓ 车机 ctrl 邀请（第 2 次，receiver=[RECEIVER]）——AirPlay 窗口已开启
+[23:12:48.099] CTRL: 车机邀请到达——本轮已有会话在处理中，交给它（不并行再起一轮）
+[23:12:49.171] CONNECT-DIAG: client=133785721 close pairing=true disposed=false cancelled=false pending=0 eventSocket=false iapLinkPresent=false
+[23:12:49.186] AIRPLAY: TCP 已连通 [CAR_PEER]:7000（本机 [CAR_LOCAL]）
+[23:12:49.386] pair-setup: M4 SRP 互验通过
+[23:12:49.414] pair-setup: ✓ M6 完成，接收端已保存我们的长期公钥
+[23:12:49.458] pair-verify: ✓ 完成，派生控制通道密钥
+[23:12:49.460] AIRPLAY: 控制通道加密已启用
+[23:12:49.462] CONNECT-DIAG: client=133785721 pairing-result keysPresent=true unsupported=false
+[23:12:49.463] CONNECT-DIAG: client=133785721 pairing-exit elapsedMs=20509 cancelled=false unsupported=false
+[23:12:49.463] PATH-DIAG: round=3 active=true stage=PAIRING attempt=2 event=END durationMs=20510 elapsedMs=56764 outcome=RETURNED
+[23:12:49.468] STAGE: 会话建立（SETUP）开始（上段 AirPlay 配对 用时 20.5s，本轮累计 27.6s）
+[23:12:49.468] CONNECT-DIAG: client=133785721 setup-start encrypted=true cancelled=false disposed=false
+[23:12:49.468] PATH-DIAG: round=3 active=true stage=INITIAL_SETUP attempt=1 event=BEGIN elapsedMs=56769
+[23:12:49.559] STAGE: 等首帧开始（上段 会话建立（SETUP） 用时 0.1s，本轮累计 27.7s）
+[23:12:49.559] PATH-DIAG: round=3 active=true stage=INITIAL_SETUP attempt=1 event=END durationMs=91 elapsedMs=56860 outcome=RETURNED
+[23:12:49.583] PATH-DIAG: round=3 active=true stage=SCREEN_SETUP attempt=1 event=BEGIN elapsedMs=56884
+[23:12:49.657] PATH-DIAG: round=3 active=true stage=SCREEN_SETUP attempt=1 event=END durationMs=74 elapsedMs=56958 outcome=RETURNED
+[23:12:49.713] PATH-DIAG: round=3 active=true stage=RECORD attempt=1 event=BEGIN elapsedMs=57014
+[23:12:49.851] PATH-DIAG: round=3 active=true stage=RECORD attempt=1 event=END durationMs=137 elapsedMs=57151 outcome=true
+[23:12:51.611] PATH-DIAG: round=3 active=true stage=RECORD attempt=2 event=BEGIN elapsedMs=58912
+[23:12:51.626] PATH-DIAG: round=3 active=true stage=RECORD attempt=2 event=END durationMs=15 elapsedMs=58927 outcome=true
+[23:12:51.632] PATH-DIAG: videoAttach cachedFrames=48 cachedBytes=154350 lateFrames=0 replay=true firstKey=true firstSps=true lastSourceAgeMs=60 cachedGopAgeMs=3574
+[23:12:51.633] CARLIFE: 回放缓存 48 帧立即起播（首帧自带 SPS，策略=缓存关键帧立即起播（RECORD 后立刻有画面；仅当缓存 IDR 自带 SPS）；丢弃 attach 期间 0 帧）
+[23:12:51.642] CARLIFE: ✓ 已开始向车机送帧（首帧 80542B）
+[23:12:51.653] PATH-DIAG: videoReinit hu=89154981 reason=attach request=1 lastInitAttemptAgeMs=55335; request only
+[23:12:51.653] CARLIFE: 请求引擎重建编码器（约 1 秒后出当期首帧）
+[23:12:51.654] PATH-DIAG: videoAttach event=END durationMs=22 senderRunning=true; write success is not display confirmation
+[23:12:51.654] STAGE: ✓ 首帧已到达，开始推流（本轮累计 29.8s）
+[23:12:51.657] PATH-DIAG: round=3 active=true stage=AUDIO_SETUP attempt=1 event=BEGIN elapsedMs=58958
+[23:12:51.802] PATH-DIAG: round=3 active=true stage=AUDIO_SETUP attempt=1 event=END durationMs=145 elapsedMs=59103 outcome=RETURNED
+[23:12:51.806] PATH-DIAG: round=3 active=true stage=RECORD attempt=3 event=BEGIN elapsedMs=59107
+[23:12:51.824] PATH-DIAG: round=3 active=true stage=RECORD attempt=3 event=END durationMs=18 elapsedMs=59125 outcome=true
+[23:12:51.825] STAGE: 本轮小结（车机回连）共 29.9s：等车机连接信息（0x4301） 7.1s → AirPlay 配对 20.5s → 会话建立（SETUP） 0.1s → 等首帧 2.1s → 推流中 0.2s
+[23:12:52.557] PATH-DIAG: encoderInit hu=89154981 decision=ATTEMPT force=false previousAttemptAgeMs=56239 durationMs=1 sent=true; not source-IDR confirmation
+[23:13:04.660] STAGE: 车机接管屏幕有回落信号（首帧后 12s 内 12 条事件命令：hidSendReport、iAPSendMessage；车机未回报收帧统计（该固件没有 statsDictionary））
+[23:15:15.485] LINK closed: bt socket closed, read return: -1
+[23:15:15.494] HANDOVER-DIAG: btClosed decision=KEEP_VIDEO uptimeMs=766538013 inviteGeneration=3 pendingInviteAgeMs=null targetConfigured=true credentialsCached=true boundTargetCached=true networkCached=true policyWifiReady=true client=133785721 controlAlive=true setupPending=false videoRunning=true sourceStreaming=true workCurrent=true cancelled=false; snapshot is current state, not callback-origin proof
+[23:15:15.878] CONNECT-DIAG: control-reader ended reason=EOF generation=12 pending=0
+[23:15:15.878] CONNECT-DIAG: client=133785721 close pairing=false disposed=false cancelled=false pending=0 eventSocket=true iapLinkPresent=true
+[23:15:16.030] CONNECT-DIAG: receiver service lost; cached endpoint and pending invitation invalidated; live stream unchanged
+[23:15:17.419] CONNECT-DIAG: video terminal reason=frame-write-recovery-exhausted after bounded data-port recovery
+[23:15:17.432] CONNECT-DIAG: CarPlay owner ended; stopping attached CarLife session
