@@ -23,6 +23,9 @@ internal class NavigationState {
     private var endAt: Long? = null
     private var pending: HudTurn? = null
     private var pendingAt = 0L
+    private var pendingStart: Int? = null
+    private var lastShow: HudTurn? = null
+    private var lastShowAt = 0L
     private var segment: HudTurn? = null
     private var initial = 0
     private var image: ByteArray? = null
@@ -34,6 +37,7 @@ internal class NavigationState {
     private fun reset() {
         active = false; destination = ""; destinationImage = null; phase = "idle"; endAt = null
         pending = null; segment = null; initial = 0; current = null; setImage(null)
+        pendingStart = null; lastShow = null
     }
     private fun setImage(bytes: ByteArray?) {
         if (image?.contentEquals(bytes ?: byteArrayOf()) == true || image == null && bytes == null) return
@@ -51,7 +55,7 @@ internal class NavigationState {
                 destinationImage = event.icon?.takeIf { it.isNotEmpty() }?.copyOf()
                 setImage(destinationImage)
             } else if (event.distance == 0 && phase != "end") {
-                active = false; pending = null; phase = "end"; endAt = now + 5_000
+                active = false; pending = null; pendingStart = null; phase = "end"; endAt = now + 5_000
                 if (destination.isBlank() && event.road.isNotBlank()) destination = event.road
                 setImage(event.icon?.takeIf { it.isNotEmpty() } ?: destinationImage)
             }
@@ -60,6 +64,16 @@ internal class NavigationState {
         if (event.action !in 1..2) return
         flush(now)
         active = true; endAt = null
+        if (event.action == 1) {
+            val previous = lastShow
+            val duplicate = previous != null && now - lastShowAt in 0..1_000 &&
+                previous.turn == event.turn && previous.road == event.road && previous.distance == event.distance &&
+                (previous.icon?.contentEquals(event.icon ?: byteArrayOf()) == true || previous.icon == null && event.icon == null)
+            if (!duplicate) {
+                pendingStart = event.distance
+                lastShow = event.copy(icon = event.icon?.copyOf()); lastShowAt = now
+            }
+        }
         // Collect rapid distance/road/turn updates into one coherent candidate.
         if (pending == null) pendingAt = now
         pending = event.copy(action = if (pending?.action == 1) 1 else event.action, icon = event.icon?.copyOf())
@@ -69,13 +83,14 @@ internal class NavigationState {
         val next = pending ?: return
         if (now - pendingAt < 250) return
         pending = null
+        val start = pendingStart
+        pendingStart = null
         active = true; endAt = null; phase = "guide"
         val old = segment
         val distanceJump = old != null && next.distance - old.distance > maxOf(100, initial / 5)
-        val newSegment = old == null || next.turn != old.turn ||
-            (old.distance <= 5 && next.distance > 20) || distanceJump ||
-            (next.action == 1 && next.road != old.road)
-        if (newSegment) initial = next.distance
+        val newSegment = start != null || old == null || next.turn != old.turn ||
+            (old.distance <= 5 && next.distance > 20) || distanceJump
+        if (newSegment) initial = start ?: next.distance
         initial = maxOf(initial, next.distance)
         segment = next; current = next
         if (next.icon != null) setImage(next.icon.takeIf { it.isNotEmpty() }) else if (newSegment) setImage(null)

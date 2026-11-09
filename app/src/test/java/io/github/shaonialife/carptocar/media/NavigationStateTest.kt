@@ -65,9 +65,25 @@ class NavigationStateTest {
     @Test fun roadCorrectionAndDuplicateShowDoNotResetDistanceBaseline() {
         val state = started()
         state.receive(owner, event(1, distance = 1000), 0); state.display(300)
-        state.receive(owner, event(1, distance = 800), 1000); assertEquals(20_000, state.display(1300).elapsed)
+        state.receive(owner, event(1, distance = 1000), 500); state.display(800)
+        state.receive(owner, event(distance = 800), 1000); assertEquals(20_000, state.display(1300).elapsed)
         state.receive(owner, event(road = "补全名称", distance = 700), 2000)
         assertEquals(30_000, state.display(2300).elapsed)
+    }
+
+    @Test fun aNewShowOnTheSameRoadAndTurnStartsANewBaseline() {
+        val state = started()
+        state.receive(owner, event(1, distance = 1000), 0); state.display(300)
+        state.receive(owner, event(distance = 600), 1000); state.display(1300)
+        state.receive(owner, event(1, distance = 400), 2000)
+        assertEquals(0, state.display(2300).elapsed)
+    }
+
+    @Test fun coalescingPreservesTheShowDistanceWhileDisplayingTheLatestRemainder() {
+        val state = started()
+        state.receive(owner, event(1, distance = 1000), 0)
+        state.receive(owner, event(distance = 500), 100)
+        assertEquals(50_000, state.display(300).elapsed)
     }
 
     @Test fun staleSourceCannotChangeNewSessionAndMissingDestinationStaysEmpty() {
