@@ -36,3 +36,5 @@ CarPToCarL-log-20261110-172107.txt确认源码a7f518004291，用户反馈路上�
 上游来源：[固定版本文档目录](https://github.com/jjuugk/CarPToCarL/tree/8c6007a063b431a83c437c1d0bc46acaaac0d849/docs)。原文相对路径以来源仓库为准；长十六进制负载示例已省略。
 
 本机验证：build-local.ps1完整通过，976项JVM单测（0 failures/errors）、lint及Debug APK构建成功。没有应用代码改动，未安装/路测上游策略，未交付新APK。
+
+后续用户已授权实施选择性整合，当前状态与模块提交/复核见[q4-integration-review.md](q4-integration-review.md)；上面的仅评估说明保留为本次实施之前的阶段记录。
