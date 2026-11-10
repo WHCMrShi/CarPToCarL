@@ -87,6 +87,8 @@ class Iap2BluetoothServer(
     @Volatile
     private var senderSession: Iap2SenderSession? = null
 
+    @Volatile private var availabilityCommand: BtSessionCommand? = null
+
     @Volatile
     private var running = false
     private val lifecycle = Any()
@@ -107,7 +109,7 @@ class Iap2BluetoothServer(
      * 返回 false = 当前没有可用的发送端会话（链路已断/还没起来），调用方只能退而重公告 ctrl。
      */
     fun nudgeCarPlayAvailability(reason: String): Boolean =
-        senderSession?.nudgeCarPlayAvailability(reason) ?: false
+        availabilityCommand?.run(reason) ?: false
 
     fun hasPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
@@ -244,14 +246,16 @@ class Iap2BluetoothServer(
                 { callbacks.update(it, owner) },
                 nowPlayingProvider,
                 onSessionReady = { session -> synchronized(lifecycle) {
-                    if (activeOwner === owner && owner.isCurrent && callbacks.current()) { senderSession = session; owner.markReady() }
+                    if (activeOwner === owner && owner.isCurrent && callbacks.current()) { senderSession = session
+                        owner.markReady()
+                        availabilityCommand = BtSessionCommand(owner, callbacks::current, session::nudgeCarPlayAvailability) }
                 } },
             )
         } catch (error: IOException) {
             log("SESSION 失败: ${error.message}")
         } finally {
             synchronized(lifecycle) {
-                if (activeOwner === owner) { activeOwner = null; activeSocket = null; activeChannel = null; senderSession = null }
+                if (activeOwner === owner) { activeOwner = null; activeSocket = null; activeChannel = null; senderSession = null; availabilityCommand = null }
             }
             channel?.close()
             runCatching { socket.close() }
@@ -267,7 +271,7 @@ class Iap2BluetoothServer(
         val socket = synchronized(lifecycle) {
             activeOwner?.retire()
             activeOwner = null
-            senderSession = null
+            senderSession = null; availabilityCommand = null
             activeChannel = null
             activeSocket.also { activeSocket = null }
         }

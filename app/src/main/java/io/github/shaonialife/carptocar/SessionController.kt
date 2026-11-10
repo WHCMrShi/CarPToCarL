@@ -4394,25 +4394,28 @@ object SessionController {
                     var wakeCount = 0
                     var lastWakeAt = 0L
                     val wakeCarPlayWindow: (Int) -> Unit = { refused ->
-                        val now = android.os.SystemClock.uptimeMillis()
-                        if (wakeCount < CARPLAY_WAKE_MAX_TIMES && now - lastWakeAt >= CARPLAY_WAKE_GAP_MS) {
-                            lastWakeAt = now
-                            wakeCount++
-                            val reason = "7000 已连续拒绝 $refused 次"
-                            val nudged = bluetoothServer?.nudgeCarPlayAvailability(reason) == true ||
-                                bluetoothClient?.nudgeCarPlayAvailability(reason) == true
-                            ctrlAdvertiser?.ensureForNetwork(
-                                endpoint.ssid,
-                                force = true,
-                                network = wifiConnector?.currentNetwork,
-                            )
-                            appendLog(
-                                "AIRPLAY: 7000 已连续拒绝 $refused 次（车机没起 AirPlay 服务）——" +
-                                    "第 $wakeCount/$CARPLAY_WAKE_MAX_TIMES 次叫醒：" +
-                                    (if (nudged) "重发 0x4e0e+0x4300 + " else "iAP2 会话已不在，只能") +
-                                    "重新公告 ctrl；若仍不开，请在车机上点本机图标或重启 CarPlay",
-                            )
+                        mutate {
+                            val now = android.os.SystemClock.uptimeMillis()
+                            if (wakeCount < CARPLAY_WAKE_MAX_TIMES && now - lastWakeAt >= CARPLAY_WAKE_GAP_MS) {
+                                lastWakeAt = now
+                                wakeCount++
+                                val reason = "7000 已连续拒绝 $refused 次"
+                                val nudged = bluetoothServer?.nudgeCarPlayAvailability(reason) == true ||
+                                    bluetoothClient?.nudgeCarPlayAvailability(reason) == true
+                                ctrlAdvertiser?.ensureForNetwork(
+                                    endpoint.ssid,
+                                    force = true,
+                                    network = wifiConnector?.currentNetwork,
+                                )
+                                appendLog(
+                                    "AIRPLAY: 7000 已连续拒绝 $refused 次（车机没起 AirPlay 服务）——" +
+                                        "第 $wakeCount/$CARPLAY_WAKE_MAX_TIMES 次叫醒：" +
+                                        (if (nudged) "重发 0x4e0e+0x4300 + " else "iAP2 会话已不在，只能") +
+                                        "重新公告 ctrl；若仍不开，请在车机上点本机图标或重启 CarPlay",
+                                )
+                            }
                         }
+                        Unit
                     }
 
                     fun newClient() =
@@ -4423,22 +4426,25 @@ object SessionController {
                             endpointRefresher = { current -> enrichEndpointFromBrowser(current, source) },
                             onPortRefused = wakeCarPlayWindow,
                             retryTick = { attempt ->
-                                // 配对重试期间车机仍可能没探测到 ctrl（Bonjour 漏掉首次公告）：
-                                // 周期性强制重播一次，并把 mDNS 现状写进日志——否则排查时
-                                // 只看得到「端口未开」的重试刷屏，无法判断是车机没邀请还是
-                                // 地址不对（2026-10-19 奥迪 0.1.7 日志就缺这两条信息）。
-                                ctrlAdvertiser?.ensureForNetwork(
-                                    endpoint.ssid,
-                                    force = true,
-                                    network = wifiConnector?.currentNetwork,
-                                )
-                                val invites = ctrlAdvertiser?.inviteCount ?: 0
-                                val found = endpointBrowser?.awaitEndpoint(0)
-                                appendLog(
-                                    "AIRPLAY: 重试 #$attempt —— 已重新公告 ctrl；" +
-                                        "车机邀请=$invites 次，mDNS _airplay._tcp=" +
-                                        (found?.let { "${it.host?.hostAddress}:${it.port}" } ?: "未发现"),
-                                )
+                                mutate {
+                                    // 配对重试期间车机仍可能没探测到 ctrl（Bonjour 漏掉首次公告）：
+                                    // 周期性强制重播一次，并把 mDNS 现状写进日志——否则排查时
+                                    // 只看得到「端口未开」的重试刷屏，无法判断是车机没邀请还是
+                                    // 地址不对（2026-10-19 奥迪 0.1.7 日志就缺这两条信息）。
+                                    ctrlAdvertiser?.ensureForNetwork(
+                                        endpoint.ssid,
+                                        force = true,
+                                        network = wifiConnector?.currentNetwork,
+                                    )
+                                    val invites = ctrlAdvertiser?.inviteCount ?: 0
+                                    val found = endpointBrowser?.awaitEndpoint(0)
+                                    appendLog(
+                                        "AIRPLAY: 重试 #$attempt —— 已重新公告 ctrl；" +
+                                            "车机邀请=$invites 次，mDNS _airplay._tcp=" +
+                                            (found?.let { "${it.host?.hostAddress}:${it.port}" } ?: "未发现"),
+                                    )
+                                }
+                                Unit
                             },
                         ).also { created ->
                             created.pairingCancellation = attemptCancelled

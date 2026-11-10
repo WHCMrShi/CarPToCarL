@@ -129,6 +129,8 @@ class Iap2BluetoothClient(
     @Volatile
     private var senderSession: Iap2SenderSession? = null
 
+    @Volatile private var availabilityCommand: BtSessionCommand? = null
+
     /**
      * 本轮会话是**我们自己主动拆的**（[detachCurrentSession]）。
      *
@@ -153,7 +155,7 @@ class Iap2BluetoothClient(
      * 返回 false = 当前没有可用的发送端会话（链路已断/还没起来），调用方只能退而重公告 ctrl。
      */
     fun nudgeCarPlayAvailability(reason: String): Boolean =
-        senderSession?.nudgeCarPlayAvailability(reason) ?: false
+        availabilityCommand?.run(reason) ?: false
 
     /** 目标设备不在已配对列表的提示节流（避免每 3 秒刷屏）。 */
     private var lastTargetMissingLogAt = 0L
@@ -718,7 +720,9 @@ class Iap2BluetoothClient(
                 { callbacks.update(it, owner) },
                 nowPlayingProvider,
                 onSessionReady = { session ->
-                    synchronized(this) { if (activeOwner === owner && owner.isCurrent && callbacks.current()) { senderSession = session; owner.markReady() } }
+                    synchronized(this) { if (activeOwner === owner && owner.isCurrent && callbacks.current()) { senderSession = session
+                        owner.markReady()
+                        availabilityCommand = BtSessionCommand(owner, callbacks::current, session::nudgeCarPlayAvailability) } }
                 },
 
             )
@@ -726,7 +730,7 @@ class Iap2BluetoothClient(
             log("BT-C: SESSION 失败 - ${error.message}")
         } finally {
             synchronized(this) {
-                if (activeOwner === owner) { activeOwner = null; activeChannel = null; senderSession = null }
+                if (activeOwner === owner) { activeOwner = null; activeChannel = null; senderSession = null; availabilityCommand = null }
             }
             currentSocket.compareAndSet(socket, null)
             runCatching { socket.close() }
@@ -768,7 +772,7 @@ class Iap2BluetoothClient(
         running = false
         activeOwner?.retire()
         activeOwner = null
-        senderSession = null
+        senderSession = null; availabilityCommand = null
         // 递增世代：即便有线程卡在 connect()，事后也会因世代不符自杀，不会在下次启动时复活
         generation.incrementAndGet()
         BtSessionGate.clearLinkLost()
