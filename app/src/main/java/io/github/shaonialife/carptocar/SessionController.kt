@@ -1662,8 +1662,29 @@ object SessionController {
                 if (!work.isCurrent || !cacheWork.isCurrent || !sessionWanted || freshWifiThisStart != null) return@run
                 loadFixedWifi(context)
             } ?: return@run
-            if (!work.isCurrent || !cacheWork.isCurrent || !sessionWanted ||
-                TargetDevicePrefs.get(context)?.address?.equals(target, true) != true) return@run
+            val mayPreconnect = {
+                work.isCurrent && cacheWork.isCurrent && sessionWanted && !connectCancelled &&
+                    freshWifiThisStart == null && !isStreaming() &&
+                    TargetDevicePrefs.get(context)?.address?.equals(target, true) == true
+            }
+            val presence = io.github.shaonialife.carptocar.net.RememberedWifiPresence.await(
+                now = { android.os.SystemClock.elapsedRealtime() },
+                pause = { Thread.sleep(it) },
+                valid = mayPreconnect,
+                observe = {
+                    io.github.shaonialife.carptocar.net.RememberedWifiPresence.evidence(
+                        target, io.github.shaonialife.carptocar.bt.CarApproachPrefs.aclConnected(context),
+                        BtSessionGate.iap2Ready, BtSessionGate.activePeerAddress,
+                        wifiConnector?.isAssociatedTo(saved.wifi.ssid) == true,
+                    )
+                },
+                onWaiting = { appendLog("WIFI-MEMORY: deferred; awaiting target ACL/iAP2 or associated target WiFi; no suggestion/specifier requested") },
+            )
+            if (presence == null || !mayPreconnect()) {
+                appendLog("WIFI-MEMORY: deferred preconnect ended; cancelled, superseded or presence budget expired")
+                return@run
+            }
+            appendLog("WIFI-MEMORY: presence admitted source=$presence; normal BT-to-WiFi handoff remains valid")
             cacheWork.runIfCurrent { lastCarWifi = saved.wifi; lastWifiPsk = saved.wifi.passphrase; ssidSink?.invoke(saved.wifi.ssid) }
             appendLog("WIFI-MEMORY: bounded preconnect using verified credentials; BT continues independently")
             cacheWork.runIfCurrent { wifiConnector?.registerSuggestion(saved.wifi.ssid, saved.wifi.passphrase, saved.wifi.securityType) }
