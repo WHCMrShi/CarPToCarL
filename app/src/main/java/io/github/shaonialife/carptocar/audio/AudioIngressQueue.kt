@@ -8,9 +8,6 @@ internal class AudioIngressQueue(
     private val clock: () -> Long = System::nanoTime,
     private val maxDurationNs: Long = 200_000_000L,
     private val maxBytes: Int = 64 * 1024,
-    private val speechDurationNs: Long = 10_000_000_000L,
-    private val speechMaxBytes: Int = 512 * 1024,
-    workerName: String = "audio-pcm-send",
 ) : AutoCloseable {
     private data class Block(val data: ByteArray, val rate: Int, val channels: Int, val at: Long, val duration: Long, val speech: Boolean)
     private data class Delivery(val block: Block, val gap: Boolean)
@@ -25,13 +22,13 @@ internal class AudioIngressQueue(
     private var maxAge = 0L
     private var maxWork = 0L
     private var lastReport = clock()
-    private val worker = Thread({ run() }, workerName).apply { isDaemon = true; start() }
+    private val worker = Thread({ run() }, "audio-pcm-send").apply { isDaemon = true; start() }
 
     fun offer(data: ByteArray, size: Int, rate: Int, channels: Int, speech: Boolean = false): Boolean = synchronized(lock) {
         if (closed || size <= 0 || size > data.size || size > 256 * 1024 || rate <= 0 || channels !in 1..2) return false
         val span = size.toLong() * 1_000_000_000L / (rate.toLong() * channels * 2)
-        val byteBudget = if (speech) speechMaxBytes else maxBytes
-        val timeBudget = if (speech) speechDurationNs else maxDurationNs
+        val byteBudget = if (speech) 512 * 1024 else maxBytes
+        val timeBudget = if (speech) 10_000_000_000L else maxDurationNs
         // 单次合法大包不等于排队积压。完整接纳一块；只在确有旧待处理块时丢弃旧块。
         while (true) {
             val matching = queue.filter { it.speech == speech }
@@ -61,7 +58,7 @@ internal class AudioIngressQueue(
                 while (!closed && queue.isEmpty()) lock.wait()
                 if (closed) return null
                 val age = clock() - queue.first().at
-                if (age > if (queue.first().speech) speechDurationNs else maxDurationNs) { drop(0); continue }
+                if (age > if (queue.first().speech) 10_000_000_000L else maxDurationNs) { drop(0); continue }
                 val block = queue.removeFirst()
                 bytes -= block.data.size; duration -= block.duration
                 maxAge = maxOf(maxAge, age)

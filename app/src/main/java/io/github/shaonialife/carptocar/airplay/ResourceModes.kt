@@ -21,9 +21,6 @@ internal class ResourceModes {
             "entity" to if (r.borrowers.isEmpty() && !r.overflow) r.permanent else 2L, "permanentEntity" to r.permanent) },
     ))
     @Synchronized fun markSourceStarted() { sourceStarted = true }
-    @Synchronized fun canRecoverAudio(): Boolean = resources.getValue(2).let {
-        it.permanent == 1L && it.borrowers.isEmpty() && !it.overflow
-    }
     @Synchronized fun canRecoverScreen(): Boolean = resources.getValue(1).let {
         !it.overflow && it.borrowers.isEmpty() && (it.permanent == 1L || startupNativeTake)
     }

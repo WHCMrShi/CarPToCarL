@@ -97,8 +97,11 @@ class AacLcEncoder(
             }
 
         /**
-         * 本机裸AAC解码验证，返回峰值/样本数，解不出返回null。
-         * 这只验证本机编码产物，不证明线上密文、车机解码或扬声器路由正确。
+         * 自检：用平台解码器把一帧裸 AAC 解回 PCM，返回 `(峰值, 样本数)`；解不出返回 null。
+         *
+         * 为什么需要（2026-10-20 第三次实测）：车机「收包但不发声」时，最容易搞错的是
+         * 归因——是编码器吐了坏流/静音，还是车机侧没播。本机解码一遍就能证伪：
+         * 峰值 > 0 说明比特流有效且非静音，问题必在车机侧；峰值 = 0 说明编码器在出静音。
          *
          * 注意：这里**绝不能**对帧做任何字节换序（旧实现把所有负载统一按大端 s16 换序，
          * 连 AAC 比特流也换掉了——车机解码器直接判坏帧，这就是「有包无声」的根因）。
@@ -107,44 +110,24 @@ class AacLcEncoder(
             frame: ByteArray,
             sampleRate: Int,
             channels: Int,
-        ): Pair<Int, Int>? = decodePeak(listOf(frame), sampleRate, channels)
-
-        fun audioSpecificConfig(sampleRate: Int, channels: Int): ByteArray {
-            val bits = (2 shl 11) or (frequencyIndex(sampleRate) shl 7) or (channels shl 3)
-            return byteArrayOf((bits shr 8).toByte(), bits.toByte())
-        }
-
-        fun decodePeak(frames: List<ByteArray>, sampleRate: Int, channels: Int): Pair<Int, Int>? {
+        ): Pair<Int, Int>? {
             var created: MediaCodec? = null
             try {
-                require(frames.size in 1..16 && frames.all { it.size in 1..8192 })
                 val format = MediaFormat.createAudioFormat(MIME, sampleRate, channels)
-                format.setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(audioSpecificConfig(sampleRate, channels)))
                 val codec = MediaCodec.createDecoderByType(MIME)
                 created = codec
                 codec.configure(format, null, null, 0)
                 codec.start()
+                val inputIndex = codec.dequeueInputBuffer(200_000L)
+                if (inputIndex < 0) return null
+                val input = codec.getInputBuffer(inputIndex) ?: return null
+                input.clear()
+                input.put(frame)
+                codec.queueInputBuffer(inputIndex, 0, frame.size, 0L, 0)
                 val info = MediaCodec.BufferInfo()
-                val deadline = System.nanoTime() + 1_500_000_000L
-                var submitted = 0
-                var eos = false
-                var peak = 0
-                var samples = 0
+                val deadline = System.nanoTime() + 600_000_000L
                 while (System.nanoTime() < deadline) {
-                    if (!eos) {
-                        val inputIndex = codec.dequeueInputBuffer(0)
-                        if (inputIndex >= 0) {
-                            val input = codec.getInputBuffer(inputIndex) ?: return null
-                            input.clear()
-                            val frame = frames.getOrNull(submitted)
-                            if (frame != null) input.put(frame)
-                            codec.queueInputBuffer(inputIndex, 0, frame?.size ?: 0,
-                                submitted * FRAME_SAMPLES * 1_000_000L / sampleRate,
-                                if (frame == null) MediaCodec.BUFFER_FLAG_END_OF_STREAM else 0)
-                            if (frame == null) eos = true else submitted++
-                        }
-                    }
-                    val outputIndex = codec.dequeueOutputBuffer(info, 10_000L)
+                    val outputIndex = codec.dequeueOutputBuffer(info, 60_000L)
                     if (outputIndex == MediaCodec.INFO_TRY_AGAIN_LATER ||
                         outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED ||
                         outputIndex == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED
@@ -153,8 +136,9 @@ class AacLcEncoder(
                     }
                     if (outputIndex < 0) continue
                     val output = codec.getOutputBuffer(outputIndex)
+                    var peak = 0
+                    var samples = 0
                     if (output != null && info.size > 0) {
-                        output.order(java.nio.ByteOrder.LITTLE_ENDIAN)
                         output.position(info.offset)
                         output.limit(info.offset + info.size)
                         while (output.remaining() >= 2) {
@@ -165,9 +149,9 @@ class AacLcEncoder(
                         }
                     }
                     codec.releaseOutputBuffer(outputIndex, false)
-                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                    if (samples > 0) return peak to samples
                 }
-                return if (samples > 0) peak to samples else null
+                return null
             } catch (_: Exception) {
                 return null
             } finally {
@@ -216,7 +200,6 @@ class AacLcEncoder(
     fun start(): Boolean =
         synchronized(lock) {
             if (started) return true
-            var initializing: MediaCodec? = null
             try {
                 val format =
                     MediaFormat.createAudioFormat(MIME, sampleRate, channels).apply {
@@ -228,7 +211,6 @@ class AacLcEncoder(
                         setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, inputFrameBytes)
                     }
                 val created = MediaCodec.createEncoderByType(MIME)
-                initializing = created
                 created.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
                 created.start()
                 codec = created
@@ -238,17 +220,8 @@ class AacLcEncoder(
                     "AUDIO: AAC-LC 编码器就绪（${sampleRate}Hz ${channels}ch " +
                         "${bitRate / 1000}kbps，帧=${FRAME_SAMPLES}采样/${inputFrameBytes}B）",
                 )
-                val implementation = runCatching {
-                    val info = created.codecInfo
-                    "name=${created.name} hardwareReported=${info.isHardwareAccelerated} softwareOnly=${info.isSoftwareOnly}"
-                }.getOrDefault("codecInfo=unavailable")
-                log("AUDIO-DIAG: AAC encoder $implementation")
-                initializing = null
                 true
             } catch (error: Exception) {
-                runCatching { initializing?.stop() }
-                runCatching { initializing?.release() }
-                codec = null
                 log("AUDIO: AAC-LC 编码器启动失败 - ${error.message}（本档位放弃）")
                 started = false
                 false
@@ -268,7 +241,6 @@ class AacLcEncoder(
     fun encode(
         pcm: ByteArray,
         size: Int,
-        offset: Int = 0,
     ): List<ByteArray> =
         synchronized(lock) {
             val encoder = codec
@@ -292,15 +264,14 @@ class AacLcEncoder(
                     // 送进 codec 的字节数必须与 put 进去的一致：`put` 会被 capacity
                     // 截断，而 queueInputBuffer 若仍按原始 size 记账，codec 会去读
                     // 没写过的区域（个别 ROM 直接抛 IllegalArgumentException）。
-                    require(offset >= 0 && offset <= pcm.size && size >= 0 && size <= pcm.size - offset)
-                    val length = size.coerceAtMost(buffer?.capacity() ?: 0).coerceAtMost(pcm.size - offset)
+                    val length = size.coerceAtMost(buffer?.capacity() ?: 0).coerceAtMost(pcm.size)
                     if (buffer == null || length <= 0) {
                         // 拿不到输入缓冲：不排队空 buffer（那会被当成一帧空音频）
                         encoder.queueInputBuffer(inputIndex, 0, 0, presentationUs, 0)
                         droppedInputBusy++
                     } else {
                         buffer.clear()
-                        buffer.put(pcm, offset, length)
+                        buffer.put(pcm, 0, length)
                         encoder.queueInputBuffer(inputIndex, 0, length, presentationUs, 0)
                         presentationUs += FRAME_SAMPLES * 1_000_000L / sampleRate
                     }
@@ -311,9 +282,7 @@ class AacLcEncoder(
                 // 不是「异常」，是一次可预期的收尾竞态，记一行即可，别继续喂。
                 codec = null
                 started = false
-                runCatching { encoder.stop() }
-                runCatching { encoder.release() }
-                log("AUDIO: AAC 编码器状态失效，停止编码并释放（${error.message}）；交由AAC恢复策略判断")
+                log("AUDIO: AAC 编码器已释放，停止编码（${error.message}）——收尾竞态，已忽略")
             } catch (error: Exception) {
                 log("AUDIO: AAC 编码异常 - ${error.message}")
             }

@@ -11,22 +11,13 @@ import java.util.Random
 class PcmFrameBufferTest {
     @Test
     fun arbitraryFragmentsPreserveEveryByteAndDoNotRetainInputTail() {
-        checkFragments(AudioSender.PACKET_BYTES)
-    }
-
-    @Test
-    fun aacFramesPreserveByteOrderAcrossBorrowedSlicesAndReusedInput() {
-        checkFragments(AacLcEncoder.pcmBytes(2))
-    }
-
-    private fun checkFragments(frameBytes: Int) {
         val random = Random(42)
-        val source = ByteArray(frameBytes * 100).also { random.nextBytes(it) }
-        val buffer = PcmFrameBuffer(frameBytes)
+        val source = ByteArray(AudioSender.PACKET_BYTES * 100).also { random.nextBytes(it) }
+        val buffer = PcmFrameBuffer(AudioSender.PACKET_BYTES)
         val out = ByteArrayOutputStream()
         var offset = 0
         val emit = PcmFrameConsumer { data, start ->
-            out.write(data, start, frameBytes)
+            out.write(data, start, AudioSender.PACKET_BYTES)
             true
         }
         while (offset < source.size) {

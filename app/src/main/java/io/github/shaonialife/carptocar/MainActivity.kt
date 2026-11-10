@@ -266,7 +266,7 @@ class MainActivity : AppCompatActivity() {
     /**
      * 连接前必须拿到的权限（缺哪个列哪个）。
      *
-     * - 13+：`BLUETOOTH_CONNECT`（iAP2 控制通道）+ `NEARBY_WIFI_DEVICES` + 精确位置
+     * - 13+：`BLUETOOTH_CONNECT`（iAP2 控制通道）+ `NEARBY_WIFI_DEVICES`
      *   （`WifiNetworkSpecifier`／热点建议；缺了它 `requestNetwork` 会**静默挂起**，
      *   既不回调也不抛异常，现场表现是「发起加入后一条日志都没有」）；
      * - 12/12L：`BLUETOOTH_CONNECT` + `ACCESS_FINE_LOCATION`（那时应用专属网络
@@ -281,10 +281,7 @@ class MainActivity : AppCompatActivity() {
             if (!isGranted(Manifest.permission.NEARBY_WIFI_DEVICES)) {
                 missing += Manifest.permission.NEARBY_WIFI_DEVICES
             }
-        }
-        // SSID/BSSID remain location-sensitive on Android 13+, even with Nearby Wi-Fi granted.
-        if (!isGranted(Manifest.permission.ACCESS_FINE_LOCATION)) {
-            missing += Manifest.permission.ACCESS_COARSE_LOCATION
+        } else if (!isGranted(Manifest.permission.ACCESS_FINE_LOCATION)) {
             missing += Manifest.permission.ACCESS_FINE_LOCATION
         }
         return missing
@@ -298,20 +295,22 @@ class MainActivity : AppCompatActivity() {
     private fun promptConnectionPermissionDenied(missing: Collection<String>) {
         if (!permissionHintShown.compareAndSet(false, true)) return
         val names =
-            missing.map { permission ->
+            missing.joinToString("、") { permission ->
                 when (permission.substringAfterLast('.')) {
                     "BLUETOOTH_CONNECT" -> "附近的蓝牙设备"
                     "NEARBY_WIFI_DEVICES" -> "附近的 WLAN 设备"
-                    "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION" -> "精确位置信息"
+                    "ACCESS_FINE_LOCATION" -> "位置信息"
                     else -> permission.substringAfterLast('.')
                 }
-            }.distinct().joinToString("、")
+            }
         DarkMessageDialog.show(
             activity = this,
             title = "缺少「$names」权限",
             message =
-                "连接需要附近设备权限；识别已连接热点还需要精确位置权限，避免重复弹出 Wi-Fi 选择窗口。" +
-                    "不会读取或记录手机坐标。\n\n请到「设置 > 应用 > 权限」允许对应权限，然后重新启动连接。",
+                "没有这项权限，系统不允许 App 加入车机热点，也不允许通过蓝牙与车机通信，" +
+                    "连接必然失败。\n\n这是 Android 的系统级授权，只能由你点一次「允许」，" +
+                    "没有任何应用能绕过。请到「设置 > 应用 > 权限 > 附近的设备」里打开，" +
+                    "然后重新点「启动连接」。",
             actions =
                 listOf(
                     DarkMessageDialog.Action("知道了") {},
@@ -476,7 +475,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 启动连接的前置检查：**权限（一次申请完）** → 位置服务（识别当前热点身份）
+     * 启动连接的前置检查：**权限（一次申请完）** → 位置服务（仅 Android 12/12L）
      * → 蓝牙开关。任一不满足都引导（蓝牙关闭可一键跳系统设置），通过后回调继续。
      *
      * 权限这里只调用一次 [connectionPermissionLauncher]：以前是「先申请蓝牙权限、
@@ -499,13 +498,14 @@ class MainActivity : AppCompatActivity() {
             connectionPermissionLauncher.launch(missing.toTypedArray())
             return
         }
-        if (!locationServiceEnabled()) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && !locationServiceEnabled()) {
             DarkMessageDialog.show(
                 activity = this,
                 title = "需要开启位置服务",
                 message =
-                    "识别当前已连接的车机热点需要精确位置权限和系统位置服务，" +
-                        "用于避免已经连上热点却重复弹出 Wi-Fi 选择窗口。不会读取或记录手机位置。\n\n请开启位置服务后重试。",
+                    "Android 12 加入车机热点（应用专属 WiFi）要求位置服务开启——系统用它判定" +
+                        "可连接的 WiFi，不会记录你的位置。\n\n请打开位置服务后重试（打开后" +
+                        "热点会静默自动连上，不需要在 WLAN 列表里手动点选）。",
                 actions =
                     listOf(
                         DarkMessageDialog.Action("取消") {},
@@ -518,7 +518,7 @@ class MainActivity : AppCompatActivity() {
                         },
                     ),
             )
-            log("WIFI-ID: 位置服务未开启，无法可靠识别已连接热点；本次连接未发起")
+            log("WIFI: 位置服务未开启——Android 12 下应用专属网络不可用，本次连接未发起")
             return
         }
         val on =
@@ -1575,33 +1575,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun bindDisplayCard() {
         val navigationSwitch = findViewById<SwitchCompat>(R.id.switchInstrumentNavigation)
-        val audioModeSwitch = findViewById<SwitchCompat>(R.id.switchAudioStability)
-        val aacComparison = findViewById<SwitchCompat>(R.id.switchAudioAac44k)
-        val retryAac = findViewById<TextView>(R.id.btnRetryAacAudio)
-        retryAac.setOnClickListener {
-            if (SessionController.retryCurrentAacAudio()) snack("已请求仅重建AAC音频，请观察声音是否恢复")
-            else snack("仅当前AAC媒体连接可用；恢复进行中或车机临时占用音频时请稍后重试")
-        }
-        val savedAudioMode = io.github.shaonialife.carptocar.audio.AudioModePrefs.load(this)
-        audioModeSwitch.isChecked = savedAudioMode != io.github.shaonialife.carptocar.audio.AudioMode.QUALITY
-        aacComparison.isChecked = savedAudioMode == io.github.shaonialife.carptocar.audio.AudioMode.AAC_44K_TEST
-        aacComparison.visibility = if (audioModeSwitch.isChecked) View.VISIBLE else View.GONE
-        retryAac.visibility = aacComparison.visibility
-        fun saveAudioMode() {
-            val mode = when {
-                !audioModeSwitch.isChecked -> io.github.shaonialife.carptocar.audio.AudioMode.QUALITY
-                aacComparison.isChecked -> io.github.shaonialife.carptocar.audio.AudioMode.AAC_44K_TEST
-                else -> io.github.shaonialife.carptocar.audio.AudioMode.STABILITY
-            }
-            io.github.shaonialife.carptocar.audio.AudioModePrefs.save(this, mode)
-            android.widget.Toast.makeText(this, "${mode.label}，断开后重新连接生效", android.widget.Toast.LENGTH_SHORT).show()
-        }
-        audioModeSwitch.setOnCheckedChangeListener { _, enabled ->
-            aacComparison.visibility = if (enabled) View.VISIBLE else View.GONE
-            retryAac.visibility = aacComparison.visibility
-            saveAudioMode()
-        }
-        aacComparison.setOnCheckedChangeListener { _, _ -> saveAudioMode() }
         io.github.shaonialife.carptocar.media.NavigationNowPlaying.ensure(this)
         navigationSwitch.isChecked = io.github.shaonialife.carptocar.media.NavigationNowPlaying.isNavigation()
         navigationSwitch.setOnCheckedChangeListener { _, enabled ->

@@ -21,8 +21,6 @@ enum class AudioTuning(
     /** SETUP 里的 supportsHighAccuracyTimestamps。 */
     val highAccuracyTimestamps: Boolean,
 ) {
-    /** PCM policy is independent of AAC; preserves the existing native 352-sample wire format. */
-    PCM_NATIVE(adts = false, spf = 352, highAccuracyTimestamps = false),
     /** 裸 AAC 帧 + `spf=1024` + 到达时间戳——真车实测唯一可用组合。 */
     RAW_SPF(
         adts = false,
@@ -33,5 +31,5 @@ enum class AudioTuning(
 
     /** 日志用的一行说明。 */
     val detail: String
-        get() = if (this == PCM_NATIVE) "原生 PCM + spf=352 + 到达时间戳" else "裸 AAC 帧 + spf=$spf + 到达时间戳"
+        get() = "裸 AAC 帧 + spf=$spf + 到达时间戳"
 }

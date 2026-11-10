@@ -18,9 +18,20 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Local car communication only: reuse an identified live network or request a WifiNetworkSpecifier.
- * Never register system internet suggestions. Remove historical app-owned suggestions before joining.
- * Process binding routes this app's sockets; system internet/default selection is observed separately.
+ * 用车机热点承载 CarPlay 流量。
+ *
+ * **两种入网方式，默认应用专属网络**：
+ *  - [joinCarPlayNetwork]：`WifiNetworkSpecifier` 请求「只对本进程可见」的 WiFi。
+ *    系统不会把它保存成普通网络、也不会设为默认网络——其它应用（微信/地图/导航）
+ *    继续走 4G/5G。这是无互联网车机热点的正确形态：否则系统会把它当成「已连接但
+ *    无网络」的默认 WiFi，部分 ROM 会连带关掉移动数据，用户一上车就断网。
+ *  - [bindCurrentWifi]：旧路径，绑定「任意已连接的 WiFi」。仅在用户手动到 WLAN
+ *    设置连了热点（系统级网络）时兜底用。
+ *
+ * 关键点：
+ *  - 请求不带 `NET_CAPABILITY_INTERNET`，系统不会因「无互联网」拆连接；
+ *  - 应用专属网络必须 `bindProcessToNetwork` 后再建 socket / 注册 mDNS；
+ *  - 首次连接会弹系统确认框；SSID 必须精确匹配（热点名可能带空格/中文）。
  */
 class WifiCarPlayConnector(
     private val context: Context,
@@ -43,40 +54,19 @@ class WifiCarPlayConnector(
     private val connectivityManager =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
-    // Used to remove historical app-owned suggestions, not to propose internet networks.
+    /**
+     * WiFi 建议（[WifiNetworkSuggestion]）通道。null = 系统不支持（API < 29 或厂商裁剪）。
+     *
+     * 建议与 [joinCarPlayNetwork] 的 specifier 是两条**互补**的路：
+     *  - specifier：本轮立刻入网，但每次都要用户在系统确认框上点「连接」；
+     *  - suggestion：登记一次（首次经系统通知授权）后长期有效，进入范围由系统自动
+     *    关联，**不再有任何确认框**——这才是车上无人点屏时的正确形态。
+     * 所以两者要同时用：suggestion 先登记（异步生效），specifier 同步等结果。
+     */
     private val wifiManager: WifiManager? =
         context.applicationContext.getSystemService(WifiManager::class.java)
 
     private val callback = io.github.shaonialife.carptocar.util.OwnedSlot<ConnectivityManager.NetworkCallback>()
-    private val associationObserver = io.github.shaonialife.carptocar.util.OwnedSlot<ConnectivityManager.NetworkCallback>()
-    private val associations = WifiAssociationCache<Network>()
-
-    /** Passive identity observer: never requests a network or changes process binding. */
-    @Synchronized fun startAssociationObservation() {
-        if (associationObserver.get() != null) return
-        val observer = object : ConnectivityManager.NetworkCallback(FLAG_INCLUDE_LOCATION_INFO) {
-            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
-                associationObserver.runIfCurrent(this) {
-                    associations.update(network, plainSsid((caps.transportInfo as? WifiInfo)?.ssid))
-                }
-            }
-            override fun onLost(network: Network) { associationObserver.runIfCurrent(this) { associations.lost(network) } }
-        }
-        associationObserver.replace(observer, { true }) { connectivityManager.unregisterNetworkCallback(it) }
-        try {
-            connectivityManager.registerNetworkCallback(NetworkRequest.Builder()
-                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(), observer)
-        } catch (error: Exception) {
-            stopAssociationObservation()
-            log("WIFI-ID: passive observation unavailable type=${error.javaClass.simpleName}")
-        }
-    }
-
-    @Synchronized fun stopAssociationObservation() {
-        associationObserver.clear { runCatching { connectivityManager.unregisterNetworkCallback(it) } }
-        associations.clear()
-    }
 
     val currentNetwork: Network? get() = boundNetwork.get()
     private val boundNetwork = AtomicReference<Network?>(null)
@@ -214,7 +204,6 @@ class WifiCarPlayConnector(
         graceMillis: Long = 0L,
         isCancelled: () -> Boolean = { false },
     ): JoinResult {
-        if (isCancelled() || !isolateLegacySuggestions()) return JoinResult.Unavailable
         val specifier =
             buildSpecifier(ssid, passphrase, securityType)
                 ?: return JoinResult.Unsupported
@@ -235,7 +224,7 @@ class WifiCarPlayConnector(
                         val bound = result.available(network) { connectivityManager.bindProcessToNetwork(network) }
                         if (bound) boundNetwork.set(network)
                         log("CONNECT-DIAG: specifier available request=${System.identityHashCode(this)} bound=$bound")
-                        log("WiFi: 已加入应用专属网络 \"$ssid\"（$network bindProcessToNetwork=$bound）——仅确认本APP绑定，系统默认网络另行观测")
+                        log("WiFi: 已加入应用专属网络 \"$ssid\"（$network bindProcessToNetwork=$bound）——不影响其它应用联网")
                         latch.countDown()
                     }
                 }
@@ -358,22 +347,102 @@ class WifiCarPlayConnector(
     fun bindCurrentWifi(ssid: String, onResult: (Boolean) -> Unit = {}) {
         Bg.run("wifi-bind") { onResult(bindCurrentWifiBlocking(15_000L, ssid) != null) }
     }
-    // System internet suggestions are intentionally disabled; migrate old app-owned entries before joining.
-    private val suggestionIsolation = LegacySuggestionIsolation()
+    /**
+     * 把车机热点登记为「WiFi 建议」——**免确认框**入网的唯一途径。
+     *
+     * 背景（2026-10-29 BMW iD9 实测定谳）：`WifiNetworkSpecifier` 每次加入都要人在
+     * 系统确认框上点「连接」；车机只等约 27 秒就拆蓝牙链，用户在车上看不到手机屏幕，
+     * 于是每轮都「发起 → 无人确认 → 车机超时 → 重连」，表现为「连上就闪退」。
+     * 建议登记一次后由系统自动关联，进范围即连，不再需要人。
+     *
+     * 幂等：已登记过（返回 [WifiManager.STATUS_NETWORK_SUGGESTIONS_ERROR_ADD_DUPLICATE]）
+     * 视为成功——重复登记不是错误，调用方每轮都可以调。
+     *
+     * 首次登记系统会发一条通知请用户「允许连接」，用户点允许后列表才生效；
+     * 返回值 [WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS] 只代表「已登记」，
+     * 不代表用户已授权——所以本函数**不能**用来判断网络已可用，必须配合
+     * [bindCurrentWifiBlocking] 验证。
+     *
+     * 副作用提示：建议网络一旦生效，系统会把它保存并自动连接（属于系统级网络，
+     * 会出现在「已保存的网络」里，不再是应用专属）。无互联网时会由系统决定是否
+     * 回落移动数据——本应用始终 `bindProcessToNetwork` 到它，其它应用行为不受我们控制。
+     */
+    fun registerSuggestion(
+        ssid: String,
+        passphrase: String,
+        securityType: Int,
+    ): Boolean {
+        val manager = wifiManager ?: return logSuggestion("不可用（系统无 WifiManager）")
+        // 没有 isNetworkSuggestionsSupported 这种公开 API，用「每应用建议条数上限」
+        // 判断：厂商裁剪掉该特性时返回 0。
+        val capacity =
+            runCatching { manager.maxNumberOfNetworkSuggestionsPerApp }.getOrDefault(-1)
+        if (capacity <= 0) {
+            return logSuggestion("跳过（系统不支持 WifiNetworkSuggestion，上限=$capacity）")
+        }
+        val suggestion =
+            try {
+                val builder = WifiNetworkSuggestion.Builder().setSsid(ssid)
+                when (securityType) {
+                    0 -> Unit
+                    // WEP 无对应 API，也不该再出现在现代车机上
+                    1 -> return logSuggestion("跳过（WEP 无法用建议表达）")
+                    4 -> {
+                        if (passphrase.isEmpty()) return logSuggestion("跳过（WPA3 但无密码）")
+                        builder.setWpa3Passphrase(passphrase)
+                    }
+                    else -> {
+                        if (passphrase.isEmpty()) return logSuggestion("跳过（无密码）")
+                        builder.setWpa2Passphrase(passphrase)
+                    }
+                }
+                builder.build()
+            } catch (error: Exception) {
+                return logSuggestion("构造失败（${error.message}）")
+            }
+        val status =
+            try {
+                manager.addNetworkSuggestions(listOf(suggestion))
+            } catch (error: Exception) {
+                // Android 13+ 缺 NEARBY_WIFI_DEVICES 会抛 SecurityException
+                return logSuggestion("登记异常（${error.javaClass.simpleName}: ${error.message}）")
+            }
+        return when (status) {
+            WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS -> {
+                log(
+                    "WiFi: 已登记热点建议 \"$ssid\"（首次会弹系统通知请用户「允许」；" +
+                        "授权后进范围自动连接，不再有确认框）",
+                )
+                true
+            }
 
-    /** Upgrade migration: only this package's suggestions, never saved user networks or credentials. */
-    private fun isolateLegacySuggestions(): Boolean = suggestionIsolation.ensure {
-        val manager = wifiManager ?: return@ensure false
-        try {
-            val owned = manager.networkSuggestions
-            val status = if (owned.isEmpty()) WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS
-                else manager.removeNetworkSuggestions(owned)
-            val ready = status == WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS
-            log("WIFI-POLICY: local-only; removedOwnedSuggestions=${owned.size} status=$status ready=$ready; saved networks and encrypted credentials unchanged")
-            ready
-        } catch (error: Exception) {
-            log("WIFI-POLICY: legacy suggestion cleanup failed type=${error.javaClass.simpleName}; no new network request")
-            false
+            WifiManager.STATUS_NETWORK_SUGGESTIONS_ERROR_ADD_DUPLICATE -> {
+                // 每轮都会走到这里，日常不刷屏：只在调试级别留一行
+                log("WiFi: 热点建议 \"$ssid\" 已登记过——无需重复登记")
+                true
+            }
+
+            WifiManager.STATUS_NETWORK_SUGGESTIONS_ERROR_ADD_NOT_ALLOWED -> {
+                logSuggestion("失败（系统不允许现在登记——应用可能不在前台）")
+            }
+
+            WifiManager.STATUS_NETWORK_SUGGESTIONS_ERROR_RESTRICTED_BY_ADMIN -> {
+                logSuggestion("失败（被设备管理员/工作资料策略限制）")
+            }
+
+            WifiManager.STATUS_NETWORK_SUGGESTIONS_ERROR_APP_DISALLOWED -> {
+                logSuggestion("失败（本应用被系统禁止提交 WiFi 建议）")
+            }
+
+            WifiManager.STATUS_NETWORK_SUGGESTIONS_ERROR_ADD_INVALID -> {
+                logSuggestion("失败（建议参数无效：SSID/密码不符合系统要求）")
+            }
+
+            WifiManager.STATUS_NETWORK_SUGGESTIONS_ERROR_ADD_EXCEEDS_MAX_PER_APP -> {
+                logSuggestion("失败（超过厂商允许的建议条数上限）")
+            }
+
+            else -> logSuggestion("失败（status=$status）")
         }
     }
 
@@ -398,7 +467,7 @@ class WifiCarPlayConnector(
     /**
      * 阻塞版「绑定当前已连接的 WiFi」：等系统给出任意可用 WiFi 网络并绑定进程。
      *
-     * 用途是复用系统当前已关联、身份已验证的车机热点，
+     * 用途是接住 [registerSuggestion] 的成果——建议生效后系统会**自己**连上车机热点，
      * 此时不需要再发 specifier（也不会弹框），直接绑上即可。返回 null = 超时/取消。
      *
      * 与 [bindCurrentWifi] 的区别：那个是回调式、永不返回结果（给 UI 用）；
@@ -409,7 +478,6 @@ class WifiCarPlayConnector(
         expectedSsid: String? = null,
         isCancelled: () -> Boolean = { false },
     ): Network? {
-        if (isCancelled() || !isolateLegacySuggestions()) return null
         val request =
             NetworkRequest
                 .Builder()
@@ -460,7 +528,7 @@ class WifiCarPlayConnector(
                             result.set(network)
                         }
                         log("WIFI: fallback selected network=$network identity=${if (observedSsid != null) "ssid-visible" else "target-invite-and-exact-interface"} bound=$bound; lease pinned")
-                        log("WiFi: 已验证目标网络——绑定当前 WiFi（$network bindProcessToNetwork=$bound）")
+                        log("WiFi: 建议网络已生效——绑定当前 WiFi（$network bindProcessToNetwork=$bound）")
                         latch.countDown()
                     }
                 }
@@ -520,7 +588,7 @@ class WifiCarPlayConnector(
     /**
      * 系统当前是不是已经连在 [ssid] 这条热点上。
      *
-     * 三种来源都算：用户手动在系统 WLAN 里连过、旧版本热点建议 登记的建议网络被
+     * 三种来源都算：用户手动在系统 WLAN 里连过、[registerSuggestion] 登记的建议网络被
      * 系统自动关联、上一轮的应用专属网络还没被系统拆掉。
      *
      * 读不到 SSID 时一律返回 false——Android 11+ 没给定位/附近设备权限时
@@ -528,7 +596,6 @@ class WifiCarPlayConnector(
      * 家里的 WiFi 上（AirPlay 必然连不上，而且其它应用瞬间断网）。
      */
     fun isAssociatedTo(ssid: String): Boolean {
-        if (runCatching { associations.matches(ssid, connectivityManager.allNetworks.toList()) }.getOrDefault(false)) return true
         // 主路径：ConnectivityManager 逐条网络的 transportInfo。
         //
         // `wifiManager.connectionInfo` 单独用会漏：Android 12+ 上它对**应用专属网络**
@@ -580,18 +647,7 @@ class WifiCarPlayConnector(
         timeoutMillis: Long,
         isCancelled: () -> Boolean = { false },
     ): Network? {
-        if (!isAssociatedTo(ssid)) {
-            // Existing Wi-Fi can precede its unredacted capabilities callback; don't prompt immediately.
-            val hasWifi = runCatching { connectivityManager.allNetworks.any {
-                connectivityManager.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
-            } }.getOrDefault(false)
-            val deadline = SystemClock.elapsedRealtime() + if (hasWifi) 1_200L else 0L
-            while (!isCancelled() && SystemClock.elapsedRealtime() < deadline && !isAssociatedTo(ssid)) Thread.sleep(100)
-            if (isCancelled() || !isAssociatedTo(ssid)) {
-                log("WIFI-ID: reuse unavailable hasWifi=$hasWifi; no live matching SSID evidence")
-                return null
-            }
-        }
+        if (!isAssociatedTo(ssid)) return null
         log("WiFi: 系统已连在 \"$ssid\" 上——直接复用，不再发 specifier（不弹确认框）")
         return bindCurrentWifiBlocking(timeoutMillis, ssid, isCancelled)
     }

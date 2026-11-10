@@ -159,6 +159,7 @@ class AudioSender(
     private var syncFirstSent = false
 
     /** AAC-LC 编码器（仅 [AudioCodec.AAC_LC] 时创建）。 */
+    private var aacEncoder: AacLcEncoder? = null
 
     /**
      * RTP 游标（原本是采集循环里的局部变量）。提到字段上是因为**同步包线程**要读
@@ -172,16 +173,11 @@ class AudioSender(
 
     /** 首个音频包标记（打完就清）；AAC 自检只跑一次。 */
     private var markerPending = true
-    @Volatile var onAacDiscontinuity: ((AudioSender, String) -> Unit)? = null
-    val isAac: Boolean get() = codec == AudioCodec.AAC_LC
-    private val aacOutput: AacOutputPipeline? = if (codec == AudioCodec.AAC_LC)
-        AacOutputPipeline(AacOutputSettings(sampleRate, wrapAdts = adtsFrames), log,
-            send = { payload -> sendPayload(payload).also { if (!it) stop() } }, longGap = { onAacDiscontinuity?.invoke(this, it) }) else null
-    private val reportedSourceFormats = IntArray(8) { Int.MIN_VALUE }
+    private var selfChecked = false
 
     /** 每包/每帧对应的 PCM 字节数（PCM 通路=一包的负载；AAC 通路=一帧的输入）。 */
     private val framePcmBytes: Int
-        get() = aacOutput?.frameBytes ?: PACKET_BYTES
+        get() = if (codec == AudioCodec.AAC_LC) AacLcEncoder.pcmBytes(CHANNELS) else PACKET_BYTES
 
     /** 每包推进的样本数（AAC 一帧 1024，PCM 一包 352）。 */
     private val samplesPerPacket: Long
@@ -303,9 +299,14 @@ class AudioSender(
             socket = client
 
             // AAC 通路先把编码器立起来：编不出来就没必要采集（也避免「有包无声」的假象）
-            if (aacOutput != null && !aacOutput.start()) {
-                client.close(); socket = null
-                return false
+            if (codec == AudioCodec.AAC_LC) {
+                val encoder = AacLcEncoder(sampleRate, CHANNELS, wrapAdts = adtsFrames, log = log)
+                if (!encoder.start()) {
+                    client.close()
+                    socket = null
+                    return false
+                }
+                aacEncoder = encoder
             }
 
             val captureConfig = buildCaptureConfig(projection)
@@ -326,7 +327,8 @@ class AudioSender(
             if (recorder.state != AudioRecord.STATE_INITIALIZED) {
                 log("AUDIO: AudioRecord 初始化失败（state=${recorder.state}）")
                 runCatching { recorder.release() }
-                aacOutput?.stop()
+                aacEncoder?.stop()
+                aacEncoder = null
                 client.close()
                 socket = null
                 return false
@@ -391,9 +393,14 @@ class AudioSender(
             client.connect(InetAddress.getByName(host), dataPort)
             socket = client
 
-            if (aacOutput != null && !aacOutput.start()) {
-                client.close(); socket = null
-                return false
+            if (codec == AudioCodec.AAC_LC) {
+                val encoder = AacLcEncoder(sampleRate, CHANNELS, wrapAdts = adtsFrames, log = log)
+                if (!encoder.start()) {
+                    client.close()
+                    socket = null
+                    return false
+                }
+                aacEncoder = encoder
             }
 
             running.set(true)
@@ -406,12 +413,7 @@ class AudioSender(
             ingress = AudioIngressQueue(
                 consume = { data, rate, channels, gap -> processPcm(data, data.size, rate, channels, gap) },
                 log = log,
-                failed = { error -> log("AUDIO-DIAG: input worker failed=${error.javaClass.simpleName} codec=$codec"); stop() },
-                maxDurationNs = aacOutput?.settings?.ingressNs ?: PcmOutputSettings.INGRESS_NS,
-                maxBytes = aacOutput?.settings?.ingressBytes ?: PcmOutputSettings.INGRESS_BYTES,
-                speechDurationNs = aacOutput?.settings?.speechNs ?: PcmOutputSettings.SPEECH_NS,
-                speechMaxBytes = aacOutput?.settings?.speechBytes ?: PcmOutputSettings.SPEECH_BYTES,
-                workerName = if (aacOutput != null) "audio-aac-send" else "audio-pcm-send",
+                failed = { error -> log("AUDIO-DIAG: PCM worker failed=${error.javaClass.simpleName}"); stop() },
             )
             startSyncLoop()
             startSilenceKeepAlive()
@@ -424,7 +426,8 @@ class AudioSender(
     }
 
     /** 直通模式下的帧对齐累积缓冲（把任意大小的注入 PCM 切成固定帧长）。 */
-    private val pcmFrames by lazy { PcmFrameBuffer(PACKET_BYTES) }
+    private val passthroughBuffer = java.io.ByteArrayOutputStream() // AAC 回退路径
+    private val pcmFrames = PcmFrameBuffer(PACKET_BYTES)
     private val pcmPackets by lazy { PcmPacketSealer(streamKey, streamType) }
     private val pcmDatagram = DatagramPacket(ByteArray(0), 0)
     private val forwardPcmFrame = PcmFrameConsumer { source, offset ->
@@ -434,7 +437,7 @@ class AudioSender(
     /** 最近一次收到**真实** PCM 的时刻（uptimeMillis）；静音保活据此判断要不要补帧。 */
     @Volatile
     private var lastRealFeedAt = 0L
-    private val silencePolicy = aacOutput?.settings?.let { SilenceFillPolicy(it.idleFillMs, it.stoppedFillMs) } ?: SilenceFillPolicy()
+    private val silencePolicy = SilenceFillPolicy()
     fun beginIdleFill() {
         if (running.get() && record == null) silencePolicy.engineStopped()
     }
@@ -474,7 +477,7 @@ class AudioSender(
                     var announced = false
                     while (running.get()) {
                         try {
-                            Thread.sleep(aacOutput?.settings?.fillTickMs ?: KEEPALIVE_TICK_MILLIS)
+                            Thread.sleep(KEEPALIVE_TICK_MILLIS)
                         } catch (_: InterruptedException) {
                             break
                         }
@@ -497,7 +500,7 @@ class AudioSender(
                         var guard = 0
                         while (running.get() &&
                             nextFillAt <= now &&
-                            guard < (aacOutput?.settings?.maxFillFrames ?: MAX_KEEPALIVE_FRAMES_PER_TICK)
+                            guard < MAX_KEEPALIVE_FRAMES_PER_TICK
                         ) {
                             if (android.os.SystemClock.uptimeMillis() - lastRealFeedAt <
                                 silencePolicy.thresholdMs() || ingress?.pending() == true
@@ -591,17 +594,8 @@ class AudioSender(
 
     private fun processPcmLocked(srcPcm: ByteArray, size: Int, srcRate: Int, srcChannels: Int, gap: Boolean) {
         if (!running.get()) return
-        val sourceFormatKey = srcRate * 4 + srcChannels
-        val reportSlot = if (sourceFormatKey in reportedSourceFormats) -1 else reportedSourceFormats.indexOf(Int.MIN_VALUE)
-        if (reportSlot >= 0) {
-            // Media/TTS may alternate every block. Report each format once, not every alternation.
-            reportedSourceFormats[reportSlot] = sourceFormatKey
-            log("AUDIO-ROUTE: inputRate=$srcRate inputChannels=$srcChannels inputPcm=s16le " +
-                "targetRate=$sampleRate targetChannels=$CHANNELS codec=$codec streamType=$streamType " +
-                "resampler=${if (codec == AudioCodec.AAC_LC && srcRate > 0 && srcRate != sampleRate) "streaming-phase-preserved" else "native-or-channel-alignment"}")
-        }
         if (gap) {
-            if (codec == AudioCodec.PCM) pcmFrames.clear(); markerPending = true
+            pcmFrames.clear(); passthroughBuffer.reset(); markerPending = true
             // Count discontinuities in the bounded stage summary, preserving reset semantics.
         }
         if (codec == AudioCodec.PCM) {
@@ -614,7 +608,17 @@ class AudioSender(
             }
             return
         }
-        aacOutput?.feed(srcPcm, size, srcRate, srcChannels, gap)
+        val resampled = alignPcm(srcPcm, size, srcRate, srcChannels)
+        // 累积到固定帧长，凑满一帧才发（PCM 通路逐包、AAC 通路逐帧）
+        val frameBytes = framePcmBytes
+        passthroughBuffer.write(resampled, 0, resampled.size)
+        while (passthroughBuffer.size() >= frameBytes) {
+            val frame = passthroughBuffer.toByteArray().copyOf(frameBytes)
+            val rest = passthroughBuffer.toByteArray()
+            passthroughBuffer.reset()
+            passthroughBuffer.write(rest, frameBytes, rest.size - frameBytes)
+            dispatchPcm(frame)
+        }
     }
 
     /**
@@ -683,7 +687,11 @@ class AudioSender(
             if (codec == AudioCodec.PCM) {
                 sendPayload(pcm, offset, size).also { if (!it) stop() }
             } else {
-                (aacOutput?.dispatch(pcm, offset, size) == true).also { if (!it) stop() }
+                val encoder = aacEncoder ?: return false
+                val payloads = encoder.encode(pcm, size)
+                val success = payloads.all { sendPayload(it) }
+                if (!success) stop()
+                success
             }
         } catch (error: Throwable) {
             log("AUDIO: 直通注入异常 - ${error.message}")
@@ -707,12 +715,8 @@ class AudioSender(
         runCatching { record?.stop() }
         runCatching { record?.release() }
         record = null
-        // AAC's backend serializes framing and sends. Unblock UDP before waiting for its state lock.
-        if (aacOutput != null) {
-            runCatching { socket?.close() }
-            socket = null
-        }
-        aacOutput?.stop()
+        aacEncoder?.stop()
+        aacEncoder = null
         runCatching { socket?.close() }
         socket = null
         runCatching { syncSocket?.close() }
@@ -722,7 +726,8 @@ class AudioSender(
         keepAliveThread = null
         thread = null
         synchronized(this) {
-            if (codec == AudioCodec.PCM) pcmFrames.clear()
+            pcmFrames.clear()
+            passthroughBuffer.reset()
         }
         continuity.summary(System.nanoTime())?.let { log("$it final=true codec=$codec") }
         stageWindow.finish(System.nanoTime())?.let(log)
@@ -730,7 +735,7 @@ class AudioSender(
         if (syncSent > 0 && syncIcmpDeferrals > 0) {
             log(
                 "AUDIO: 同步包共发出 $syncSent 个，其中 $syncIcmpDeferrals 次被车机 controlPort 的 " +
-                    "ICMP 拒绝（仅本地补发，不证明车机收到或采用锚点）",
+                    "ICMP 拒绝（已就地补发，锚点未丢）",
             )
         }
         log("AUDIO: 已停止（共发 $packetsSent 包 / ${bytesSent / 1024}KB）")
@@ -798,7 +803,7 @@ class AudioSender(
                     if (syncIcmpDeferrals == 1L) {
                         log(
                             "AUDIO: 车机 controlPort 未监听（ICMP 端口不可达）——每包延后一拍报错，" +
-                                "已在同一套接字补发；本地发送不证明车机收到锚点（此提示只打一次）",
+                                "已就地在同一套接字补发，锚点仍每秒一包（此提示只打一次）",
                         )
                     }
                 }
@@ -862,7 +867,8 @@ class AudioSender(
                         if (sent && !syncFirstSent) {
                             syncFirstSent = true
                             log(
-                                "AUDIO: 首个同步包本地发送成功（X 位=1）；车机接收与采用未确认",
+                                "AUDIO: 首个同步包已发出（X 位=1）——" +
+                                    "车机若仍无声，说明它没在等这个锚点",
                             )
                         }
                         try {
@@ -932,11 +938,20 @@ class AudioSender(
                 // PCM 通路：采一段 = 发一包；AAC 通路：喂一帧 PCM，编码器可能吐出 0~N 帧
                 val payloads: List<ByteArray> =
                     if (codec == AudioCodec.AAC_LC) {
-                        aacOutput?.encode(pcm, 0, frameBytes) ?: break
+                        val encoder = aacEncoder ?: break
+                        encoder.encode(pcm, frameBytes)
                     } else {
                         listOf(pcm)
                     }
                 if (payloads.isEmpty()) continue
+
+                // 一次性自检：把编码结果自己解一遍，证明比特流有效且非静音。
+                // 这是「车机无声」最需要的一条证据——如果自解码峰值是 0，问题在编码器，
+                // 如果自解码有声音而车机静音，问题在车机侧（会话/音量/路由）。
+                if (!selfChecked) {
+                    selfChecked = true
+                    verifyEncodedFrame(payloads.first())
+                }
 
                 var sendFailed = false
                 for (payload in payloads) {
@@ -1001,6 +1016,37 @@ class AudioSender(
         } catch (error: IOException) {
             log("AUDIO: UDP 发送失败 - ${error.message}")
             false
+        }
+    }
+
+    /** 用平台解码器把首帧解回 PCM，记录峰值（后台线程，不阻塞推流）。 */
+    private fun verifyEncodedFrame(frame: ByteArray) {
+        val payload = frame.copyOf()
+        Thread(
+            {
+                try {
+                    val result = AacLcEncoder.decodePeak(payload, sampleRate, CHANNELS)
+                    if (result == null) {
+                        log("AUDIO: 自检 = 本机解码器没解出样本（首帧 ${payload.size}B）——无法证伪，继续推流")
+                        return@Thread
+                    }
+                    val (peak, samples) = result
+                    log(
+                        "AUDIO: 自检 = 首帧 ${payload.size}B 本机解码 $samples 个样本，峰值 $peak" +
+                            if (peak > 0) {
+                                "（✓ 比特流有效且非静音：车机若无声，问题不在编码/加密）"
+                            } else {
+                                "（⚠ 解码为全零：AAC 编码器输出的是静音数据）"
+                            },
+                    )
+                } catch (error: Exception) {
+                    log("AUDIO: 自检解码异常 - ${error.message}")
+                }
+            },
+            "audio-selfcheck",
+        ).apply {
+            isDaemon = true
+            start()
         }
     }
 

@@ -1014,7 +1014,6 @@ class AirPlayClient(
     @Volatile internal var onResourceModesChanged: (() -> Unit)? = null
     internal fun markRealSourceStarted() = resourceModes.markSourceStarted()
     internal fun screenRecoveryAllowed(): Boolean = resourceModes.canRecoverScreen()
-    internal fun audioRecoveryAllowed(): Boolean = resourceModes.canRecoverAudio()
 
     internal fun handleModeChange(command: Map<*, *>) {
         resourceModes.change((command["params"] as? Map<*, *>) ?: command)

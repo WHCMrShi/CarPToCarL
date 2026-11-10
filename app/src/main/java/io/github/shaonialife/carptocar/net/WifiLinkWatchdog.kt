@@ -66,7 +66,7 @@ class WifiLinkWatchdog(
 ) {
     private val cm: ConnectivityManager? =
         context.applicationContext.getSystemService(ConnectivityManager::class.java)
-    private val wifiEndpoints = LinkedHashMap<Network, String>()
+    private val wifiEndpoints = LinkedHashSet<String>()
     private var lastSignature: String? = null
     private var callback: ConnectivityManager.NetworkCallback? = null
     private var scheduler: ScheduledExecutorService? = null
@@ -91,12 +91,12 @@ class WifiLinkWatchdog(
         val newCallback =
             object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
-                    synchronized(wifiEndpoints) { wifiEndpoints[network] = endpoint(network) }
+                    synchronized(wifiEndpoints) { wifiEndpoints += endpoint(network) }
                     report("系统事件 onAvailable")
                 }
 
                 override fun onLost(network: Network) {
-                    synchronized(wifiEndpoints) { wifiEndpoints.remove(network) }
+                    synchronized(wifiEndpoints) { wifiEndpoints -= endpoint(network) }
                     report("系统事件 onLost")
                 }
 
@@ -106,7 +106,7 @@ class WifiLinkWatchdog(
                 ) {
                     // 关联参数变化（换信道 / 重新认证）不一定伴随 onAvailable/onLost，
                     // 但会导致帧发送卡顿——留一条，只在不重复时输出。
-                    synchronized(wifiEndpoints) { wifiEndpoints[network] = endpoint(network) }
+                    synchronized(wifiEndpoints) { wifiEndpoints += endpoint(network) }
                     report("系统事件网卡能力变化")
                 }
             }
@@ -172,7 +172,7 @@ class WifiLinkWatchdog(
     }
 
     private fun currentSignature(): String {
-        val known = synchronized(wifiEndpoints) { wifiEndpoints.values.toSet() }
+        val known = synchronized(wifiEndpoints) { wifiEndpoints.toSet() }
         val wifi =
             if (known.isEmpty() && running) {
                 // 回调还没跑过：显式取一次当前 WiFi，避免起点写成「没有任何网络」。
@@ -184,16 +184,12 @@ class WifiLinkWatchdog(
             } else {
                 known
             }
-        val observedDefault = runCatching { cm?.activeNetwork }.getOrNull()
-        val processBound = runCatching { cm?.boundNetworkForProcess }.getOrNull()
-        val caps = observedDefault?.let { runCatching { cm?.getNetworkCapabilities(it) }.getOrNull() }
         return WifiLinkSignature.of(
             wifi = wifi,
             car = endpoint(carNetwork()),
-            default = endpoint(observedDefault),
+            default = endpoint(runCatching { cm?.activeNetwork }.getOrNull()),
             ssid = boundSsid(),
-        ) + " processBound=${endpoint(processBound)} defaultInternet=${caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)}" +
-            " defaultValidated=${caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)} defaultTrusted=${caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_TRUSTED)}"
+        )
     }
 
     /** 这条网络是不是 WiFi（区分「Wi-Fi 掉线切了蜂窝」与「真的换了 WiFi 接口」）。 */
