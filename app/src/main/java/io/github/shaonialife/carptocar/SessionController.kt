@@ -198,7 +198,7 @@ object SessionController {
     private const val SPECIFIER_JOIN_GRACE_MS = 20_000L
 
     /**
-     * 建议网络（[registerSuggestion]）生效后，等系统自动关联车机热点的上限。
+     * 本地请求后被动复用已连接目标网络的等待上限（不登记系统互联网建议）。
      * 建议已被用户授权时系统通常 1~3 秒内就连上，比 specifier 快且无弹框。
      */
     private const val SUGGESTION_JOIN_WAIT_MS = 8_000L
@@ -1687,7 +1687,6 @@ object SessionController {
             appendLog("WIFI-MEMORY: presence admitted source=$presence; normal BT-to-WiFi handoff remains valid")
             cacheWork.runIfCurrent { lastCarWifi = saved.wifi; lastWifiPsk = saved.wifi.passphrase; ssidSink?.invoke(saved.wifi.ssid) }
             appendLog("WIFI-MEMORY: bounded preconnect using verified credentials; BT continues independently")
-            cacheWork.runIfCurrent { wifiConnector?.registerSuggestion(saved.wifi.ssid, saved.wifi.passphrase, saved.wifi.securityType) }
             val result = joinCarWifiSpecifier(saved.wifi, false, work = cacheWork)
             if (result !is WifiCarPlayConnector.JoinResult.Joined) return@run
             if (!work.isCurrent || !cacheWork.isCurrent || !sessionWanted ||
@@ -2242,10 +2241,6 @@ object SessionController {
             // 1) WLAN 开关。shell 不可用时跳过检查——requestNetwork 会以 Unavailable 反馈。
             if (shellReady && shellWifiDisabled() && !waitForWifiEnabled()) return@run
             if (cancelled()) return@run
-            // 1.5) 登记 WiFi 建议（幂等）：用户授权过一次后，系统会自己把手机连上
-            // 车机热点，后续不再出现「连接到此网络？」确认框——这是无人点屏场景的
-            // 唯一可行路径（BMW iD9 只给 27s，人来不及点就断链）。
-            work.runIfCurrent { wifiConnector?.registerSuggestion(wifi.ssid, wifi.passphrase, wifi.securityType) }
             // 2) 首选应用专属网络（不影响 4G/5G、不会被系统切回、不需要任何特权）
             when (val result = joinCarWifiSpecifier(wifi, shellReady, work = work)) {
                 is WifiCarPlayConnector.JoinResult.Joined -> Unit
@@ -5501,12 +5496,7 @@ object SessionController {
             connectBudget.enter(ConnectStage.WIFI)
             Bg.run("wifi-join-on-endpoint") {
                 if (attemptCancelled()) return@run
-                // 第一步永远是登记「WiFi 建议」——幂等、不等结果、不弹框。
-                // 用户授权过一次之后，系统会在进入范围时自动关联车机热点，
-                // 届时下面那条 specifier 请求会立刻拿到 onAvailable（网络已存在，
-                // 系统不再要求确认），整条链路才能真正做到「上车即连」。
-                val connector = wifiConnector
-                mutate { connector?.registerSuggestion(wifiConfig.ssid, wifiConfig.passphrase, wifiConfig.securityType) }
+                // Reuse a verified network or request local-only Wi-Fi; never register internet suggestions.
                 while (!attemptCancelled()) {
                     // Shizuku 已移除：没有 shell 特权。
                     val shellReady = false
