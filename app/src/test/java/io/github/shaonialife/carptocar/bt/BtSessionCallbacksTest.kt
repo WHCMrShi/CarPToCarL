@@ -90,4 +90,21 @@ class BtSessionCallbacksTest {
         callbacks.closed(old); callbacks.connected(old)
         assertEquals(0, writes.get())
     }
+    @Test fun ignoredInputLogsItsOriginalConnectionWithoutDeliveringIt() {
+        val work = WorkEpoch(); val ticket = work.capture()
+        val owner = BtLinkOwnership { 0L }.claim("inbound")!!
+        val original = ticket.diagnosticId
+        var delivered = false
+        val logs = mutableListOf<String>()
+        val callbacks = BtSessionCallbacks(isCurrent = { ticket.isCurrent },
+            onWifi = { _, _ -> delivered = true }, diagnosticConnection = original, diagnosticLog = logs::add)
+        work.end(); work.begin()
+        callbacks.wifi(wifi, owner)
+        assertFalse(delivered)
+        assertEquals(1, logs.size)
+        assertTrue(logs.single().contains("connection=$original") && logs.single().contains("kind=wifi"))
+        assertTrue(logs.single().contains("connectionCurrent=false"))
+        assertEquals(original, ticket.diagnosticId)
+    }
+
 }

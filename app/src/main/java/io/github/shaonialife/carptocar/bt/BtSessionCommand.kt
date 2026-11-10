@@ -16,7 +16,7 @@ internal class BtSessionCommand(
                 if (result == "sending") {
                     log("BT-COMMAND: availability begin owner=${owner.id} direction=${owner.direction} reason=$reason")
                     sent = send(reason)
-                    result = if (sent) "written" else "channel-unavailable"
+                    result = if (sent) "submitted" else "channel-unavailable"
                 }
             }
         } catch (error: Exception) {

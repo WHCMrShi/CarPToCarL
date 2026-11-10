@@ -915,6 +915,8 @@ object SessionController {
     private fun captureBtCallbacks(source: String): io.github.shaonialife.carptocar.bt.BtSessionCallbacks {
         val work = connectionWork.capture()
         return io.github.shaonialife.carptocar.bt.BtSessionCallbacks(
+            diagnosticConnection = work.diagnosticId,
+            diagnosticLog = { appendLog(it) },
             isCurrent = { work.isCurrent },
             onEndpoint = { endpoint, link -> onCarPlayEndpoint(endpoint, source, work, { link.isCurrent }) },
             onWifi = { wifi, link -> onWifiCredentials(wifi, work, { link.isCurrent }) },
@@ -1340,6 +1342,9 @@ object SessionController {
         if (!sessionWanted || connectCancelled) return
         val inviteGeneration = pendingCtrlInvite.currentGeneration() ?: return
         val target = appContext?.let { TargetDevicePrefs.get(it)?.address }
+        appendLog("FLOW-DIAG: connection=${connectionWork.capture().diagnosticId} event=CTRL_INVITE inviteGeneration=$inviteGeneration " +
+            "targetMatches=${io.github.shaonialife.carptocar.net.WifiIdentityProof.matchesReceiver(target, receiverId)} setupPending=${sessionStarting.get()} " +
+            "controlAlive=${currentClient?.controlConnectionAlive == true} videoRunning=${isStreaming()} network=${wifiConnector?.currentNetwork}; request-received-only")
         if (isStreaming()) {
             onCtrlInviteWhileStreaming(receiverId)
             return
@@ -3042,17 +3047,23 @@ object SessionController {
         ssid: String,
         timeoutMillis: Long,
         inviteGeneration: Long?,
+        diagnosticScope: String,
     ): Boolean {
         val advertiser = ctrlAdvertiser
         val deadline = android.os.SystemClock.uptimeMillis() + timeoutMillis
         val startedAt = android.os.SystemClock.uptimeMillis()
+        fun outcome(reason: String, result: Boolean): Boolean {
+            appendLog("FLOW-DIAG: $diagnosticScope event=CTRL_WAIT_RESULT inviteGeneration=$inviteGeneration " +
+                "reason=$reason waitResult=$result elapsedMs=${android.os.SystemClock.uptimeMillis() - startedAt} network=${wifiConnector?.currentNetwork}")
+            return result
+        }
         var lastLogAt = startedAt
         var reannounced = false
         while (android.os.SystemClock.uptimeMillis() < deadline) {
             if (connectCancelled || (inviteGeneration != null &&
                 pendingCtrlInvite.currentGeneration() != inviteGeneration)
-            ) return false
-            if (consumePendingInvite("等邀请窗口", inviteGeneration)) return true
+            ) return outcome("cancelled-or-generation-changed", false)
+            if (consumePendingInvite("等邀请窗口", inviteGeneration)) return outcome("fresh-invite-consumed", true)
             val invites = advertiser?.inviteCount ?: 0
             // 无用户轮次的旧入口保留既有计数行为；本轮缓存过期后不能再被累计计数放行。
             if (inviteGeneration == null && invites > 0) {
@@ -3060,7 +3071,7 @@ object SessionController {
                     "CTRL: ✓ 收到车机邀请（${android.os.SystemClock.uptimeMillis() - startedAt}ms，第 $invites 次）" +
                         "——立即连接 AirPlay",
                 )
-                return true
+                return outcome("legacy-invite-count", true)
             }
             val browserInfo = endpointBrowser?.awaitEndpoint(0)
             if (browserInfo != null) {
@@ -3083,7 +3094,7 @@ object SessionController {
                             "CTRL: 已发现 _airplay._tcp（features 未知，按旧机型行为）——直接连接 AirPlay"
                     },
                 )
-                return true
+                return outcome("mdns-discovered-not-invite", true)
             }
             val now = android.os.SystemClock.uptimeMillis()
             // catplay 实测：iPhone 的 Bonjour 公告常被车机丢弃——它在每次邀请前都
@@ -3100,11 +3111,11 @@ object SessionController {
             try {
                 Thread.sleep(50)
             } catch (_: InterruptedException) {
-                return false
+                return outcome("interrupted", false)
             }
         }
         appendLog("CTRL: ${timeoutMillis}ms 未收到邀请——按超时继续连接（可能车机走旧发现路径）")
-        return false
+        return outcome("timeout-continue-without-invite", false)
     }
 
     // ---- 以下方法体自 MainActivity 原样迁入（会话逻辑不依赖 Activity）----
@@ -4199,6 +4210,10 @@ object SessionController {
             appendLog(">>> [$source] 已有会话在处理中，忽略本次端点（等待上一轮结束）")
             return
         }
+        val flowScope = "connection=${work.diagnosticId} setup=${setup.diagnosticId} inviteGeneration=$inviteGeneration"
+        appendLog("FLOW-DIAG: $flowScope event=SETUP_ACCEPTED source=$source port=${endpoint.airPlayPort} portSource=${endpoint.airPlayPortSource} " +
+            "addressCount=${endpoint.ipAddresses.size} credentialsPresent=${endpoint.ssid.isNotEmpty()} memoryCredentialsMatch=${rememberedSetup === setup} " +
+            "carLifeStreaming=${CarLifeHijack.isStreaming} videoRunning=${videoSender?.isRunning == true}")
         val attemptCancelled = { connectCancelled || !work.isCurrent || !setup.isCurrent }
         val finishAttempt = { work.runIfCurrent { setup.runIfCurrent { sessionStarting.set(false) } }; Unit }
         val mutate = { action: () -> Unit ->
@@ -4307,7 +4322,7 @@ object SessionController {
                 appendLog("CONNECT-DIAG: ignored stale network continuation source=$source inviteGeneration=$inviteGeneration")
                 return@proceed
             }
-            appendLog("CONNECT-DIAG: network-bound result=$bound source=$source inviteGeneration=$inviteGeneration")
+            appendLog("CONNECT-DIAG: $flowScope network-bound result=$bound source=$source network=${wifiConnector?.currentNetwork}")
             if (!bound) {
                 phaseHint = "手机不在车机热点——请到 WLAN 设置加入 ${endpoint.ssid}"
                 appendLog(">>> [$source] 手机当前不在该热点——请到 设置>WLAN 加入 \"${endpoint.ssid}\" 后断开重连")
@@ -4342,12 +4357,13 @@ object SessionController {
                     }
                     if (endpointSelfContained) {
                         consumePendingInvite("完整端点", inviteGeneration)
+                        appendLog("FLOW-DIAG: $flowScope event=CTRL_WAIT_SKIPPED reason=endpoint-complete portSource=${endpoint.airPlayPortSource}; not-an-invitation")
                         appendLog("AIRPLAY: 0x4301 端点完整（${endpoint.ipAddresses.firstOrNull()}:${endpoint.airPlayPort}）——直接配对，不等 ctrl 邀请")
                     } else {
                         // 等 ctrl 邀请（catplay CarPlayCtrlServer：邀请=车机已发现手机且
                         // AirPlay 窗口已开，收到即刻连接）。此前是「固定睡 1.6s 赌它已到」，
                         // 快的时候白等、慢的时候不够；改为事件驱动。
-                        awaitCtrlInvite(endpoint.ssid, CTRL_INVITE_WAIT_MS, inviteGeneration)
+                        awaitCtrlInvite(endpoint.ssid, CTRL_INVITE_WAIT_MS, inviteGeneration, flowScope)
                     }
                     // awaitCtrlInvite 的超时仍允许继续，但旧用户轮次必须真正停止交接。
                     if (inviteGeneration != null && pendingCtrlInvite.currentGeneration() != inviteGeneration) {
@@ -4387,7 +4403,7 @@ object SessionController {
                                 lastWakeAt = now
                                 wakeCount++
                                 val selected = currentClient?.currentEndpoint ?: effectiveEndpoint
-                                val reason = "connectFailures=$refused port=${selected.airPlayPort} portSource=${selected.airPlayPortSource}"
+                                val reason = "$flowScope connectFailures=$refused port=${selected.airPlayPort} portSource=${selected.airPlayPortSource}"
                                 val nudged = bluetoothServer?.nudgeCarPlayAvailability(reason) == true ||
                                     bluetoothClient?.nudgeCarPlayAvailability(reason) == true
                                 ctrlAdvertiser?.ensureForNetwork(
@@ -4398,7 +4414,7 @@ object SessionController {
                                 appendLog(
                                     "AIRPLAY: 候选入口连接连续失败（$reason）——" +
                                         "第 $wakeCount/$CARPLAY_WAKE_MAX_TIMES 次叫醒：" +
-                                        (if (nudged) "已写入 0x4e0e+0x4300（不代表车机已接受） + " else "无可用就绪 iAP2 会话，仅") +
+                                        (if (nudged) "已提交 0x4e0e+0x4300（可能排队，不代表车机已接受） + " else "无可用就绪 iAP2 会话，仅") +
                                         "重新公告 ctrl；若仍不开，请在车机上点本机图标或重启 CarPlay",
                                 )
                             }
@@ -4409,7 +4425,7 @@ object SessionController {
                     fun newClient() =
                         AirPlayClient(
                             effectiveEndpoint,
-                            log = { line -> appendLog(line) },
+                            log = { line -> appendLog(if (line.startsWith("CONNECT-DIAG:") || line.startsWith("AIRPLAY: TCP")) "$line $flowScope" else line) },
                             context = context.applicationContext,
                             endpointRefresher = { current -> enrichEndpointFromBrowser(current, source) },
                             onPortRefused = wakeCarPlayWindow,
@@ -4427,7 +4443,7 @@ object SessionController {
                                     val invites = ctrlAdvertiser?.inviteCount ?: 0
                                     val found = endpointBrowser?.awaitEndpoint(0)
                                     appendLog(
-                                        "AIRPLAY: 重试 #$attempt —— 已重新公告 ctrl；" +
+                                        "AIRPLAY: 重试 #$attempt $flowScope —— 已请求重新公告 ctrl（可能受冷却限制）；" +
                                             "车机邀请=$invites 次，mDNS _airplay._tcp=" +
                                             (found?.let { "${it.host?.hostAddress}:${it.port}" } ?: "未发现"),
                                     )
@@ -5371,8 +5387,14 @@ object SessionController {
                     // 配对线程任何异常都不能留下「已有会话在处理中」的卡死状态
                     appendLog("AIRPLAY: 配对线程异常 - ${error.message ?: error.javaClass.simpleName}")
                 } finally {
+                    if (!work.isCurrent || !setup.isCurrent) {
+                        appendLog("FLOW-DIAG: $flowScope event=SETUP_EXIT retired=true; successor state omitted")
+                    }
                     work.runIfCurrent {
                         setup.runIfCurrent {
+                            appendLog("FLOW-DIAG: $flowScope event=SETUP_EXIT retired=false cancelled=$connectCancelled " +
+                                "controlAlive=${currentClient?.controlConnectionAlive == true} controlReady=${currentClient?.controlSessionReady == true} " +
+                                "videoRunning=${videoSender?.isRunning == true} carLifeStreaming=${CarLifeHijack.isStreaming}; transport-state-not-decoder-confirmation")
                             if (currentClient?.authenticationFailed == true) retireSession()
                             // 阶段汇总：成功也打——「这次连接一共多久、花在哪」是用户最常问的问题
                             // （2026-11-01 日志 090105 就是靠人工掐时间才拆出 29.7s 的构成）。

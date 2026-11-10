@@ -22,6 +22,7 @@ internal fun Iap2LinkChannel.runSenderSession(
     onSessionReady: (Iap2SenderSession) -> Unit = {},
     /** 保活泵退出（链路断开）回调——用于释放主控的「会话处理中」互斥，见调用处注释。 */
     onLinkClosed: () -> Unit = {},
+    diagnosticContext: String = "unbound",
 ) {
     // 蓝牙列表里的名字先修一遍：MagicOS 在本地蓝牙名未设置时会把「未知设备」当成
     // 适配器名，车机屏幕上就出现「未知设备 / 已连接」。
@@ -38,6 +39,7 @@ internal fun Iap2LinkChannel.runSenderSession(
             // MFi 挑战长度按车机身份持久化（省掉 20B 静默 6 秒的试探）
             context.applicationContext,
             nowPlayingProvider,
+            diagnosticContext = diagnosticContext,
         )
     try {
         val endpoint = session.run(timeoutMillis)

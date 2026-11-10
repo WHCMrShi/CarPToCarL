@@ -10,14 +10,17 @@ class BtSessionCallbacks(
     private val onUpdate: (Iap2SenderSession.CarPlayEndpoint, BtLinkOwnership.Token) -> Unit = { _, _ -> },
     private val onClosed: (BtLinkOwnership.Token) -> Unit = {},
     private val onConnected: (BtLinkOwnership.Token) -> Unit = {},
+    val diagnosticConnection: String = "unbound",
+    private val diagnosticLog: (String) -> Unit = {},
 ) {
     fun current(): Boolean = isCurrent()
-    private fun deliver(link: BtLinkOwnership.Token, action: () -> Unit) {
+    private fun deliver(link: BtLinkOwnership.Token, event: String, action: () -> Unit) {
         if (isCurrent() && link.isCurrent) action()
+        else runCatching { diagnosticLog("FLOW-DIAG: connection=$diagnosticConnection btOwner=${link.id} direction=${link.direction} event=BT_INPUT_IGNORED kind=$event connectionCurrent=${isCurrent()} ownerCurrent=${link.isCurrent}") }
     }
-    fun endpoint(value: Iap2SenderSession.CarPlayEndpoint, link: BtLinkOwnership.Token) = deliver(link) { onEndpoint(value, link) }
-    fun wifi(value: Iap2SenderSession.WifiConfiguration, link: BtLinkOwnership.Token) = deliver(link) { onWifi(value, link) }
-    fun update(value: Iap2SenderSession.CarPlayEndpoint, link: BtLinkOwnership.Token) = deliver(link) { onUpdate(value, link) }
-    fun closed(link: BtLinkOwnership.Token) = deliver(link) { onClosed(link) }
-    fun connected(link: BtLinkOwnership.Token) = deliver(link) { onConnected(link) }
+    fun endpoint(value: Iap2SenderSession.CarPlayEndpoint, link: BtLinkOwnership.Token) = deliver(link, "endpoint") { onEndpoint(value, link) }
+    fun wifi(value: Iap2SenderSession.WifiConfiguration, link: BtLinkOwnership.Token) = deliver(link, "wifi") { onWifi(value, link) }
+    fun update(value: Iap2SenderSession.CarPlayEndpoint, link: BtLinkOwnership.Token) = deliver(link, "update") { onUpdate(value, link) }
+    fun closed(link: BtLinkOwnership.Token) = deliver(link, "closed") { onClosed(link) }
+    fun connected(link: BtLinkOwnership.Token) = deliver(link, "connected") { onConnected(link) }
 }

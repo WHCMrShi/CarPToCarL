@@ -10,6 +10,7 @@ internal class WorkEpoch {
     fun end() = synchronized(lock) { identity = null }
 
     inner class Ticket internal constructor(private val value: Any?) {
+        val diagnosticId: String get() = value?.let { Integer.toHexString(System.identityHashCode(it)) } ?: "none"
         val isCurrent: Boolean get() = value != null && identity === value
         fun runIfCurrent(action: () -> Unit): Boolean = synchronized(lock) {
             if (!isCurrent) false else { action(); true }

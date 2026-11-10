@@ -55,7 +55,7 @@ class BtSessionCommandTest {
         } catch (_: java.io.IOException) { }
         assertTrue(logs.any { it.contains("owner=${owner.id}") && it.contains("direction=outbound") })
         assertTrue(logs.any { it.contains("write-failed:IOException") })
-        assertFalse(logs.any { it.contains("result=written") })
+        assertFalse(logs.any { it.contains("result=submitted") })
     }
 
 }

@@ -37,6 +37,16 @@ class Iap2LinkChannel(
     /** 逐帧摘要日志预算（每方向每连接）。 */
     private var rxFrameLogs = 0
     private var txFrameLogs = 0
+    private var engineTxFrames = 0L
+    private var streamWrites = 0L
+    private var lastPeerAck: Int? = null
+    private var lastEngineTxSequence: Int? = null
+
+    /** Aggregate link facts, not proof that an individual CSM was written or accepted. */
+    fun diagnosticState(): String = synchronized(lock) {
+        "linkState=${engine.state} peerFrames=$peerFrameCount peerAck=${lastPeerAck ?: "unknown"} " +
+            "engineTxFrames=$engineTxFrames lastTxSeq=${lastEngineTxSequence ?: "unknown"} streamWrites=$streamWrites alive=${!terminated}"
+    }
 
     val isAlive: Boolean get() = !terminated
 
@@ -65,6 +75,7 @@ class Iap2LinkChannel(
         }
         engine.onFrameReceived = { control, sequence, ack, sessionId, size ->
             peerFrameCount++
+            if (control and io.github.shaonialife.carptocar.iap2.Iap2LinkPacket.CTRL_ACK != 0) lastPeerAck = ack
             // 真车调试关键观测：车机在识别阶段是否回帧、回什么（静默分歧全靠它定位）
             if (rxFrameLogs < FRAME_LOG_LIMIT) {
                 rxFrameLogs++
@@ -75,6 +86,8 @@ class Iap2LinkChannel(
             }
         }
         engine.onFrameSent = { control, sequence, ack, sessionId, size ->
+            engineTxFrames++
+            lastEngineTxSequence = sequence
             if (txFrameLogs < FRAME_LOG_LIMIT) {
                 txFrameLogs++
                 log(
@@ -251,6 +264,7 @@ class Iap2LinkChannel(
         dumpOutbound(bytes)
         try {
             stream.write(bytes)
+            streamWrites++
         } catch (error: IOException) {
             finishLocked(error)
         }

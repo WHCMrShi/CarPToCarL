@@ -53,7 +53,9 @@ class Iap2SenderSession(
      * 在蓝牙 bring-up 后即发 0x5000，歌名需在**这条蓝牙链路**上应答。
      */
     private val nowPlayingProvider: (() -> CarPlayNowPlaying?)? = null,
+    diagnosticContext: String = "unbound",
 ) {
+    private val evidence = Iap2ConnectionEvidence(diagnosticContext, log)
     /** 从 0x5703 + 0x4301 解析出的接收端信息。 */
     data class CarPlayEndpoint(
         val ssid: String,
@@ -366,6 +368,16 @@ class Iap2SenderSession(
     }
 
     fun run(timeoutMillis: Long = 60_000L): CarPlayEndpoint {
+        var outcome = "phase1-failed"
+        try {
+            return runPhaseOne(timeoutMillis).also { outcome = "phase1-returned" }
+        } finally {
+            evidence.summary(outcome, channel.diagnosticState())
+        }
+    }
+
+    private fun runPhaseOne(timeoutMillis: Long): CarPlayEndpoint {
+        evidence.phase("link-ready")
         val deadline = System.nanoTime() + timeoutMillis * 1_000_000L
         if (!channel.awaitReady(remainingMillis(deadline))) {
             throw IOException("iAP2 链路协商超时")
@@ -373,6 +385,7 @@ class Iap2SenderSession(
         log("iap2 link ready peerMaxControl=${channel.peerMaxControlPayload()}")
 
         // ---- 识别 ----
+        evidence.phase("identification")
         send(Iap2MessageIds.START_IDENTIFICATION)
         val identification = expect(Iap2MessageIds.IDENTIFICATION_INFORMATION, deadline)
         logIdentification(identification)
@@ -410,6 +423,7 @@ class Iap2SenderSession(
         // 依据：同源参考实现 link_plus `modernBootstrap` 分支（它对别克做过实车）；
         // 通用系 Cinemo（BUICK_8948/E2LB）恰好在发送清单里列了 0xAA06，而我们一直直接要证书，
         // 车机那条「发序列号」的分支从头到尾没被触发过（2026-11-07 12:45 日志）。
+        evidence.phase("authentication")
         val wantsAuthSerial =
             wifiGen == ReceiverProfile.WifiGen.NEW &&
                 accessoryDeclaresSend(Iap2MessageIds.MFI_AUTH_SERIAL_NUMBER) == true
@@ -436,6 +450,7 @@ class Iap2SenderSession(
         // 车机据这批消息判定「发送端已就绪」，晚发会被当成还没起来。旧实现把它们
         // 排在 awaitOptionalHid（最多 2s）之后，等于让车机多等 2 秒——凯迪拉克日志里
         // 0xaa05 在 33.248、问候在 35.249，中间空了 2 秒正是那段 HID 等待。
+        evidence.phase("device-state")
         sendDeviceStateGreetings()
 
         // ---- 订阅与 HID：0x6800 是可选步骤 ----
@@ -447,6 +462,7 @@ class Iap2SenderSession(
         // BUICK_8948（E2LB）两次实测里，车机最后一次 ACK 都停在问候的最后一帧（ack=110），
         // 2 秒后发出的 0x4300 连链路 ACK 都拿不到（2026-11-07 12:33 / 12:39 两轮）。
         // 晚到的 0x6800 仍会被 expect 循环接住并应答（见 expectOrNull / respondToStartHid）。
+        evidence.phase("optional-hid")
         if (wifiGen == ReceiverProfile.WifiGen.NEW) {
             log("iap2 新协议代：不在 0x6800 上空等 2s——问候后立刻发 0x4300（与参考实现一致）")
         } else {
@@ -466,6 +482,7 @@ class Iap2SenderSession(
             accessoryDeclaresReceive(Iap2MessageIds.REQUEST_ACCESSORY_WIFI_CONFIGURATION)
         val declaresSendWifi = accessoryDeclaresSend(Iap2MessageIds.ACCESSORY_WIFI_CONFIGURATION)
         // 提前算：旧协议分支要用它决定「要不要并行发 0x4300」，后面等 0x4301 也要用。
+        evidence.phase("wifi-configuration")
         val declaresStartSession = accessoryDeclaresSend(Iap2MessageIds.CARPLAY_START_SESSION)
         // 0x4300 的发送记账：可能在本段提前并行发出（旧协议兜底），也可能在后面正常发出。
         // 静默判定要的「发出前对端帧计数」就在**真正发的那一刻**取，别提前取——
@@ -557,6 +574,7 @@ class Iap2SenderSession(
         // （事件通道 SYN 洪水把它打懵的时段），链路看门狗险些再次自杀。
         // 发之前记一次对端控制帧计数：别克 E2LB 实测它收到这一帧后就**彻底不再 ACK**，
         // 用这个计数把「对端还在不在处理我们的帧」量出来（见下方 noteAvailabilitySilence）。
+        evidence.phase("availability")
         if (!availabilitySent) {
             framesBeforeAvailability = channel.peerFrameCount
             // 催问的静默基线也钉在这一刻：第一次催问（+15s）就能判断车机是否还在回帧。
@@ -572,6 +590,7 @@ class Iap2SenderSession(
         val startSessionWindow =
             if (wifiFromExchange == null) START_SESSION_WAIT_NEW_PROTOCOL_NANOS else START_SESSION_WAIT_NANOS
         var startSession: Iap2Csm.Frame? = null
+        evidence.decision("wait4301Declared=$declaresStartSession wifiKnown=${wifiFromExchange != null} waitMs=${startSessionWindow / 1_000_000}")
         if (declaresStartSession == false) {
             log("iap2 车机未声明会发 0x4301——跳过等待（AirPlay 端点走 mDNS/网关）")
         } else {
@@ -675,6 +694,7 @@ class Iap2SenderSession(
             Iap2MessageIds.DEVICE_TRANSPORT_IDENTIFIER,
             Iap2Csm.string(0, bluetoothMac),
         )
+        evidence.decision("phase1Endpoint port=${endpoint.airPlayPort} portSource=${endpoint.airPlayPortSource} addressCount=${endpoint.ipAddresses.size} credentialsPresent=${endpoint.ssid.isNotEmpty()}")
         log("iap2 0x4e0e/0x4300 —— Phase 1 完成：拿到热点凭据与（可能的）AirPlay 端点")
 
         // 后续（Phase 2）：加入热点 → mDNS 解析 _airplay._tcp → AirPlay 主会话。
@@ -740,9 +760,13 @@ class Iap2SenderSession(
      * 真实无线 CarPlay 中这条控制通道与 AirPlay 会话并存于整个连接生命周期。
      */
     fun pumpIncomingForever() {
+        evidence.phase("keepalive")
+        var outcome = "keepalive-failed"
         try {
             pumpIncomingLoop()
+            outcome = "keepalive-returned"
         } finally {
+            evidence.summary(outcome, channel.diagnosticState())
             nowPlayingDispatcher.close()
         }
     }
@@ -902,7 +926,7 @@ class Iap2SenderSession(
         )
         sendAvailability()
         log(
-            "iap2 恢复请求（$reason）：已写入 0x4e0e + 0x4300；未等待 ACK，不代表车机已接受或开放服务",
+            "iap2 恢复请求（$reason）：已提交 0x4e0e + 0x4300 到链路；可能排队，不代表车机已接受或开放服务",
         )
         return true
     }
@@ -965,6 +989,7 @@ class Iap2SenderSession(
      * 进重传队列只会让看门狗提前把链路杀掉。
      */
     private fun sendAvailability() {
+        evidence.decision("availabilityVariant=${availabilityVariant ?: AvailabilityBodyMemory.Variant.MODERN_NESTED} peerFrames=${channel.peerFrameCount}")
         when (availabilityVariant ?: AvailabilityBodyMemory.Variant.MODERN_NESTED) {
             AvailabilityBodyMemory.Variant.DUAL_GROUPS -> {
                 // 与 link_plus 的 modernBootstrap 完全一致：group0 = 有线标识（00008110+MAC+0000），
@@ -1113,6 +1138,7 @@ class Iap2SenderSession(
             log("iap2 0x4301 自带 AP 信息：ssid=${endpoint.ssid}——已缓存，供后续 0x5703/0x4301 复用")
         }
         if (endpoint.ssid.isEmpty()) {
+            evidence.decision("rx4301Disposition=ignored-no-credentials")
             log("iap2 rx=0x4301（晚到）——无线组里没解析出 SSID，本条忽略")
             return
         }
@@ -1130,6 +1156,7 @@ class Iap2SenderSession(
                     "——交给主控热更新端点/重试配对",
             )
         }
+        evidence.decision("rx4301Disposition=forward-late callbackPresent=${onEndpointUpdate != null} port=${endpoint.airPlayPort} addressCount=${endpoint.ipAddresses.size}")
         onEndpointUpdate?.invoke(endpoint)
     }
 
@@ -1218,6 +1245,7 @@ class Iap2SenderSession(
             }
             offset = end
         }
+        if (evidence.observes(messageId)) evidence.message("TX_SUBMITTED", messageId, "awaitAck=true ${channel.diagnosticState()}")
         log("iap2 tx=0x${messageId.toString(16).padStart(4, '0')}")
         SessionTrace.csm(SessionTrace.Dir.TX, "bt", messageId, joined)
     }
@@ -1239,6 +1267,7 @@ class Iap2SenderSession(
             }
             offset = end
         }
+        if (evidence.observes(messageId)) evidence.message("TX_SUBMITTED", messageId, "awaitAck=false ${channel.diagnosticState()}")
         log("iap2 tx=0x${messageId.toString(16).padStart(4, '0')}（发后不管）")
         SessionTrace.csm(SessionTrace.Dir.TX, "bt", messageId, body, "fire-and-forget")
     }
@@ -1312,6 +1341,7 @@ class Iap2SenderSession(
                 "iap2 rx=0x${frame.messageId.toString(16).padStart(4, '0')} " +
                     "(${Iap2MessageIds.nameOf(frame.messageId)})，非预期，暂存待后续消费",
             )
+            if (frame.messageId == Iap2MessageIds.CARPLAY_START_SESSION) evidence.decision("rx4301Disposition=buffered waitingFor=0x${messageId.toString(16)}")
             pendingFrames += frame
             if (pendingFrames.size > maxPendingFrames) {
                 pendingFrames.removeFirst()
@@ -1396,6 +1426,7 @@ class Iap2SenderSession(
         // 完整会话录制：原始报文（含 0x1D01 能力清单这类大包）进 session_trace.log，
         // 与 main_debug.log 的摘要行按时间戳对齐，用于事后离线分析拆链/超时。
         frames.forEach { SessionTrace.csm(SessionTrace.Dir.RX, "bt", it.messageId, it.body) }
+        frames.forEach { evidence.message("RX_PARSED", it.messageId) }
         frames.forEach { recordNowPlayingSubscription(it) }
         frames.forEachIndexed { index, frame -> if (index > 0) receivedFrames += frame }
         return frames.first()

@@ -27,10 +27,11 @@ class Iap2SenderSessionTest {
         accessoryThread.isDaemon = true
         accessoryThread.start()
 
+        val flow = java.util.Collections.synchronizedList(mutableListOf<String>())
         val endpoint =
             Iap2SenderSession(
                 phoneChannel,
-                log = { line -> println("PHONE $line") },
+                log = { line -> if (line.startsWith("IAP2-FLOW:")) flow.add(line) },
                 bluetoothMac = "AA:BB:CC:DD:EE:FF",
             ).run(timeoutMillis = 10_000L)
 
@@ -43,6 +44,11 @@ class Iap2SenderSessionTest {
         assertNotNull(endpoint.publicKey)
         assertEquals(listOf("192.168.49.1", "fd00::1"), endpoint.ipAddresses)
 
+        assertTrue(flow.any { it.contains("event=TX_SUBMITTED id=0x4300") })
+        assertTrue(flow.any { it.contains("event=TX_SUBMITTED id=0x4e0e") && it.contains("awaitAck=false") })
+        assertTrue(flow.any { it.contains("event=RX_PARSED id=0x4301") })
+        assertTrue(flow.any { it.contains("outcome=phase1-returned") && it.contains("streamWrites=") })
+        assertTrue(flow.none { it.contains("secret-passphrase") || it.contains("AA:BB:CC:DD:EE:FF") || it.contains("mock-device-id") })
         phoneChannel.close()
         accessoryChannel.close()
     }

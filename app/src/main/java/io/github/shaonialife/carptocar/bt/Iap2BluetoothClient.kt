@@ -719,6 +719,7 @@ class Iap2BluetoothClient(
                 { callbacks.wifi(it, owner) },
                 { callbacks.update(it, owner) },
                 nowPlayingProvider,
+                diagnosticContext = "connection=${callbacks.diagnosticConnection} btOwner=${owner.id} direction=${owner.direction}",
                 onSessionReady = { session ->
                     synchronized(this) { if (activeOwner === owner && owner.isCurrent && callbacks.current()) { senderSession = session
                         owner.markReady()
