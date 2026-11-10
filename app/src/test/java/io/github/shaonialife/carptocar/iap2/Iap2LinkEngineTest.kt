@@ -7,6 +7,23 @@ import org.junit.Test
 
 /** 两个链路引擎通过直接交换输出字节完成握手与数据往返（无线程、无 I/O）。 */
 class Iap2LinkEngineTest {
+    @Test fun handshakeObservationDoesNotChangeNegotiationOrTimeout() {
+        val observed = Iap2LinkEngine()
+        val baseline = Iap2LinkEngine()
+        var count = 0
+        observed.onHandshakeObservation = { count++; error("diagnostic failure") }
+        observed.start(0); baseline.start(0)
+        repeat(20) {
+            val candidate = byteArrayOf(0xff.toByte(), 0x55, 0x7f, 0x00)
+            observed.feed(candidate, it.toLong()); baseline.feed(candidate, it.toLong())
+        }
+        assertEquals(8, count)
+        assertEquals(baseline.state, observed.state)
+        assertEquals(baseline.nextDeadlineMillis(), observed.nextDeadlineMillis())
+        val peer = Iap2LinkEngine().apply { start(0) }
+        exchange(observed, peer); exchange(observed, peer); exchange(observed, peer)
+        assertEquals(Iap2LinkEngine.State.NORMAL, observed.state)
+    }
     @Test fun peerWindowOneCanSendFilesAndZeroIsDiagnosedAsInvalid() {
         for (window in listOf(0, 1)) {
             val phone = Iap2LinkEngine()

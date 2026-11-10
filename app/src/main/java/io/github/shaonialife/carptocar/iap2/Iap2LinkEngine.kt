@@ -172,6 +172,8 @@ class Iap2LinkEngine(
     var onFrameSent: ((control: Int, sequence: Int, ack: Int, sessionId: Int, size: Int) -> Unit)? = null
 
     private var unknownSessionDropped = 0
+    var onHandshakeObservation: ((String) -> Unit)? = null
+    private var handshakeObservations = 0
 
     private val unacknowledged = ArrayList<Packet>()
     private val sendBacklog = ArrayDeque<Packet>()
@@ -439,6 +441,14 @@ class Iap2LinkEngine(
         while (receive.size >= 2 &&
             !(receive[0] == 0xFF.toByte() && receive[1] == 0x5A.toByte())
         ) {
+            // Observe only: retain the original byte-by-byte discard, deadlines and negotiation.
+            // A fragmented DETECT may look like a candidate; never classify it as rejection.
+            if (receive[0] == 0xFF.toByte() && receive[1] == 0x55.toByte() &&
+                !(receive.size >= MARKER.size && receive.peek(MARKER.size).contentEquals(MARKER)) &&
+                handshakeObservations < 8) {
+                handshakeObservations++
+                runCatching { onHandshakeObservation?.invoke("FF55 candidate=$handshakeObservations bufferedBytes=${receive.size} state=$state; partial-or-private, rejection unconfirmed; parser unchanged") }
+            }
             receive.discard(1)
         }
         if (receive.size < HEADER_BYTES) return false

@@ -63,6 +63,7 @@ class Iap2LinkChannel(
 
     init {
         engine.onFileDiagnostic = { log("ARTWORK: BT $it") }
+        engine.onHandshakeObservation = { log("CONNECT-DIAG: BT handshake $it") }
         engine.onPeerSynchronizationAdopted = { sync ->
             log("ARTWORK: BT peer-SYN maxLength=${sync.maxLength} maxOutgoing=${sync.maxOutgoing} retries=${sync.maxRetransmissions} sessions=${sync.sessions.joinToString { "${it.id}/k${it.kind}/v${it.version}" }}")
             log(
