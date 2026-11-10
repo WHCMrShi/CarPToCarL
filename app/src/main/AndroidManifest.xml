@@ -10,9 +10,8 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation" />
-    <!-- WifiNetworkSpecifier（应用专属网络）在 Android 12/12L（API 31-32）仍要求位置权限；
-         13+ 由 NEARBY_WIFI_DEVICES 取代，运行时不再申请这两个权限。
-         声明层面必须 FINE+COARSE 成对（lint CoarseFineLocation 强制要求）。 -->
+    <!-- 所有支持版本均申请FINE+COARSE以读取已连接热点身份；13+的NEARBY_WIFI_DEVICES
+         不替代SSID/BSSID所需的位置权限。不采集手机坐标。 -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />

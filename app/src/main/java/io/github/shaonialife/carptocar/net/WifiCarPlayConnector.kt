@@ -67,6 +67,35 @@ class WifiCarPlayConnector(
         context.applicationContext.getSystemService(WifiManager::class.java)
 
     private val callback = io.github.shaonialife.carptocar.util.OwnedSlot<ConnectivityManager.NetworkCallback>()
+    private val associationObserver = io.github.shaonialife.carptocar.util.OwnedSlot<ConnectivityManager.NetworkCallback>()
+    private val associations = WifiAssociationCache<Network>()
+
+    /** Passive identity observer: never requests a network or changes process binding. */
+    @Synchronized fun startAssociationObservation() {
+        if (associationObserver.get() != null) return
+        val observer = object : ConnectivityManager.NetworkCallback(FLAG_INCLUDE_LOCATION_INFO) {
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                associationObserver.runIfCurrent(this) {
+                    associations.update(network, plainSsid((caps.transportInfo as? WifiInfo)?.ssid))
+                }
+            }
+            override fun onLost(network: Network) { associationObserver.runIfCurrent(this) { associations.lost(network) } }
+        }
+        associationObserver.replace(observer, { true }) { connectivityManager.unregisterNetworkCallback(it) }
+        try {
+            connectivityManager.registerNetworkCallback(NetworkRequest.Builder()
+                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(), observer)
+        } catch (error: Exception) {
+            stopAssociationObservation()
+            log("WIFI-ID: passive observation unavailable type=${error.javaClass.simpleName}")
+        }
+    }
+
+    @Synchronized fun stopAssociationObservation() {
+        associationObserver.clear { runCatching { connectivityManager.unregisterNetworkCallback(it) } }
+        associations.clear()
+    }
 
     val currentNetwork: Network? get() = boundNetwork.get()
     private val boundNetwork = AtomicReference<Network?>(null)
@@ -596,6 +625,7 @@ class WifiCarPlayConnector(
      * 家里的 WiFi 上（AirPlay 必然连不上，而且其它应用瞬间断网）。
      */
     fun isAssociatedTo(ssid: String): Boolean {
+        if (runCatching { associations.matches(ssid, connectivityManager.allNetworks.toList()) }.getOrDefault(false)) return true
         // 主路径：ConnectivityManager 逐条网络的 transportInfo。
         //
         // `wifiManager.connectionInfo` 单独用会漏：Android 12+ 上它对**应用专属网络**
@@ -647,7 +677,18 @@ class WifiCarPlayConnector(
         timeoutMillis: Long,
         isCancelled: () -> Boolean = { false },
     ): Network? {
-        if (!isAssociatedTo(ssid)) return null
+        if (!isAssociatedTo(ssid)) {
+            // Existing Wi-Fi can precede its unredacted capabilities callback; don't prompt immediately.
+            val hasWifi = runCatching { connectivityManager.allNetworks.any {
+                connectivityManager.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+            } }.getOrDefault(false)
+            val deadline = SystemClock.elapsedRealtime() + if (hasWifi) 1_200L else 0L
+            while (!isCancelled() && SystemClock.elapsedRealtime() < deadline && !isAssociatedTo(ssid)) Thread.sleep(100)
+            if (isCancelled() || !isAssociatedTo(ssid)) {
+                log("WIFI-ID: reuse unavailable hasWifi=$hasWifi; no live matching SSID evidence")
+                return null
+            }
+        }
         log("WiFi: 系统已连在 \"$ssid\" 上——直接复用，不再发 specifier（不弹确认框）")
         return bindCurrentWifiBlocking(timeoutMillis, ssid, isCancelled)
     }

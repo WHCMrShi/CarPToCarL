@@ -1900,6 +1900,7 @@ object SessionController {
         // 用户明确要连：解冻恢复的前提之一（断开后再解冻不该自己爬起来）
         val firstStart = !sessionWanted && !isStreaming() && !sessionStarting.get()
         if (firstStart) audioMode = io.github.shaonialife.carptocar.audio.AudioModePrefs.load(context)
+        wifiConnector?.startAssociationObservation()
         appendLog("CONNECT-DIAG: start requested running=${isSessionRunning()} phase=$phaseHint; mediaMode=${audioMode.label}; strict format")
         sessionWanted = true
         if (firstStart) { lastCarWifi = null; lastWifiPsk = null; freshWifiThisStart = null; lastGoodEndpoint = null; unreadableWifiTarget = null }
@@ -2007,6 +2008,7 @@ object SessionController {
         ctrlAdvertiser?.stop()
         endpointBrowser?.stop()
         wifiConnector?.release()
+        wifiConnector?.stopAssociationObservation()
         wifiWatchdog?.stop()
         boundCarSsid = null
         sessionStarting.set(false)
