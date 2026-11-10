@@ -8,6 +8,19 @@ import org.junit.rules.TemporaryFolder
 class DiagnosticLogArchiveTest {
     @get:Rule val temp = TemporaryFolder()
 
+    @Test fun audioProofSourceParametersAndNetworkPolicySurviveMainRotation() {
+        for (event in listOf("AAC-PROBE: decodedPeak=100", "AAC-RECOVERY: queued", "AUDIO-ROUTE: inputRate=48000",
+            "WIFI-ID: reuse", "WIFI-POLICY: removedOwnedSuggestions=1", "CARLIFE: 媒体 音频格式宣告 48000Hz",
+            "CARLIFE: TTS 音频格式宣告 24000Hz", "CARLIFE: 音频直通 电平99%", "CARLIFE: 媒体 引擎音频停止")) {
+            val main = temp.newFile()
+            val writer = SessionLogFile(main, "marker", maxBytes = 100)
+            writer.write(listOf("$event\n"), 0)
+            repeat(20) { writer.write(listOf("RAW rx: ${"x".repeat(100)}\n"), 0) }
+            assertFalse(main.readText().contains(event))
+            assertTrue(DiagnosticLogArchive.read(main).contains(event))
+        }
+    }
+
     @Test fun earlyHandshakeSurvivesRepeatedMainAndDiagnosticRotation() {
         val main = temp.newFile()
         val writer = SessionLogFile(main, "marker", maxBytes = 30)
