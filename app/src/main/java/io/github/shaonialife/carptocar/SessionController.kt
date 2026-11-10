@@ -907,7 +907,8 @@ object SessionController {
             "workCurrent=${connectionWork.capture().isCurrent} cancelled=$connectCancelled; snapshot is current state, not callback-origin proof")
     }
 
-    fun onSenderLinkClosed() {
+    fun onSenderLinkClosed(link: io.github.shaonialife.carptocar.bt.BtLinkOwnership.Token) {
+        if (!link.isCurrent) { appendLog("BT-LIFECYCLE: ignored replaced close owner=${link.id} direction=${link.direction}"); return }
         if (videoSender?.isRunning == true) { noteBtHandover("KEEP_VIDEO"); return }
         val client = currentClient
         if (sessionStarting.get() && client?.controlConnectionAlive == true &&
