@@ -345,7 +345,7 @@ class Iap2BluetoothClient(
         var passiveFailRounds = 0
         /** 连续「没有有效会话」的轮数，用于 [RETRY_BACKOFF_MILLIS] 退避（连上即断也算）。 */
         var failStreak = 0
-        while (running && generation.get() == myGeneration) {
+        while (running && generation.get() == myGeneration && !Thread.currentThread().isInterrupted) {
             // 用户刚手动断开 → 先等车机「忘掉」上一轮，别急着拨。
             //
             // 2026-11-04 奥迪 4910（MIB3 4580）实录：16:22:32.519 手动断开，
@@ -601,7 +601,7 @@ class Iap2BluetoothClient(
                 "——切换为等车机主动连入，最长 ${PASSIVE_WAIT_MILLIS / 1000} 秒（本机 …cafe 监听仍在运行）",
         )
         val deadline = android.os.SystemClock.uptimeMillis() + PASSIVE_WAIT_MILLIS
-        while (running && generation.get() == myGeneration) {
+        while (running && generation.get() == myGeneration && !Thread.currentThread().isInterrupted) {
             if (BtSessionGate.inboundActive || BtSessionGate.sessionActive) {
                 log("BT-C: 被动窗口内车机主动连入——不再探测 …caff")
                 return
@@ -656,7 +656,7 @@ class Iap2BluetoothClient(
     }
 
     @SuppressLint("MissingPermission")
-    private fun dialAllowed(device: BluetoothDevice): Boolean = running && BtDialPolicy.allows(
+    private fun dialAllowed(device: BluetoothDevice): Boolean = running && !Thread.currentThread().isInterrupted && BtDialPolicy.allows(
         targetProvider()?.address, device.address, BtSessionGate.inboundActive,
         BtSessionGate.sessionActive, BtSessionGate.linkRecoveryTarget(),
     )

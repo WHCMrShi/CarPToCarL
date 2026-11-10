@@ -6,10 +6,8 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.os.SystemClock
-import android.util.Log
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 蓝牙「**只配对、不连接**」策略。
@@ -31,8 +29,6 @@ import java.util.concurrent.atomic.AtomicReference
  * 上下文），查询恒为「未连接」，反而掩盖真实状态。故固定在应用进程内做。
  */
 object BtProfiles {
-    private const val TAG = "BT-PROFILE"
-
     /** 守卫一直拿不到对端地址时，空转多久就收工（毫秒）。 */
     private const val NO_PEER_GIVE_UP_MILLIS = 60_000L
 
@@ -53,7 +49,7 @@ object BtProfiles {
         }
 
     /** profile id → 已获取的代理（进程内复用；代理本身无会话状态）。 */
-    private val proxies = HashMap<Int, BluetoothProfile>()
+    private val proxies = HashMap<Int, ProfileProxyLease<BluetoothProfile>>()
 
     /** 该地址当前在线（已连接）的配置文件名称。 */
     fun connectedNames(
@@ -61,6 +57,7 @@ object BtProfiles {
         address: String,
     ): List<String> =
         profiles.mapNotNull { id ->
+            if (Thread.currentThread().isInterrupted) return@mapNotNull null
             val p = proxy(context, id) ?: return@mapNotNull null
             val connected =
                 try {
@@ -97,14 +94,16 @@ object BtProfiles {
         deviceHint: BluetoothDevice? = null,
     ): List<String> {
         val before = connectedNames(context, address)
+        if (Thread.currentThread().isInterrupted) return emptyList()
         if (before.isEmpty()) return emptyList()
         val device = deviceHint ?: remoteDevice(context, address)
         for (id in profiles) {
+            if (Thread.currentThread().isInterrupted) return before
             if (profileName(id) !in before) continue
             val proxy = proxy(context, id)
-            if (proxy != null && device != null) disconnectProfile(proxy, device)
+            if (!Thread.currentThread().isInterrupted && proxy != null && device != null) disconnectProfile(proxy, device)
         }
-        if (!awaitDisconnected(context, address, 1_500L) && device != null) {
+        if (!awaitDisconnected(context, address, 1_500L) && !Thread.currentThread().isInterrupted && device != null) {
             // 配置级断开未生效（个别 ROM 限流）：设备级断开兜底（@hide，同样只要求
             // BLUETOOTH_CONNECT）。车载/耳机当前连接的设备可能被一并断开，属预期。
             runCatching { BluetoothDevice::class.java.getMethod("disconnect").invoke(device) }
@@ -136,7 +135,7 @@ object BtProfiles {
             "BT-GUARD: 开始盯音频配置文件（每 ${AudioProfileGuardPolicy.POLL_MILLIS}ms 一次，" +
                 "上限 ${AudioProfileGuardPolicy.MAX_MILLIS / 1000}s，iAP2 会话建立即收工）",
         )
-        while (!shouldStop()) {
+        while (!shouldStop() && !Thread.currentThread().isInterrupted) {
             val elapsed = SystemClock.uptimeMillis() - started
             if (!AudioProfileGuardPolicy.shouldKeepGuarding(elapsed)) {
                 onEvent(
@@ -189,15 +188,16 @@ object BtProfiles {
         timeoutMillis: Long,
     ): Boolean {
         val deadline = SystemClock.uptimeMillis() + timeoutMillis
-        while (SystemClock.uptimeMillis() < deadline) {
+        while (!Thread.currentThread().isInterrupted && SystemClock.uptimeMillis() < deadline) {
             if (connectedNames(context, address).isEmpty()) return true
             try {
                 Thread.sleep(120)
             } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
                 return false
             }
         }
-        return connectedNames(context, address).isEmpty()
+        return !Thread.currentThread().isInterrupted && connectedNames(context, address).isEmpty()
     }
 
     @SuppressLint("MissingPermission")
@@ -217,47 +217,39 @@ object BtProfiles {
         context: Context,
         profile: Int,
     ): BluetoothProfile? {
-        synchronized(proxies) { proxies[profile]?.let { return it } }
-        val adapter =
-            (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)
-                ?.adapter
-                ?: return null
+        if (Thread.currentThread().isInterrupted || android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) return null
+        synchronized(proxies) { proxies[profile]?.get()?.let { return it } }
+        val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter ?: return null
         val latch = CountDownLatch(1)
-        val ref = AtomicReference<BluetoothProfile?>(null)
-        val requested =
-            try {
-                adapter.getProfileProxy(
-                    context.applicationContext,
-                    object : BluetoothProfile.ServiceListener {
-                        override fun onServiceConnected(
-                            id: Int,
-                            service: BluetoothProfile,
-                        ) {
-                            ref.set(service)
-                            latch.countDown()
-                        }
-
-                        override fun onServiceDisconnected(id: Int) {
-                            // 蓝牙服务重启后旧代理失效：清缓存，下次重新获取
-                            synchronized(proxies) { proxies.remove(id) }
-                            latch.countDown()
-                        }
-                    },
-                    profile,
-                )
-            } catch (_: Throwable) {
-                false
+        val lease = ProfileProxyLease<BluetoothProfile> { service ->
+            runCatching { adapter.closeProfileProxy(profile, service) }
+        }
+        val listener = object : BluetoothProfile.ServiceListener {
+            override fun onServiceConnected(id: Int, service: BluetoothProfile) {
+                lease.deliver(service)
+                latch.countDown()
             }
-        if (!requested) return null
-        // `getProfileProxy` 的回调经**主线程 Handler** 投递：若本方法跑在主线程，
-        // 回调永远无法执行 → 必然白等到超时（1.2s）并返回 null。宁可显式失败也不
-        // 静默卡顿——调用方必须转到后台线程（本对象所有入口都是后台调用）。
-        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-            Log.w(TAG, "proxy() 在主线程调用——getProfileProxy 回调会被阻塞，返回 null")
+            override fun onServiceDisconnected(id: Int) {
+                synchronized(proxies) {
+                    if (proxies[id] === lease) proxies.remove(id)
+                    lease.retire()
+                }
+                latch.countDown()
+            }
+        }
+        val requested = runCatching { adapter.getProfileProxy(context.applicationContext, listener, profile) }.getOrDefault(false)
+        if (!requested || !awaitProfileReady { latch.await(1_200, TimeUnit.MILLISECONDS) }) {
+            lease.retire()
             return null
         }
-        if (!latch.await(1_200, TimeUnit.MILLISECONDS)) return null
-        return ref.get()?.also { synchronized(proxies) { proxies[profile] = it } }
+        synchronized(proxies) {
+            if (Thread.currentThread().isInterrupted) { lease.retire(); return null }
+            // Another caller may have completed first. Its listener owns its cached entry.
+            proxies[profile]?.get()?.let { lease.retire(); return it }
+            val ready = lease.get() ?: run { lease.retire(); return null }
+            proxies[profile] = lease
+            return ready
+        }
     }
 
     /**
