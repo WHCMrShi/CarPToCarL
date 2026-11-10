@@ -1035,6 +1035,22 @@
                     android:textColor="@color/m3_on_surface"
                     android:thumb="@drawable/sw_thumb"
                     app:track="@drawable/sw_track" />
+                <androidx.appcompat.widget.SwitchCompat
+                    xmlns:app="http://schemas.android.com/apk/res-auto"
+                    android:id="@+id/switchAudioStability"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/audio_stability_mode"
+                    android:textColor="@color/m3_on_surface"
+                    android:thumb="@drawable/sw_thumb"
+                    app:track="@drawable/sw_track" />
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/audio_mode_note"
+                    android:textColor="@color/m3_on_surface" />
                 <!-- 流分辨率缩放 -->
                 <TextView
                     android:layout_width="wrap_content"

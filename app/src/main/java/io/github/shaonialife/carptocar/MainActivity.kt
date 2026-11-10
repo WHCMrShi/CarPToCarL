@@ -1575,6 +1575,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun bindDisplayCard() {
         val navigationSwitch = findViewById<SwitchCompat>(R.id.switchInstrumentNavigation)
+        val audioModeSwitch = findViewById<SwitchCompat>(R.id.switchAudioStability)
+        audioModeSwitch.isChecked = io.github.shaonialife.carptocar.audio.AudioModePrefs.load(this) == io.github.shaonialife.carptocar.audio.AudioMode.STABILITY
+        audioModeSwitch.setOnCheckedChangeListener { _, enabled ->
+            val mode = if (enabled) io.github.shaonialife.carptocar.audio.AudioMode.STABILITY else io.github.shaonialife.carptocar.audio.AudioMode.QUALITY
+            io.github.shaonialife.carptocar.audio.AudioModePrefs.save(this, mode)
+            android.widget.Toast.makeText(this, "${mode.label}，断开后重新连接生效", android.widget.Toast.LENGTH_SHORT).show()
+        }
         io.github.shaonialife.carptocar.media.NavigationNowPlaying.ensure(this)
         navigationSwitch.isChecked = io.github.shaonialife.carptocar.media.NavigationNowPlaying.isNavigation()
         navigationSwitch.setOnCheckedChangeListener { _, enabled ->

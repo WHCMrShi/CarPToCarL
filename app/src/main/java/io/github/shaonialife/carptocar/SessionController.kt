@@ -693,6 +693,7 @@ object SessionController {
      */
     @Volatile
     var audioPreferCompat: Boolean = false
+    @Volatile private var audioMode = io.github.shaonialife.carptocar.audio.AudioMode.QUALITY
 
     /** 本轮真正用上的音频档位（拆链归因与记忆回写用；null = 本次没有音频）。 */
     @Volatile
@@ -1863,7 +1864,6 @@ object SessionController {
         connectionWork.begin()
         wifiConnector?.clearReceiverEvidence()
         io.github.shaonialife.carptocar.bt.CarIdleGuard.beginStartup(context)
-        appendLog("CONNECT-DIAG: start requested running=${isSessionRunning()} phase=$phaseHint; default media=48k PCM")
         pendingCtrlInvite.begin()
         connectCancelled = false
         // 新一轮 = 新的一致性审计：清空上一轮的问题清单，并把输出口接到本控制器的
@@ -1878,6 +1878,8 @@ object SessionController {
         io.github.shaonialife.carptocar.util.RtspDump.init(context.filesDir)
         // 用户明确要连：解冻恢复的前提之一（断开后再解冻不该自己爬起来）
         val firstStart = !sessionWanted && !isStreaming() && !sessionStarting.get()
+        if (firstStart) audioMode = io.github.shaonialife.carptocar.audio.AudioModePrefs.load(context)
+        appendLog("CONNECT-DIAG: start requested running=${isSessionRunning()} phase=$phaseHint; mediaMode=${audioMode.label}; strict format")
         sessionWanted = true
         if (firstStart) { lastCarWifi = null; lastWifiPsk = null; freshWifiThisStart = null; lastGoodEndpoint = null; unreadableWifiTarget = null }
         if (CarLifeHijack.isEnabled(context)) CarLifeHijack.prewarm(context) { line -> appendLog(line) }
@@ -3164,8 +3166,11 @@ object SessionController {
                 entry = AudioProfileMemory.load(context.applicationContext, identity)
                 appendLog("AUDIO: 本车机（$identity）有「全部档位拆链」的旧记忆，已自动清除并重试")
             }
-            val candidates = client.audioCandidates(preferCompat = audioPreferCompat)
-            val ordered = AudioProfileMemory.order(candidates, entry, preferNativePcm = !audioPreferCompat)
+            val mode = audioMode
+            val candidates = client.audioCandidates(preferCompat = false)
+            val remembered = AudioProfileMemory.order(candidates, entry, preferNativePcm = mode == io.github.shaonialife.carptocar.audio.AudioMode.QUALITY)
+            val ordered = mode.order(remembered)
+            appendLog("AUDIO-DIAG: requested=${mode.label} firstCandidate=${ordered.firstOrNull()?.label}; strict codec/rate, no cross-format fallback")
             if (ordered.isEmpty()) {
                 appendLog("AUDIO: 没有可用音频档位（候选=${candidates.map { it.label }}）——仅推视频")
                 return false
@@ -3175,9 +3180,8 @@ object SessionController {
                     "（本车机记忆：${AudioProfileMemory.describe(entry)}；" +
                     "封装=${tuning.detail}）",
             )
-            // SETUP 失败不会扰动会话（车机只是不接这条流的请求），所以本会话内就把候选
-            // 试完，不必等下一次连接。这一点对当前场景很关键：102/AAC-LC 与 100/PCM 是
-            // 两条完全不同的通路，前者不被接受时应当立刻退到后者，而不是让用户白连一次。
+            // 只尝试用户所选的编码与48K采样率；同格式可尝试车机声明的其他通路，
+            // SETUP失败也不跨格式回退。通话重建仍沿用已激活的具体profile。
             var chosen: AudioProfile? = null
             var streamInfo: AirPlayClient.AudioStreamInfo? = null
             for (candidate in ordered) {
