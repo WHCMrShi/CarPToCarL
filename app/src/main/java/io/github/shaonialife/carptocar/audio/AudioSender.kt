@@ -426,7 +426,10 @@ class AudioSender(
     }
 
     /** 直通模式下的帧对齐累积缓冲（把任意大小的注入 PCM 切成固定帧长）。 */
-    private val passthroughBuffer = java.io.ByteArrayOutputStream() // AAC 回退路径
+    private val aacFrames by lazy { PcmFrameBuffer(AacLcEncoder.pcmBytes(CHANNELS)) }
+    private val forwardAacFrame = PcmFrameConsumer { source, offset ->
+        running.get() && dispatchPcm(source, offset, AacLcEncoder.pcmBytes(CHANNELS))
+    }
     private val pcmFrames = PcmFrameBuffer(PACKET_BYTES)
     private val pcmPackets by lazy { PcmPacketSealer(streamKey, streamType) }
     private val pcmDatagram = DatagramPacket(ByteArray(0), 0)
@@ -595,7 +598,7 @@ class AudioSender(
     private fun processPcmLocked(srcPcm: ByteArray, size: Int, srcRate: Int, srcChannels: Int, gap: Boolean) {
         if (!running.get()) return
         if (gap) {
-            pcmFrames.clear(); passthroughBuffer.reset(); markerPending = true
+            pcmFrames.clear(); if (codec == AudioCodec.AAC_LC) aacFrames.clear(); markerPending = true
             // Count discontinuities in the bounded stage summary, preserving reset semantics.
         }
         if (codec == AudioCodec.PCM) {
@@ -608,16 +611,12 @@ class AudioSender(
             }
             return
         }
-        val resampled = alignPcm(srcPcm, size, srcRate, srcChannels)
-        // 累积到固定帧长，凑满一帧才发（PCM 通路逐包、AAC 通路逐帧）
-        val frameBytes = framePcmBytes
-        passthroughBuffer.write(resampled, 0, resampled.size)
-        while (passthroughBuffer.size() >= frameBytes) {
-            val frame = passthroughBuffer.toByteArray().copyOf(frameBytes)
-            val rest = passthroughBuffer.toByteArray()
-            passthroughBuffer.reset()
-            passthroughBuffer.write(rest, frameBytes, rest.size - frameBytes)
-            dispatchPcm(frame)
+        // Same-rate stereo input is borrowed synchronously; only partial-frame tails are copied.
+        if ((srcRate <= 0 || srcRate == sampleRate) && srcChannels != 1) {
+            aacFrames.feed(srcPcm, size, forwardAacFrame)
+        } else {
+            val aligned = alignPcm(srcPcm, size, srcRate, srcChannels)
+            aacFrames.feed(aligned, aligned.size, forwardAacFrame)
         }
     }
 
@@ -688,7 +687,7 @@ class AudioSender(
                 sendPayload(pcm, offset, size).also { if (!it) stop() }
             } else {
                 val encoder = aacEncoder ?: return false
-                val payloads = encoder.encode(pcm, size)
+                val payloads = encoder.encode(pcm, size, offset)
                 val success = payloads.all { sendPayload(it) }
                 if (!success) stop()
                 success
@@ -727,7 +726,7 @@ class AudioSender(
         thread = null
         synchronized(this) {
             pcmFrames.clear()
-            passthroughBuffer.reset()
+            if (codec == AudioCodec.AAC_LC) aacFrames.clear()
         }
         continuity.summary(System.nanoTime())?.let { log("$it final=true codec=$codec") }
         stageWindow.finish(System.nanoTime())?.let(log)

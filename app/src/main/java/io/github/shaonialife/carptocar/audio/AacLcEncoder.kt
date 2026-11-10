@@ -220,6 +220,11 @@ class AacLcEncoder(
                     "AUDIO: AAC-LC 编码器就绪（${sampleRate}Hz ${channels}ch " +
                         "${bitRate / 1000}kbps，帧=${FRAME_SAMPLES}采样/${inputFrameBytes}B）",
                 )
+                val implementation = runCatching {
+                    val info = created.codecInfo
+                    "name=${created.name} hardwareReported=${info.isHardwareAccelerated} softwareOnly=${info.isSoftwareOnly}"
+                }.getOrDefault("codecInfo=unavailable")
+                log("AUDIO-DIAG: AAC encoder $implementation")
                 true
             } catch (error: Exception) {
                 log("AUDIO: AAC-LC 编码器启动失败 - ${error.message}（本档位放弃）")
@@ -241,6 +246,7 @@ class AacLcEncoder(
     fun encode(
         pcm: ByteArray,
         size: Int,
+        offset: Int = 0,
     ): List<ByteArray> =
         synchronized(lock) {
             val encoder = codec
@@ -264,14 +270,15 @@ class AacLcEncoder(
                     // 送进 codec 的字节数必须与 put 进去的一致：`put` 会被 capacity
                     // 截断，而 queueInputBuffer 若仍按原始 size 记账，codec 会去读
                     // 没写过的区域（个别 ROM 直接抛 IllegalArgumentException）。
-                    val length = size.coerceAtMost(buffer?.capacity() ?: 0).coerceAtMost(pcm.size)
+                    require(offset >= 0 && offset <= pcm.size && size >= 0 && size <= pcm.size - offset)
+                    val length = size.coerceAtMost(buffer?.capacity() ?: 0).coerceAtMost(pcm.size - offset)
                     if (buffer == null || length <= 0) {
                         // 拿不到输入缓冲：不排队空 buffer（那会被当成一帧空音频）
                         encoder.queueInputBuffer(inputIndex, 0, 0, presentationUs, 0)
                         droppedInputBusy++
                     } else {
                         buffer.clear()
-                        buffer.put(pcm, 0, length)
+                        buffer.put(pcm, offset, length)
                         encoder.queueInputBuffer(inputIndex, 0, length, presentationUs, 0)
                         presentationUs += FRAME_SAMPLES * 1_000_000L / sampleRate
                     }
