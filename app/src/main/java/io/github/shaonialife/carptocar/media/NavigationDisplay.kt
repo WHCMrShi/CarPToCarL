@@ -109,7 +109,7 @@ internal class NavigationState {
         val guide = phase == "guide" && turn != null
         val elapsed = if (guide && initial > 0) (((initial - turn!!.distance).toLong() * 100_000) / initial).coerceIn(0, 100_000).toInt() else 0
         return NavigationDisplay(
-            title = if (guide) "${formatDistance(turn!!.distance)} ${turnName(turn.turn)}" else when (phase) {
+            title = if (guide) "${formatDistance(turn!!.distance)} ${turnName(turn.turn) ?: turn.road}" else when (phase) {
                 "end" -> "导航结束"
                 else -> "等待导航"
             },
@@ -128,14 +128,14 @@ internal class NavigationState {
             else String.format(Locale.ROOT, "%d:%02d:%02d", seconds / 3_600, seconds / 60 % 60, seconds % 60)
         }
         fun formatDistance(meters: Int): String = if (meters < 1000) "${meters}米" else String.format(Locale.ROOT, "%.1f公里", meters / 1000.0)
-        fun turnName(code: Int): String = when (code) {
+        fun turnName(code: Int): String? = when (code) {
             1 -> "直行"; 2 -> "右前方转弯"; 3 -> "右转"; 4 -> "右后方转弯"; 5 -> "掉头"
             6 -> "左后方转弯"; 7 -> "左转"; 8 -> "左前方转弯"; 9 -> "进入环岛"; 10 -> "出环岛"
             11 -> "靠左行驶"; 12 -> "靠右行驶"; 13 -> "靠左进入主路"; 14 -> "左分叉直行"
             15 -> "靠右进入主路"; 16 -> "右分叉直行"; 17 -> "分叉路走中间"; 18 -> "靠左驶入辅路"; 19 -> "靠右驶入辅路"
             20 -> "走左侧分叉"; 21 -> "走右侧分叉"; 22 -> "走中间分叉"; 23 -> "出发点"
-            24 -> "到达目的地"; 25 -> "驶离出口"; 29 -> "进入轮渡"; 30 -> "离开轮渡"; 31 -> "经过收费站"
-            else -> "导航指引"
+            24 -> "到达目的地"; 29 -> "进入轮渡"; 30 -> "离开轮渡"; 31 -> "经过收费站"
+            else -> null
         }
     }
 }

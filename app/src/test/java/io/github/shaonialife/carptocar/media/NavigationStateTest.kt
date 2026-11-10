@@ -119,9 +119,9 @@ class NavigationStateTest {
         assertEquals("999米", NavigationState.formatDistance(999))
         assertEquals("1.0公里", NavigationState.formatDistance(1000))
         assertEquals("16.7公里", NavigationState.formatDistance(16700))
-        assertEquals("驶离出口", NavigationState.turnName(25))
+        assertNull(NavigationState.turnName(25))
         assertEquals("右分叉直行", NavigationState.turnName(16))
-        assertEquals("导航指引", NavigationState.turnName(999))
+        assertNull(NavigationState.turnName(999))
     }
 
     @Test fun protocolSnapshotKeepsRoadInAlbumAndBlankArtistWithPausedPercentageTimebase() {
@@ -197,4 +197,30 @@ class NavigationStateTest {
         val fields = io.github.shaonialife.carptocar.iap2.Iap2Csm.parseParams(media.value)
         for (id in listOf(6, 12)) assertArrayEquals(byteArrayOf(32, 32, 32, 0), fields.single { it.id == id }.value)
     }
+    @Test fun unmappedShowAndUpdateUseRoadWithoutChangingIconOrProgress() {
+        for (code in listOf(25, 26, 999)) {
+            val state = NavigationState().apply { begin(owner) }
+            state.receive(owner, event(1, code, "隧道道路", 1000, byteArrayOf(1)), 0)
+            assertEquals("1.0公里 隧道道路", state.display(300).nowPlaying().title)
+            val updatedIcon = byteArrayOf(2, 3)
+            state.receive(owner, event(2, code, "下一道路", 500, updatedIcon), 1000)
+            val view = state.display(1300)
+            val media = view.nowPlaying()
+            assertEquals("500米 下一道路", media.title)
+            assertEquals("下一道路", media.album)
+            assertEquals(NavigationState.BLANK, media.artist)
+            assertEquals(100_000, media.durationMs)
+            assertEquals(50_000, media.elapsedMs)
+            assertArrayEquals(updatedIcon, view.icon)
+        }
+    }
+
+    @Test fun unmappedTitlePreservesUnnamedAndBlankRoadExactlyAsReceived() {
+        for (road in listOf("无名道路", "", "   ", "  原始道路  ")) {
+            val state = NavigationState().apply { begin(owner) }
+            state.receive(owner, event(2, 25, road, 26), 0)
+            assertEquals("26米 $road", state.display(300).nowPlaying().title)
+        }
+    }
+
 }
