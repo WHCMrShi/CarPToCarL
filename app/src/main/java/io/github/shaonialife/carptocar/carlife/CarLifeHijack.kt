@@ -944,12 +944,14 @@ object CarLifeHijack {
     private fun onEngineAudioGate(active: Boolean) {
         enginePlaybackAt = android.os.SystemClock.uptimeMillis()
         if (!active) {
+            io.github.shaonialife.carptocar.SessionController.audioSender?.beginIdleFill()
             logSink?.invoke("CARLIFE: 引擎音频已停（来电 / 音频路由被切走）——车机侧这一段会静音")
             return
         }
         audioSink?.setPlaybackPaused(false)
         val audio = io.github.shaonialife.carptocar.SessionController.audioSender
         if (audio != null && audio.isRunning) {
+            audio.endIdleFill()
             audio.resyncAnchor("引擎音频恢复")
         } else {
             logSink?.invoke("CARLIFE: 引擎音频恢复，但音频通道未在运行——跳过重新对齐")

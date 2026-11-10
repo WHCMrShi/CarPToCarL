@@ -92,7 +92,7 @@ class AudioSender(
         private const val IDLE_FILL_AFTER_MILLIS = 300L
 
         /** 单拍最多补几帧（≈[KEEPALIVE_TICK_MILLIS]/帧长，留一点追赶余量，避免卡顿后猛灌）。 */
-        private const val MAX_KEEPALIVE_FRAMES_PER_TICK = 12
+        private const val MAX_KEEPALIVE_FRAMES_PER_TICK = 16
 
         /** 一次 `sendSyncOnce` 内最多尝试次数（ICMP 端口不可达时就地补发一次）。 */
         private const val SYNC_SEND_ATTEMPTS = 2
@@ -437,6 +437,11 @@ class AudioSender(
     /** 最近一次收到**真实** PCM 的时刻（uptimeMillis）；静音保活据此判断要不要补帧。 */
     @Volatile
     private var lastRealFeedAt = 0L
+    private val silencePolicy = SilenceFillPolicy()
+    fun beginIdleFill() {
+        if (running.get() && record == null) silencePolicy.engineStopped()
+    }
+    fun endIdleFill() { silencePolicy.resumed() }
     private val realInputSeen = AtomicBoolean(false)
     val hasRealInput: Boolean get() = realInputSeen.get()
     private val continuity = AudioContinuityWindow()
@@ -468,7 +473,7 @@ class AudioSender(
         val thread =
             Thread(
                 {
-                    var nextFillAt = 0L
+                    var nextFillAt = 0.0
                     var announced = false
                     while (running.get()) {
                         try {
@@ -478,16 +483,16 @@ class AudioSender(
                         }
                         if (!running.get()) break
                         val now = android.os.SystemClock.uptimeMillis()
-                        if (now - lastRealFeedAt < IDLE_FILL_AFTER_MILLIS || ingress?.pending() == true) {
-                            nextFillAt = 0L
+                        if (now - lastRealFeedAt < silencePolicy.thresholdMs() || ingress?.pending() == true) {
+                            nextFillAt = 0.0
                             continue
                         }
-                        if (nextFillAt == 0L) {
-                            nextFillAt = now
+                        if (nextFillAt == 0.0) {
+                            nextFillAt = now.toDouble()
                             if (!announced) {
                                 announced = true
                                 log(
-                                    "AUDIO: 无 PCM 超过 ${IDLE_FILL_AFTER_MILLIS}ms——开始补静音帧保活" +
+                                    "AUDIO-DIAG: silence thresholdMs=${silencePolicy.thresholdMs()} next-tick fill" +
                                         "（避免车机把音频流判空闲，之后第一段音乐被丢）",
                                 )
                             }
@@ -498,17 +503,22 @@ class AudioSender(
                             guard < MAX_KEEPALIVE_FRAMES_PER_TICK
                         ) {
                             if (android.os.SystemClock.uptimeMillis() - lastRealFeedAt <
-                                IDLE_FILL_AFTER_MILLIS || ingress?.pending() == true
+                                silencePolicy.thresholdMs() || ingress?.pending() == true
                             ) {
                                 break // 真实 PCM 回来了，本拍不再补
                             }
-                            continuity.silence()
-                            dispatchPcm(silence)
-                            nextFillAt += frameMillis.toLong().coerceAtLeast(1L)
+                            synchronized(this) {
+                                if (running.get() && ingress?.pending() != true &&
+                                    android.os.SystemClock.uptimeMillis() - lastRealFeedAt >= silencePolicy.thresholdMs()) {
+                                    continuity.silence()
+                                    dispatchPcm(silence)
+                                }
+                            }
+                            nextFillAt += frameMillis
                             guard++
                         }
                         // 落后太多就不追了：补的静音没必要和历史对齐，重新从当前时刻起算
-                        if (nextFillAt < now) nextFillAt = now
+                        if (nextFillAt < now) nextFillAt = now.toDouble()
                     }
                 },
                 "audio-silence-keepalive",
@@ -550,6 +560,7 @@ class AudioSender(
         if (admitted) {
             realInputSeen.set(true)
             lastRealFeedAt = android.os.SystemClock.uptimeMillis()
+            silencePolicy.resumed() // Real PCM wins even if START was absent or delayed.
         }
         continuity.input(System.nanoTime(), admitted)
     }
