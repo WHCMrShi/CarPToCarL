@@ -95,6 +95,22 @@ object LogExporter {
                     "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})",
             )
             appendLine("==================================================")
+            val crash = runCatching { CrashEvidence(context.filesDir).read() }.getOrNull()
+            if (crash != null) {
+                appendLine("===== 最近一次未捕获异常（独立留存，可能属于先前进程；以时间/版本为准） =====")
+                appendLine(crash)
+            }
+            runCatching {
+                context.getSystemService(android.app.ActivityManager::class.java)
+                    ?.getHistoricalProcessExitReasons(context.packageName, 0, 3)
+            }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { exits ->
+                appendLine("===== 系统记录的近期进程退出（可能属于旧版本/用户主动停止；不是本轮故障结论） =====")
+                exits.forEach {
+                    appendLine("PROCESS-EXIT: time=${Date(it.timestamp)} reason=${it.reason} status=${it.status} " +
+                        "pid=${it.pid} importance=${it.importance} pssKb=${it.pss} rssKb=${it.rss} " +
+                        "description=${it.description?.take(512)?.replace('\n', ' ')}")
+                }
+            }
             val fileLog = DebugFileLog.read(context, currentSessionOnly = scope == Scope.CURRENT_SESSION)
             if (!fileLog.isNullOrBlank()) {
                 if (scope == Scope.CURRENT_SESSION) {
