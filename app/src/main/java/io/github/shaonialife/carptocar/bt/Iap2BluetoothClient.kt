@@ -41,6 +41,7 @@ class Iap2BluetoothClient(
     private val nowPlayingProvider: (() -> CarPlayNowPlaying?)? = null,
     /** 保活泵退出（BT 链路断开）时回调：主控据此释放「会话处理中」（僵尸轮次堵门修复）。 */
     private val onLinkClosed: (BtLinkOwnership.Token) -> Unit = {},
+    private val callbackFactory: (() -> BtSessionCallbacks)? = null,
 ) {
     companion object {
         /**
@@ -689,6 +690,10 @@ class Iap2BluetoothClient(
     }
 
     private fun runSession(socket: BluetoothSocket, epoch: Long) {
+        val callbacks = callbackFactory?.invoke() ?: BtSessionCallbacks(
+            onEndpoint = { value, _ -> onEndpoint(value) }, onWifi = { value, _ -> onWifiCredentials(value) },
+            onUpdate = { value, _ -> onEndpointUpdate(value) }, onClosed = onLinkClosed,
+        )
         val owner = synchronized(this) {
             if (!running || generation.get() != epoch) null else BtSessionGate.links.claim("outbound")?.also { activeOwner = it }
         }
@@ -708,12 +713,12 @@ class Iap2BluetoothClient(
                 context,
                 SESSION_TIMEOUT_MILLIS,
                 log,
-                { if (owner.isCurrent) onEndpoint(it) },
-                { if (owner.isCurrent) onWifiCredentials(it) },
-                { if (owner.isCurrent) onEndpointUpdate(it) },
+                { callbacks.endpoint(it, owner) },
+                { callbacks.wifi(it, owner) },
+                { callbacks.update(it, owner) },
                 nowPlayingProvider,
                 onSessionReady = { session ->
-                    synchronized(this) { if (activeOwner === owner && owner.isCurrent) { senderSession = session; owner.markReady() } }
+                    synchronized(this) { if (activeOwner === owner && owner.isCurrent && callbacks.current()) { senderSession = session; owner.markReady() } }
                 },
 
             )
@@ -734,7 +739,7 @@ class Iap2BluetoothClient(
             val completed = owner.finish() && owner.isCurrent
             if (completed) {
                 log("BT-LIFECYCLE: closed direction=outbound owner=${owner.id} ageMs=${android.os.SystemClock.elapsedRealtime() - owner.startedAt} ready=${owner.ready}")
-                onLinkClosed(owner)
+                callbacks.closed(owner)
             }
             if (completed && running && generation.get() == epoch && !manualTeardown && BtSessionGate.sessionActive) {
                 BtSessionGate.noteLinkLost(peerAddress)

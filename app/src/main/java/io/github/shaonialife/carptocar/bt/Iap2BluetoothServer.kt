@@ -46,6 +46,7 @@ class Iap2BluetoothServer(
      * 会一直为真，自动连接会被自己挡掉。
      */
     private val onPeerConnected: () -> Unit = {},
+    private val callbackFactory: (() -> BtSessionCallbacks)? = null,
 ) {
     companion object {
         /**
@@ -202,6 +203,11 @@ class Iap2BluetoothServer(
                 runCatching { socket.close() }
                 continue
             }
+            val callbacks = callbackFactory?.invoke() ?: BtSessionCallbacks(
+                onEndpoint = { value, _ -> onEndpoint(value) }, onWifi = { value, _ -> onWifiCredentials(value) },
+                onUpdate = { value, _ -> onEndpointUpdate(value) }, onClosed = onLinkClosed,
+                onConnected = { onPeerConnected() },
+            )
             val owner = synchronized(lifecycle) {
                 if (!running || listenerEpoch != epoch) null else {
                     BtSessionGate.links.claim("inbound")?.also {
@@ -213,14 +219,14 @@ class Iap2BluetoothServer(
             }
             if (owner == null) { runCatching { socket.close() }; continue }
             log("BT-LIFECYCLE: accepted direction=inbound owner=${owner.id}")
-            Thread({ runSession(socket, owner, epoch) }, "iap2-bt-session").apply {
+            Thread({ runSession(socket, owner, epoch, callbacks) }, "iap2-bt-session").apply {
                 isDaemon = true
                 start()
             }
         }
     }
 
-    private fun runSession(socket: BluetoothSocket, owner: BtLinkOwnership.Token, epoch: Long) {
+    private fun runSession(socket: BluetoothSocket, owner: BtLinkOwnership.Token, epoch: Long, callbacks: BtSessionCallbacks) {
         var channel: Iap2LinkChannel? = null
         try {
             synchronized(lifecycle) {
@@ -230,15 +236,15 @@ class Iap2BluetoothServer(
                 activeChannel = channel
             }
             if (!owner.isCurrent) return
-            onPeerConnected()
+            callbacks.connected(owner)
             channel!!.runSenderSession(
                 context, SESSION_TIMEOUT_MILLIS, log,
-                { if (owner.isCurrent) onEndpoint(it) },
-                { if (owner.isCurrent) onWifiCredentials(it) },
-                { if (owner.isCurrent) onEndpointUpdate(it) },
+                { callbacks.endpoint(it, owner) },
+                { callbacks.wifi(it, owner) },
+                { callbacks.update(it, owner) },
                 nowPlayingProvider,
                 onSessionReady = { session -> synchronized(lifecycle) {
-                    if (activeOwner === owner && owner.isCurrent) { senderSession = session; owner.markReady() }
+                    if (activeOwner === owner && owner.isCurrent && callbacks.current()) { senderSession = session; owner.markReady() }
                 } },
             )
         } catch (error: IOException) {
@@ -251,7 +257,7 @@ class Iap2BluetoothServer(
             runCatching { socket.close() }
             if (owner.finish() && owner.isCurrent) {
                 log("BT-LIFECYCLE: closed direction=inbound owner=${owner.id} ageMs=${android.os.SystemClock.elapsedRealtime() - owner.startedAt} ready=${owner.ready}")
-                onLinkClosed(owner)
+                callbacks.closed(owner)
             }
         }
     }

@@ -345,3 +345,11 @@ IdleGuard在长于10秒的观察间断后，仅给仍有连接意图的工作2�
 
 
 最终本机验证：947项JVM单测通过（0 failures/errors/skipped），lint无Error、97项既有Warning、2项Information。执行任务仅testDebugUnitTest和lintDebug，未执行assemble/package APK；旧APK最后修改时间仍为2026-11-10 08:15:18，未更新交付包。未安装或实车验证。
+
+
+### E8关键Review修复：局部取消与BT输入原始票据
+
+详见[连接Review修复及E7/E8场景复核](vehicle-tests/2026-11-10-q4-cold-start/review-fixes.md)。取消setup在作废票据前清静默门禁/旧client并接续原有有界恢复，不把局部失败当用户取消。BT事件建立时捕获原始用户工作票据，控制器在状态提交处复核，旧事件不能重新获取新轮票据；已接纳Wi-Fi工作仍可跨正常BT交接继续。E7的2至3秒后TCP成功路径保留，窗口耗尽后不再本地自锁；7000自动开放仍未证明。E8拒绝旧accept与旧回调，但不宣称解决所有合法新链路协商超时。Wi-Fi可读记录固定/不可读成功后重学、20B认证、源缓存及5秒/离车/重试预算均不变。
+
+
+本轮最终本机验证：952项JVM单测通过（0 failures/errors/skipped），lint无Error、97项既有Warning、2项Information；6个实际控制器设备fixtures编译通过，未在Android设备执行。任务仅testDebugUnitTest、lintDebug和compileDebugAndroidTestKotlin，没有构建/更新APK，未安装或实车验证。
