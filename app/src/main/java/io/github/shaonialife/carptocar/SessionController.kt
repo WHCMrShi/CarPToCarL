@@ -3705,13 +3705,14 @@ object SessionController {
                 // EndpointHosts 会按 IPv4 → 全局 IPv6 → 链路本地重排。
                 val gateways = EndpointHosts.candidates(wifiConnector?.gatewayAddresses().orEmpty())
                 if (gateways.isNotEmpty()) {
-                    appendLog(
-                        ">>> [$source] mDNS 未发现，兜底使用网关地址 ${gateways.joinToString(" / ")}:7000" +
-                            "（车机热点网关=车机，${gateways.size} 个候选按 IPv4 优先）",
-                    )
-                    return AirPlayEndpointPorts.fallback(effective.copy(
+                    val selected = AirPlayEndpointPorts.fallback(effective.copy(
                         ipAddresses = gateways + effective.ipAddresses,
                     ))
+                    appendLog(
+                        ">>> [$source] mDNS 未发现，补充网关地址 ${gateways.joinToString(" / ")}; " +
+                            "port=${selected.airPlayPort} portSource=${selected.airPlayPortSource}（有界候选，不代表车机已开放服务）",
+                    )
+                    return selected
                 }
                 appendLog(">>> [$source] mDNS 未发现车机 AirPlay 服务（车机可能尚未启动无线会话）")
                 return effective
@@ -3724,6 +3725,8 @@ object SessionController {
      * IPv4 → 全局 IPv6 → 链路本地 IPv6 重排，顺序只影响同类型内部）。
      * 其余字段只在缺失时补（0x4301 的权威值不覆盖）。
      */
+    @Volatile private var lastMdnsPortDecision: String? = null
+
     private fun mergeBrowserEndpoint(
         endpoint: Iap2SenderSession.CarPlayEndpoint,
         info: android.net.nsd.NsdServiceInfo,
@@ -3739,6 +3742,17 @@ object SessionController {
             appendLog(">>> [$source] mDNS 解析到车机地址 $address:${info.port}")
         }
         result = AirPlayEndpointPorts.fromMdns(result, info.port)
+        val decision = when {
+            !AirPlayEndpointPorts.valid(info.port) -> "invalid-mdns-port"
+            result.airPlayPortSource == io.github.shaonialife.carptocar.net.AirPlayPortSource.IAP2 -> "keep-iap2"
+            else -> "accept-mdns"
+        }
+        val diagnostic = "source=$source network=${wifiConnector?.currentNetwork} mdnsPort=${info.port} " +
+            "selectedPort=${result.airPlayPort} portSource=${result.airPlayPortSource} decision=$decision"
+        if (lastMdnsPortDecision != diagnostic) {
+            lastMdnsPortDecision = diagnostic
+            appendLog("ENDPOINT-DIAG: $diagnostic")
+        }
         // TXT 公钥兜底（pair-verify 校验用；0x4301 缺失时只能从这里拿）
         if (result.publicKey == null) {
             txtValue(info, "pk")?.let { result = result.copy(publicKey = it) }
@@ -4343,7 +4357,7 @@ object SessionController {
                     // 端点解析放在邀请之后：车机的 `_airplay._tcp` 常在受邀后才上线，
                     // 且这一步最长 3s——必须在后台线程做，不能占住网络回调线程。
                     var effectiveEndpoint = resolveEndpointHost(endpoint, source)
-                    appendLog("CONNECT-DIAG: endpoint resolved source=$source addressCount=${effectiveEndpoint.ipAddresses.size} port=${effectiveEndpoint.airPlayPort} cancelled=${attemptCancelled()}")
+                    appendLog("CONNECT-DIAG: endpoint resolved source=$source addressCount=${effectiveEndpoint.ipAddresses.size} port=${effectiveEndpoint.airPlayPort} portSource=${effectiveEndpoint.airPlayPortSource} cancelled=${attemptCancelled()}")
                     // 交接流程起步期间车机补发的 0x4301（比 mDNS 合成更权威）在此并入。
                     pendingEndpointUpdate?.let { late ->
                         pendingEndpointUpdate = null
@@ -4372,7 +4386,8 @@ object SessionController {
                             if (wakeCount < CARPLAY_WAKE_MAX_TIMES && now - lastWakeAt >= CARPLAY_WAKE_GAP_MS) {
                                 lastWakeAt = now
                                 wakeCount++
-                                val reason = "7000 已连续拒绝 $refused 次"
+                                val selected = currentClient?.currentEndpoint ?: effectiveEndpoint
+                                val reason = "connectFailures=$refused port=${selected.airPlayPort} portSource=${selected.airPlayPortSource}"
                                 val nudged = bluetoothServer?.nudgeCarPlayAvailability(reason) == true ||
                                     bluetoothClient?.nudgeCarPlayAvailability(reason) == true
                                 ctrlAdvertiser?.ensureForNetwork(
@@ -4381,9 +4396,9 @@ object SessionController {
                                     network = wifiConnector?.currentNetwork,
                                 )
                                 appendLog(
-                                    "AIRPLAY: 7000 已连续拒绝 $refused 次（车机没起 AirPlay 服务）——" +
+                                    "AIRPLAY: 候选入口连接连续失败（$reason）——" +
                                         "第 $wakeCount/$CARPLAY_WAKE_MAX_TIMES 次叫醒：" +
-                                        (if (nudged) "重发 0x4e0e+0x4300 + " else "iAP2 会话已不在，只能") +
+                                        (if (nudged) "已写入 0x4e0e+0x4300（不代表车机已接受） + " else "无可用就绪 iAP2 会话，仅") +
                                         "重新公告 ctrl；若仍不开，请在车机上点本机图标或重启 CarPlay",
                                 )
                             }

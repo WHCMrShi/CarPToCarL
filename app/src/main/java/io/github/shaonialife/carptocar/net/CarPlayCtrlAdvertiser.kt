@@ -286,6 +286,7 @@ class CarPlayCtrlAdvertiser(
                 return
             }
             val requestLine = head.lineSequence().firstOrNull() ?: ""
+            val responseStartedAt = System.nanoTime()
             val headers =
                 head
                     .substringAfter("\r\n", "")
@@ -306,7 +307,7 @@ class CarPlayCtrlAdvertiser(
                         }?.substringAfter(':')
                         ?.trim()
                 inviteCount++
-                log("$TAG: ✓ 车机 ctrl 邀请（第 $inviteCount 次，receiver=${receiverId ?: "?"}）——AirPlay 窗口已开启")
+                log("$TAG: ✓ 车机 ctrl 邀请（第 $inviteCount 次，receiver=${receiverId ?: "?"}）——已收到连接请求，服务是否可用待验证")
                 // 回调里可能再走一轮连接（会话失败后的恢复入口），异常不能打死应答
                 runCatching { onNetworkInvite?.invoke(receiverId, client.localAddress?.hostAddress) }
                 runCatching { onInvite?.invoke(receiverId) }
@@ -317,7 +318,7 @@ class CarPlayCtrlAdvertiser(
             val response =
                 when {
                     requestLine.startsWith("GET /ctrl-int/") -> {
-                        log("$TAG: ✓ 应答 ctrl-int 探测 200 OK")
+                        log("$TAG: 准备应答 ctrl-int 探测 200 OK")
                         "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                     }
 
@@ -326,8 +327,14 @@ class CarPlayCtrlAdvertiser(
                         "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                     }
                 }
-            output.write(response.toByteArray(Charsets.US_ASCII))
-            output.flush()
+            try {
+                output.write(response.toByteArray(Charsets.US_ASCII))
+                output.flush()
+                log("CTRL-DIAG: response-written status=200 durationMs=${(System.nanoTime() - responseStartedAt) / 1_000_000} listenerCurrent=${serverSocket === owner && !owner.isClosed}; peer receipt unverified")
+            } catch (error: IOException) {
+                log("CTRL-DIAG: response-write-failed durationMs=${(System.nanoTime() - responseStartedAt) / 1_000_000} type=${error.javaClass.simpleName}")
+                throw error
+            }
 
             // 对端 Connection: close 会自行断开；等待期间若还有字节（隧道/事件），转储出来
             client.soTimeout = 3_000

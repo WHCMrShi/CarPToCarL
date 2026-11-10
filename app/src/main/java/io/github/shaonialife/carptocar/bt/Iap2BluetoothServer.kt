@@ -248,7 +248,7 @@ class Iap2BluetoothServer(
                 onSessionReady = { session -> synchronized(lifecycle) {
                     if (activeOwner === owner && owner.isCurrent && callbacks.current()) { senderSession = session
                         owner.markReady()
-                        availabilityCommand = BtSessionCommand(owner, callbacks::current, session::nudgeCarPlayAvailability) }
+                        availabilityCommand = BtSessionCommand(owner, callbacks::current, log, session::nudgeCarPlayAvailability) }
                 } },
             )
         } catch (error: IOException) {

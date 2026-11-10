@@ -45,4 +45,17 @@ class BtSessionCommandTest {
         assertTrue(nextCommand.run("next"))
         assertEquals(1, writes)
     }
+    @Test fun failedSendReportsOwnerAndFailureWithoutClaimingSuccess() {
+        val owner = BtLinkOwnership { 0L }.claim("outbound")!!.also { it.markReady() }
+        val logs = mutableListOf<String>()
+        val command = BtSessionCommand(owner, { true }, logs::add) { throw java.io.IOException("closed") }
+        try {
+            command.run("test")
+            fail("send failure must reach recovery caller")
+        } catch (_: java.io.IOException) { }
+        assertTrue(logs.any { it.contains("owner=${owner.id}") && it.contains("direction=outbound") })
+        assertTrue(logs.any { it.contains("write-failed:IOException") })
+        assertFalse(logs.any { it.contains("result=written") })
+    }
+
 }

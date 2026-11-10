@@ -902,8 +902,7 @@ class Iap2SenderSession(
         )
         sendAvailability()
         log(
-            "iap2 叫醒车机（$reason）：重发 0x4e0e + 0x4300——" +
-                "车机没起 AirPlay 服务（7000 拒绝），用可用性请求把它从「等 IAP2 信息」里叫出来",
+            "iap2 恢复请求（$reason）：已写入 0x4e0e + 0x4300；未等待 ACK，不代表车机已接受或开放服务",
         )
         return true
     }

@@ -335,8 +335,8 @@ class AirPlayClient(
         val deferClose = AirPlaySessionPolicy.deferEndpointClose(pairingInProgress, pendingResponses.size)
         log(
             "AIRPLAY: 端点更新（$reason）" +
-                "${old.ipAddresses.firstOrNull()}:${old.airPlayPort} → " +
-                "${newEndpoint.ipAddresses.firstOrNull()}:${newEndpoint.airPlayPort}" +
+                "${old.ipAddresses.firstOrNull()}:${old.airPlayPort}[${old.airPlayPortSource}] → " +
+                "${newEndpoint.ipAddresses.firstOrNull()}:${newEndpoint.airPlayPort}[${newEndpoint.airPlayPortSource}]" +
                 if (deferClose) {
                     "（${if (inFlight) "请求在飞" else "配对进行中"}：不打断当前通道，下一轮重连生效）"
                 } else {
@@ -359,7 +359,7 @@ class AirPlayClient(
 
     fun runPairing(windowMillis: Long = PAIRING_WINDOW_MILLIS): PairVerifyClient.ControlKeys? {
         val started = SystemClock.elapsedRealtime()
-        log("CONNECT-DIAG: client=${System.identityHashCode(this)} pairing-start budgetMs=$windowMillis addressCount=${endpoint.ipAddresses.size} port=${endpoint.airPlayPort}")
+        log("CONNECT-DIAG: client=${System.identityHashCode(this)} pairing-start budgetMs=$windowMillis addressCount=${endpoint.ipAddresses.size} port=${endpoint.airPlayPort} portSource=${endpoint.airPlayPortSource}")
         pairingInProgress = true
         try {
             val result = runPairingLoop(windowMillis)
@@ -403,9 +403,10 @@ class AirPlayClient(
                 refusedStreak++
                 if (refusedStreak % PORT_REFUSED_WAKE_EVERY == 0) {
                     runCatching { onPortRefused?.invoke(refusedStreak) }
+                        .onFailure { log("CONNECT-DIAG: recovery callback failed type=${it.javaClass.simpleName}") }
                 }
                 if (attempt == 1 || attempt % 5 == 0) {
-                    log("AIRPLAY: 车机 AirPlay 端口未开（等待你点车机上的手机图标 / 车机发 ctrl 邀请）…第 $attempt 次重试")
+                    log("AIRPLAY: 候选入口尚未连通（不能据此断定车机未启动服务）…第 $attempt 次重试")
                 }
                 Thread.sleep(2_000)
                 continue
@@ -3357,11 +3358,12 @@ class AirPlayClient(
                     return false
                 }
                 previous.close()
-                log("AIRPLAY: TCP 已连通 $activeHost:${target.airPlayPort}（本机 ${newSocket.localAddress.hostAddress}）")
+                log("AIRPLAY: TCP 已连通 $activeHost:${target.airPlayPort} portSource=${target.airPlayPortSource}（本机 ${newSocket.localAddress.hostAddress}）")
                 return true
             } catch (error: IOException) {
                 attempt.second.release(newSocket)
                 runCatching { newSocket.close() }
+                log("CONNECT-DIAG: tcp-failed host=$host port=${target.airPlayPort} portSource=${target.airPlayPortSource} type=${error.javaClass.simpleName} error=${error.message}")
                 failures += "$host（${error.message}）"
             }
         }
