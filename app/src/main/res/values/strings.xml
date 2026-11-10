@@ -7,4 +7,8 @@
     <string name="app_subtitle">非官方实验性 CarPlay 兼容发送端</string>
     <string name="accessibility_description">镜像模式：把车机触摸手势注入手机屏幕，不读取屏幕内容</string>
     <string name="instrument_navigation">仪表导航信息（关闭显示音乐）</string>
+    <string name="clear_car_wifi_memory">清除记忆</string>
+    <string name="wifi_memory_fixed">已记忆 · 固定使用，修改需清除记忆</string>
+    <string name="wifi_memory_learning">未记忆 · 成功连接后记住</string>
+    <string name="wifi_memory_unreadable">记忆不可读 · 成功连接后重新学习</string>
 </resources>

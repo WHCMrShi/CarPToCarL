@@ -1305,12 +1305,19 @@ object SessionController {
         }
         // 所有非推流态邀请统一记账，等待窗口不再依赖无有效期的累计计数。
         if (!pendingCtrlInvite.record(inviteGeneration, io.github.shaonialife.carptocar.net.WifiIdentityProof.matchesReceiver(target, receiverId))) return
-        val endpoint = lastGoodEndpoint
+        val (endpoint, endpointWork) = synchronized(wifiMemoryLock) {
+            val current = lastGoodEndpoint
+            current to if (current != null && rememberedEndpoint === current) rememberedWifiWork.capture() else connectionWork.capture()
+        }
         if (endpoint == null) {
             appendLog(
                 "CTRL: 车机邀请到达（receiver=${receiverId ?: "?"}）——但还没有热点端点；" +
                     "已挂起待决邀请（catplay cache_miss 自愈），端点晚到时直接接续，不再空等",
             )
+            return
+        }
+        if (endpoint === rememberedEndpoint && !io.github.shaonialife.carptocar.net.WifiIdentityProof.matchesReceiver(target, receiverId)) {
+            appendLog("WIFI-MEMORY: invitation lacks matching target identity; keep waiting for BT or target invitation")
             return
         }
         if (sessionStarting.get()) {
@@ -1341,7 +1348,7 @@ object SessionController {
             if (connectCancelled || !sessionWanted || isStreaming() ||
                 pendingCtrlInvite.currentGeneration() != inviteGeneration
             ) return@run
-            onCarPlayEndpoint(endpoint, "车机 ctrl 邀请触发")
+            onCarPlayEndpoint(endpoint, "车机 ctrl 邀请触发", endpointWork)
         }
     }
 
@@ -1457,6 +1464,174 @@ object SessionController {
     @Volatile
     private var lastCarWifi: Iap2SenderSession.WifiConfiguration? = null
 
+    private val rememberedWifiWork = WorkEpoch()
+    private val wifiMemoryLock = Any()
+    @Volatile private var unreadableWifiTarget: String? = null
+    @Volatile private var freshWifiThisStart: Iap2SenderSession.WifiConfiguration? = null
+    @Volatile private var rememberedWifi: io.github.shaonialife.carptocar.net.VerifiedWifi? = null
+    @Volatile private var rememberedEndpoint: Iap2SenderSession.CarPlayEndpoint? = null
+    @Volatile private var rememberedSetup: WorkEpoch.Ticket? = null
+
+    private fun sameWifi(a: Iap2SenderSession.WifiConfiguration, b: Iap2SenderSession.WifiConfiguration): Boolean =
+        a.ssid == b.ssid && a.passphrase == b.passphrase && a.securityType == b.securityType
+
+    private fun cachedEndpoint(wifi: Iap2SenderSession.WifiConfiguration) = Iap2SenderSession.CarPlayEndpoint(
+        wifi.ssid, wifi.passphrase, wifi.channel, wifi.securityType, 7000, null, null, null, emptyList(),
+    )
+
+    /** Invalidate only the cached attempt; the normal BT path stays available. */
+    private fun discardRememberedWifiAttempt() {
+        var retired: AirPlayClient? = null
+        connectionWork.capture().runIfCurrent {
+            // A working control socket already proved its network; do not disrupt it on a refresh.
+            if (videoSender?.isRunning == true || currentClient?.controlConnectionAlive == true) return@runIfCurrent
+            val setup = rememberedSetup
+            if (sessionStarting.get() && setup?.isCurrent != true) return@runIfCurrent
+            rememberedWifiWork.end()
+            val endpoint = rememberedEndpoint
+            fun withdrawNetwork() {
+                wifiJoinGate.reset()
+                wifiConnector?.release()
+                boundCarSsid = null
+                if (lastGoodEndpoint === endpoint) lastGoodEndpoint = null
+            }
+            if (setup?.isCurrent == true) setup.runIfCurrent {
+                retired = currentClient // Capture before reopening the setup mutex.
+                setupWork.end()
+                withdrawNetwork()
+                synchronized(connectRetryLock) { connectRetryGeneration++; connectRetryScheduled = false }
+                sessionStarting.set(false)
+            } else withdrawNetwork()
+            rememberedSetup = null
+            rememberedEndpoint = null
+            rememberedWifi = null
+        }
+        retired?.dispose()
+    }
+
+    fun onRememberedWifiTargetChanged() = synchronized(wifiMemoryLock) {
+        unreadableWifiTarget = null
+        freshWifiThisStart = null
+        if (rememberedWifi != null) discardRememberedWifiAttempt()
+    }
+
+    fun canClearRememberedWifi(): Boolean = !sessionWanted && !isSessionRunning() && !sessionStarting.get()
+
+    fun clearRememberedWifi(context: Context): Boolean = synchronized(wifiMemoryLock) {
+        if (!canClearRememberedWifi()) return false
+        val target = TargetDevicePrefs.get(context)?.address ?: return true
+        val memory = io.github.shaonialife.carptocar.net.CarWifiMemory(context)
+        val previous = memory.load(target)
+        rememberedWifiWork.end()
+        rememberedWifi = null
+        rememberedEndpoint = null
+        rememberedSetup = null
+        unreadableWifiTarget = null
+        freshWifiThisStart = null
+        lastCarWifi = null
+        lastWifiPsk = null
+        lastGoodEndpoint = null
+        memory.clear(target)
+        previous?.let { wifiConnector?.removeSuggestion(it.wifi) }
+        ssidSink?.invoke("")
+        appendLog("WIFI-MEMORY: cleared selected vehicle credentials and application suggestion; pairing identity unchanged")
+        true
+    }
+
+    private fun rememberConnectedWifi(context: Context, endpoint: Iap2SenderSession.CarPlayEndpoint, target: String?) {
+        if (target == null || TargetDevicePrefs.get(context)?.address?.equals(target, true) != true) return
+        if (rememberedWifi?.target?.equals(target, true) == true) return
+        val wifi = Iap2SenderSession.WifiConfiguration(endpoint.ssid, endpoint.passphrase, endpoint.channel, endpoint.securityType)
+        if (lastCarWifi?.let { sameWifi(it, wifi) } != true || !carWifiReady(wifi.ssid)) return
+        val peerMatches = target.equals(BtSessionGate.activePeerAddress, true)
+        val cachedProof = rememberedWifi?.let { it.target.equals(target, true) && sameWifi(it.wifi, wifi) } == true
+        if (!peerMatches && !cachedProof) return
+        val work = connectionWork.capture()
+        Bg.run("wifi-memory-save") {
+            work.runIfCurrent {
+                if (TargetDevicePrefs.get(context)?.address?.equals(target, true) != true) return@runIfCurrent
+                runCatching { io.github.shaonialife.carptocar.net.CarWifiMemory(context).save(
+                    io.github.shaonialife.carptocar.net.VerifiedWifi(target, wifi, System.currentTimeMillis()))
+                }.onSuccess { saved ->
+                    unreadableWifiTarget = null
+                    if (saved) appendLog("WIFI-MEMORY: verified credentials fixed until manual reset")
+                }
+                    .onFailure { appendLog("WIFI-MEMORY: save unavailable type=${it.javaClass.simpleName}; normal connection unchanged") }
+            }
+        }
+    }
+
+    private fun loadFixedWifi(context: Context): io.github.shaonialife.carptocar.net.VerifiedWifi? = synchronized(wifiMemoryLock) {
+        val target = TargetDevicePrefs.get(context)?.address ?: return null
+        rememberedWifi?.takeIf { it.target.equals(target, true) }?.let { return it }
+        val memory = io.github.shaonialife.carptocar.net.CarWifiMemory(context)
+        val state = memory.readState(target)
+        val saved = state.value
+        rememberedWifi = saved
+        if (saved == null && state.occupied) {
+            if (unreadableWifiTarget != target) {
+                appendLog("WIFI-MEMORY: no readable credentials; normal connection will relearn after success")
+            }
+            unreadableWifiTarget = target
+        } else unreadableWifiTarget = null
+        saved
+    }
+
+    private fun selectFixedWifi(context: Context, incoming: Iap2SenderSession.WifiConfiguration): Iap2SenderSession.WifiConfiguration? {
+        val fixed = loadFixedWifi(context)
+        if (fixed != null && !sameWifi(fixed.wifi, incoming))
+            appendLog("WIFI-MEMORY: different received credentials ignored; using fixed memory until manual reset")
+        return fixed?.wifi ?: incoming
+    }
+
+    private fun selectFixedEndpoint(context: Context, incoming: Iap2SenderSession.CarPlayEndpoint): Iap2SenderSession.CarPlayEndpoint? {
+        val config = selectFixedWifi(context, Iap2SenderSession.WifiConfiguration(
+            incoming.ssid, incoming.passphrase, incoming.channel, incoming.securityType)) ?: return null
+        return if (incoming.ssid == config.ssid && incoming.passphrase == config.passphrase && incoming.securityType == config.securityType) incoming
+        else incoming.copy(ssid = config.ssid, passphrase = config.passphrase, channel = config.channel, securityType = config.securityType)
+    }
+
+    fun wifiMemoryStatus(context: Context): Int {
+        val target = TargetDevicePrefs.get(context)?.address ?: return 0
+        if (unreadableWifiTarget?.equals(target, true) == true) return -1
+        return if (context.getSharedPreferences(io.github.shaonialife.carptocar.net.CarWifiMemory.PREFS, Context.MODE_PRIVATE).contains(target.uppercase())) 1 else 0
+    }
+
+    private fun startRememberedWifi(context: Context, work: WorkEpoch.Ticket) {
+        if (rememberedWifi != null || isStreaming()) return
+        val cacheWork = rememberedWifiWork.replace()
+        Bg.run("wifi-memory-preconnect") {
+            val target = TargetDevicePrefs.get(context)?.address ?: return@run
+            val saved = synchronized(wifiMemoryLock) {
+                if (!work.isCurrent || !cacheWork.isCurrent || !sessionWanted || freshWifiThisStart != null) return@run
+                loadFixedWifi(context)
+            } ?: return@run
+            if (!work.isCurrent || !cacheWork.isCurrent || !sessionWanted ||
+                TargetDevicePrefs.get(context)?.address?.equals(target, true) != true) return@run
+            cacheWork.runIfCurrent { lastCarWifi = saved.wifi; lastWifiPsk = saved.wifi.passphrase; ssidSink?.invoke(saved.wifi.ssid) }
+            appendLog("WIFI-MEMORY: bounded preconnect using verified credentials; BT continues independently")
+            cacheWork.runIfCurrent { wifiConnector?.registerSuggestion(saved.wifi.ssid, saved.wifi.passphrase, saved.wifi.securityType) }
+            val result = joinCarWifiSpecifier(saved.wifi, false, work = cacheWork)
+            if (result !is WifiCarPlayConnector.JoinResult.Joined) return@run
+            if (!work.isCurrent || !cacheWork.isCurrent || !sessionWanted ||
+                TargetDevicePrefs.get(context)?.address?.equals(target, true) != true) return@run
+            val endpoint = cachedEndpoint(saved.wifi)
+            synchronized(wifiMemoryLock) {
+                cacheWork.runIfCurrent {
+                    if (sessionStarting.get() || videoSender?.isRunning == true) return@runIfCurrent
+                    rememberedEndpoint = endpoint
+                    lastGoodEndpoint = endpoint // No historical IP, invitation, key or socket is restored.
+                    endpointBrowser?.start()
+                }
+            }
+            val generation = pendingCtrlInvite.currentGeneration()
+            if (rememberedEndpoint === endpoint && generation != null && pendingCtrlInvite.peekAge(generation) != null && pendingCtrlInvite.recentAge(generation) != null)
+                onCarPlayEndpoint(endpoint, "记忆凭据接续本轮邀请", cacheWork)
+            // Otherwise wait for a new ctrl invite; possession of a password is not an open AirPlay window.
+        }
+    }
+
+
     /**
      * 本轮会话中 wlan0 是否丢过（被动断开或我们自己的 release）。
      *
@@ -1565,7 +1740,7 @@ object SessionController {
                     advertiser.onInvite = { receiverId -> onCtrlInvite(receiverId) }
                     advertiser.onNetworkInvite = { receiverId, local ->
                         val target = TargetDevicePrefs.get(context)?.address
-                        if (sessionWanted && !compatSuppressed && target != null && target.equals(BtSessionGate.activePeerAddress, true)) {
+                        if (sessionWanted && !compatSuppressed && target != null && (target.equals(BtSessionGate.activePeerAddress, true) || rememberedWifi?.target?.equals(target, true) == true)) {
                             wifiConnector?.recordReceiverInvite(target, receiverId, local)
                         }
                     }
@@ -1662,7 +1837,9 @@ object SessionController {
         // RTSP 全量报文落盘（files/rtsp-YYYYMMDD.log）
         io.github.shaonialife.carptocar.util.RtspDump.init(context.filesDir)
         // 用户明确要连：解冻恢复的前提之一（断开后再解冻不该自己爬起来）
+        val firstStart = !sessionWanted && !isStreaming() && !sessionStarting.get()
         sessionWanted = true
+        if (firstStart) { lastCarWifi = null; lastWifiPsk = null; freshWifiThisStart = null; lastGoodEndpoint = null; unreadableWifiTarget = null }
         if (CarLifeHijack.isEnabled(context)) CarLifeHijack.prewarm(context) { line -> appendLog(line) }
         // 用户主动开链 = 解除「别再挂机」的抑制；这一轮由连接流程自己拉监听，
         // 不算挂机态（否则 isSessionRunning 会漏判）
@@ -1712,11 +1889,16 @@ object SessionController {
         // 不开放 iAP2 窗口，而我们断开之后它自己又会把配置文件拉回来——一次性断不够，
         // 得在整段建链期反复复查。iAP2 会话一并建立（或用户断开）就收工。
         startAudioProfileGuard()
+        if (firstStart) startRememberedWifi(context, connectionWork.capture())
     }
 
     /** 「断开连接」（可在任意 Activity 实例上调用——操作的是真管线对象）。 */
     fun disconnect(context: Context, manual: Boolean = true) {
         connectionWork.end()
+        rememberedWifiWork.end()
+        rememberedWifi = null
+        rememberedEndpoint = null
+        rememberedSetup = null
         setupWork.end()
         wifiJoinGate.reset()
         appendLog("CONNECT-DIAG: final-disconnect requested phase=$phaseHint; will stop CarLife and retire network resources")
@@ -1864,16 +2046,19 @@ object SessionController {
      * 主动发 `GET /ctrl-int/1/connect` 邀请，邀请被接受才发 0x4301。
      * 因此这里必须：绑车机 WiFi → 广播 ctrl；晚于 0x4300 则双方互等死锁（Audi 实测）。
      */
-    fun onWifiCredentials(wifi: Iap2SenderSession.WifiConfiguration) {
+    fun onWifiCredentials(incoming: Iap2SenderSession.WifiConfiguration) {
         if (compatSuppressed) {
             appendLog("CONNECT-DIAG: ignored late WiFi credentials after terminal disconnect")
             return
         }
+        val context = appContext ?: return
+        val wifi = selectFixedWifi(context, incoming) ?: return
+        freshWifiThisStart = wifi
         // 会话推流中收到的 0x5703 是冗余凭据（DiPlay 控制器周期重连会重发一轮
         // Phase 1，2026-10-15 实测「连上后自动断开」循环的推手之一）：此时再走绑定
         // 流程会 release+重绑进程网络（扰动正在推流的 socket）、force 重注册 ctrl
         // mDNS（DiPlay 视为手机重新上线、再拉一轮 RFCOMM）。只刷新密码缓存。
-        if (videoSender?.isRunning == true) {
+        if (videoSender?.isRunning == true || (rememberedWifi != null && currentClient?.controlConnectionAlive == true)) {
             lastWifiPsk = wifi.passphrase
             lastCarWifi = wifi
             appendLog("0x5703 冗余凭据（会话推流中）——保持现有 WiFi 绑定与 ctrl 广播不变")
@@ -3549,7 +3734,7 @@ object SessionController {
      *    车机等 15s 无人连入即拆链，表现为「连上后自动断开」。
      */
     private fun onLateEndpoint(
-        endpoint: Iap2SenderSession.CarPlayEndpoint,
+        incoming: Iap2SenderSession.CarPlayEndpoint,
         source: String,
     ) {
         if (connectCancelled) {
@@ -3560,6 +3745,7 @@ object SessionController {
             appendLog(">>> [$source] 0x4301 晚到（推流中）——忽略冗余端点")
             return
         }
+        val endpoint = selectFixedEndpoint(appContext ?: return, incoming) ?: return
         val client = currentClient
         if (sessionStarting.get()) {
             if (client != null && client.pairingInProgress) {
@@ -3944,16 +4130,20 @@ object SessionController {
 
     /** BT 会话交接点：拿到 0x5703/0x4301 后两条路径流程一致——绑 WiFi → AirPlay 配对 → SETUP → 推流。 */
     private fun onCarPlayEndpoint(
-        endpoint: Iap2SenderSession.CarPlayEndpoint,
+        incoming: Iap2SenderSession.CarPlayEndpoint,
         source: String,
         work: WorkEpoch.Ticket = connectionWork.capture(),
     ) {
         val context = appContext ?: return
         val inviteGeneration = pendingCtrlInvite.currentGeneration()
+        val memoryTarget = TargetDevicePrefs.get(context)?.address
         if (!work.isCurrent || compatSuppressed) {
             appendLog("CONNECT-DIAG: ignored late endpoint after terminal disconnect source=$source")
             return
         }
+        val endpoint = selectFixedEndpoint(context, incoming) ?: return
+        if (endpoint !== rememberedEndpoint && endpoint.ssid.isNotEmpty()) freshWifiThisStart =
+            Iap2SenderSession.WifiConfiguration(endpoint.ssid, endpoint.passphrase, endpoint.channel, endpoint.securityType)
         // 冗余端点防护：接收端控制器（DiPlay 实测）在我们配对推流后才完成既有的
         // RFCOMM 重连并重发 0x4301。此时重启配对会 retireSession 掉健康会话
         // （编码器 stop 竞态 = 「连上后自动断开」循环的根因）。推流中的端点一律忽略；
@@ -3966,6 +4156,9 @@ object SessionController {
         work.runIfCurrent {
             if (!compatSuppressed && sessionStarting.compareAndSet(false, true)) {
                 accepted = setupWork.replace()
+                rememberedSetup = if (rememberedWifi?.wifi?.let {
+                    it.ssid == endpoint.ssid && it.passphrase == endpoint.passphrase && it.securityType == endpoint.securityType
+                } == true) accepted else null
                 preTcpHandover = io.github.shaonialife.carptocar.net.PreTcpHandover({ android.os.SystemClock.elapsedRealtime() })
             }
         }
@@ -4207,6 +4400,7 @@ object SessionController {
                             created.onAuthenticationComplete = {
                                 mutate {
                                     if (currentClient === created && !created.authenticationFailed) {
+                                        if (videoSender?.isRunning == true) rememberConnectedWifi(context, endpoint, memoryTarget)
                                         synchronized(connectRetryLock) { connectRetryAttempt = 0 }
                                     }
                                 }
@@ -5181,6 +5375,7 @@ object SessionController {
                                 // Starting video alone must not replenish the MFi failure budget.
                                 // A late successful response also resets it through the owner-scoped callback.
                                 if (currentClient?.controlSessionReady == true) {
+                                    rememberConnectedWifi(context, endpoint, memoryTarget)
                                     synchronized(connectRetryLock) { connectRetryAttempt = 0 }
                                 }
                             }

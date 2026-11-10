@@ -1144,6 +1144,10 @@ class MainActivity : AppCompatActivity() {
         // 一存在就会让 CarLife 进入调试模式，白担开销。CarLifeDevConfig 保留备用
         // （需要时可在代码里直接调用 provision()），界面不再暴露。
 
+        findViewById<TextView>(R.id.btnClearWifiMemory).setOnClickListener {
+            if (SessionController.clearRememberedWifi(this)) snack("已清除车机 Wi-Fi 记忆，下次通过蓝牙重新获取")
+            else snack("请先断开连接，再清除 Wi-Fi 记忆")
+        }
         findViewById<TextView>(R.id.btnWifi).setOnClickListener {
             log("CONNECT-DIAG: opening WLAN settings from home WiFi button")
             val ssid = ssidInput.text.toString().trim()
@@ -1766,6 +1770,15 @@ class MainActivity : AppCompatActivity() {
      * Shizuku 项已移除（2026-10-24），准备项里不再有任何硬性前置依赖。
      */
     private fun updateReadyRow() {
+        findViewById<TextView>(R.id.wifiMemoryStatus).setText(when (SessionController.wifiMemoryStatus(this)) {
+            1 -> R.string.wifi_memory_fixed
+            -1 -> R.string.wifi_memory_unreadable
+            else -> R.string.wifi_memory_learning
+        })
+        findViewById<TextView>(R.id.btnClearWifiMemory).apply {
+            isEnabled = SessionController.canClearRememberedWifi()
+            alpha = if (isEnabled) 1f else 0.45f
+        }
         var ready = 0
         if (ssidInput.text
                 .toString()
@@ -1941,6 +1954,7 @@ class MainActivity : AppCompatActivity() {
                     iconTint = R.color.m3_outline,
                 ) {
                     TargetDevicePrefs.set(this@MainActivity, null)
+                    SessionController.onRememberedWifiTargetChanged()
                     log("TARGET: 已取消目标指定——出站逐个尝试已配对设备，入站接受任一设备")
                     // 先关弹窗再提示（snackbar 在 Activity 窗口内，会被弹窗盖住）
                     targetPicker?.dismiss()
@@ -2281,6 +2295,7 @@ class MainActivity : AppCompatActivity() {
         if (closePicker) targetPicker?.dismiss()
         val previous = TargetDevicePrefs.get(this)
         TargetDevicePrefs.set(this, TargetDevicePrefs.Target(device.address, name))
+        SessionController.onRememberedWifiTargetChanged()
         log(
             "TARGET: 目标车机已设为「$name」(${device.address})" +
                 "——出站只连该设备、入站拒绝其它设备" +

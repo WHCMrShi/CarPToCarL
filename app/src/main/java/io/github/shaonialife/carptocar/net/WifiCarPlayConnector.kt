@@ -446,6 +446,19 @@ class WifiCarPlayConnector(
         }
     }
 
+    fun removeSuggestion(wifi: io.github.shaonialife.carptocar.iap2.Iap2SenderSession.WifiConfiguration) {
+        runCatching {
+            val builder = WifiNetworkSuggestion.Builder().setSsid(wifi.ssid)
+            when (wifi.securityType) {
+                0 -> Unit
+                4 -> builder.setWpa3Passphrase(wifi.passphrase)
+                else -> builder.setWpa2Passphrase(wifi.passphrase)
+            }
+            val status = wifiManager?.removeNetworkSuggestions(listOf(builder.build()))
+            log("WIFI-MEMORY: remove application suggestion status=$status")
+        }.onFailure { log("WIFI-MEMORY: suggestion removal unavailable type=${it.javaClass.simpleName}") }
+    }
+
     private fun logSuggestion(reason: String): Boolean {
         log("WiFi: 热点建议$reason")
         return false

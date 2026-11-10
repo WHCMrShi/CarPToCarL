@@ -777,7 +777,24 @@
                             android:textColorHint="#5A6B7A"
                             android:textSize="13.5sp"
                             android:textStyle="bold" />
+                        <TextView
+                            android:id="@+id/wifiMemoryStatus"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/wifi_memory_learning"
+                            android:textColor="@color/m3_on_surface"
+                            android:textSize="11sp" />
                     </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/btnClearWifiMemory"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_tbtn"
+                        android:padding="9dp"
+                        android:text="@string/clear_car_wifi_memory"
+                        android:textColor="@color/m3_primary"
+                        android:textSize="13sp" />
 
                     <TextView
                         android:id="@+id/btnWifi"
