@@ -95,6 +95,19 @@ object LogExporter {
                     "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})",
             )
             appendLine("==================================================")
+            appendLine("===== 独立异常留证（可能来自先前进程，以时间与构建号为准） =====")
+            appendLine(runCatching { FatalErrorStore(context.filesDir).read() }
+                .getOrElse { "异常文件读取失败：" + it.javaClass.simpleName } ?: "没有留存的 Java 未捕获异常")
+            runCatching {
+                context.getSystemService(android.app.ActivityManager::class.java)
+                    ?.getHistoricalProcessExitReasons(context.packageName, 0, 3)
+            }.onSuccess { exits ->
+                appendLine("===== 近期系统进程退出（包含用户停止及旧进程，不代表本轮崩溃） =====")
+                exits.orEmpty().forEach { exit ->
+                    appendLine("PROCESS-EXIT: time=" + Date(exit.timestamp) + " reason=" + exit.reason +
+                        " status=" + exit.status + " description=" + exit.description?.take(512)?.replace('\n', ' '))
+                }
+            }.onFailure { appendLine("PROCESS-EXIT: unavailable type=" + it.javaClass.simpleName) }
             val fileLog = DebugFileLog.read(context, currentSessionOnly = scope == Scope.CURRENT_SESSION)
             if (!fileLog.isNullOrBlank()) {
                 if (scope == Scope.CURRENT_SESSION) {
@@ -118,7 +131,7 @@ object LogExporter {
                 appendLine()
                 appendLine("============ 连接失败报文快照（${failure.name}）============")
                 appendLine("格式：[时刻] 方向 通道 类型 id 长度 报文体hex；TX=手机→车机，RX=车机→手机")
-                appendLine("（仅未建链的轮次才会生成；视频/音频帧不记录）")
+                appendLine("（可能来自先前进程/旧会话，以文件名时间为准；仅未建链轮次生成，视频/音频帧不记录）")
                 appendLine("================================================================")
                 append(trace)
                 if (!trace.endsWith('\n')) appendLine()
