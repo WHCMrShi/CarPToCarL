@@ -319,6 +319,7 @@ class CarLifeHuClient(
      */
     @Volatile
     private var engineAudioActive = false
+    private val voiceObservation = VoiceModuleObservation()
 
     /** 已收到的视频帧总数（诊断用）。 */
     @Volatile
@@ -725,6 +726,7 @@ class CarLifeHuClient(
 
             CarLifeProtocol.MD_MODULE_STATUS -> {
                 val modules = CarLifeProtocol.parseModuleStatus(payload)
+                voiceObservation.update(modules)?.let { message -> runCatching { log(message) } }
                 hudObserver.moduleStatus(modules, android.os.SystemClock.uptimeMillis())
                 val automaticIds = CarLifeProtocol.automaticModuleControlIds(modules)
                 if (automaticIds.isNotEmpty()) {
