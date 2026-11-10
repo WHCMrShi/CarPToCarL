@@ -3283,6 +3283,7 @@ object SessionController {
     }
 
     private fun installAudio(lease: SessionEpoch.Lease, candidate: AudioSender, state: () -> Unit): Boolean {
+        if (candidate.isAac) candidate.onAacDiscontinuity = { source, reason -> scheduleAacRecovery(source, reason, manual = false) }
         if (!audioEpoch.isCurrent(lease) || !candidate.startPassthrough()) { candidate.stop(); return false }
         var previous: AudioSender? = null
         val installed = audioEpoch.commit(lease) {
