@@ -17,10 +17,12 @@ class ArtworkEncodingInstrumentation : Instrumentation() {
             opaqueThumbnail()
             transparentThumbnail()
             smallNativeJpeg()
+            musicSizeBoundary()
             navigationTransparentPlaceholder()
+            navigationFullyTransparentInput()
             navigationNativeIcon()
             navigationOversizedIcon()
-            results.putString("result", "6 Android Bitmap fixtures passed")
+            results.putString("result", "8 Android Bitmap fixtures passed")
             finish(Activity.RESULT_OK, results)
         } catch (error: Throwable) {
             results.putString("failure", "${error.javaClass.simpleName}: ${error.message}")
@@ -36,7 +38,7 @@ class ArtworkEncodingInstrumentation : Instrumentation() {
         check(bytes.size <= 64 * 1024)
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-        check(options.outWidth in 1..320 && options.outHeight in 1..320)
+        check(options.outWidth in 1..256 && options.outHeight in 1..256)
         return options
     }
 
@@ -46,7 +48,9 @@ class ArtworkEncodingInstrumentation : Instrumentation() {
             val pixels = IntArray(960 * 640) { 0xff000000.toInt() or ((it * 1103515245 + 12345) and 0xffffff) }
             bitmap.setPixels(pixels, 0, 960, 0, 0, 960, 640)
             val result = checkNotNull(ArtworkEncoder.loadBytes(encoded(bitmap, Bitmap.CompressFormat.JPEG)))
-            check(checkBounds(result).outMimeType == "image/jpeg")
+            val bounds = checkBounds(result)
+            check(bounds.outMimeType == "image/jpeg")
+            check(bounds.outWidth == 256 && bounds.outHeight == 170)
         } finally { bitmap.recycle() }
     }
 
@@ -55,7 +59,9 @@ class ArtworkEncodingInstrumentation : Instrumentation() {
         try {
             bitmap.eraseColor(0x4000ff00)
             val result = checkNotNull(ArtworkEncoder.loadBytes(encoded(bitmap, Bitmap.CompressFormat.PNG)))
-            check(checkBounds(result).outMimeType == "image/png")
+            val bounds = checkBounds(result)
+            check(bounds.outMimeType == "image/png")
+            check(bounds.outWidth == 256 && bounds.outHeight == 256)
             val decoded = checkNotNull(BitmapFactory.decodeByteArray(result, 0, result.size))
             try { check((decoded.getPixel(10, 10) ushr 24) in 60..68) }
             finally { decoded.recycle() }
@@ -71,14 +77,45 @@ class ArtworkEncodingInstrumentation : Instrumentation() {
         } finally { bitmap.recycle() }
     }
 
+    private fun musicSizeBoundary() {
+        for (side in listOf(256, 320)) {
+            val source = Bitmap.createBitmap(side, side, Bitmap.Config.ARGB_8888)
+            try {
+                source.eraseColor(0xff123456.toInt())
+                val original = encoded(source, Bitmap.CompressFormat.JPEG)
+                val output = checkNotNull(ArtworkEncoder.loadBytes(original))
+                val bounds = checkBounds(output)
+                check(bounds.outWidth == 256 && bounds.outHeight == 256)
+                if (side == 256) check(original.contentEquals(output))
+            } finally { source.recycle() }
+        }
+    }
+
+    private fun navigationFullyTransparentInput() {
+        val source = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888)
+        try {
+            source.eraseColor(android.graphics.Color.TRANSPARENT)
+            val output = NavigationIcon.render(encoded(source, Bitmap.CompressFormat.PNG))
+            check(output.contentEquals(NavigationIcon.render(null)))
+            // One visible source pixel must keep the full navigation canvas.
+            source.setPixel(47, 47, 0x8000ff00.toInt())
+            val visible = NavigationIcon.render(encoded(source, Bitmap.CompressFormat.PNG))
+            val image = checkNotNull(BitmapFactory.decodeByteArray(visible, 0, visible.size))
+            try {
+                check(image.width == 256 && image.height == 256)
+                check(image.getPixel(151, 151) ushr 24 in 126..130)
+            } finally { image.recycle() }
+        } finally { source.recycle() }
+    }
+
     private fun navigationTransparentPlaceholder() {
         val bytes = NavigationIcon.render(null)
         check(bytes.contentEquals(NavigationIcon.render(byteArrayOf(1, 2, 3))))
         val image = checkNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
         try {
-            check(image.width == 256 && image.height == 256)
-            val pixels = IntArray(256 * 256)
-            image.getPixels(pixels, 0, 256, 0, 0, 256, 256)
+            check(image.width == 16 && image.height == 16)
+            val pixels = IntArray(16 * 16)
+            image.getPixels(pixels, 0, 16, 0, 0, 16, 16)
             check(pixels.all { it ushr 24 == 0 })
         } finally { image.recycle() }
     }

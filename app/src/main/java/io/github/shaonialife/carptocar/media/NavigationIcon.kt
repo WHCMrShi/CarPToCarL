@@ -10,6 +10,7 @@ import java.io.ByteArrayOutputStream
 
 internal object NavigationIconLayout {
     const val SIZE = 256
+    const val PLACEHOLDER_SIZE = 16
     data class Placement(val left: Float, val top: Float, val width: Float, val height: Float)
     fun fit(width: Int, height: Int): Placement {
         require(width > 0 && height > 0)
@@ -32,20 +33,34 @@ internal object NavigationIcon {
             }
         }
         try {
-            val canvasImage = Bitmap.createBitmap(NavigationIconLayout.SIZE, NavigationIconLayout.SIZE, Bitmap.Config.ARGB_8888)
+            // Empty input and fully transparent PNGs both clear stale artwork with a small valid file.
+            val image = source?.takeUnless { isFullyTransparent(it) }
+            val size = if (image == null) NavigationIconLayout.PLACEHOLDER_SIZE else NavigationIconLayout.SIZE
+            val canvasImage = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
             return try {
                 canvasImage.eraseColor(Color.TRANSPARENT)
-                val placement = source?.let { image ->
+                val placement = image?.let { image ->
                     NavigationIconLayout.fit(image.width, image.height).also { p ->
                         Canvas(canvasImage).drawBitmap(image, null, RectF(p.left, p.top, p.left + p.width, p.top + p.height), Paint(Paint.FILTER_BITMAP_FLAG))
                     }
                 }
                 ByteArrayOutputStream().use { out ->
                     check(canvasImage.compress(Bitmap.CompressFormat.PNG, 100, out))
-                    log("ARTWORK: NAV-ART inputBytes=${bytes?.size ?: 0} source=${source?.width ?: 0}x${source?.height ?: 0} sourceHasAlpha=${source?.hasAlpha()} canvas=256x256 transparentBackground=true draw=$placement outputBytes=${out.size()} placeholder=${source == null}")
+                    log("ARTWORK: NAV-ART inputBytes=${bytes?.size ?: 0} source=${source?.width ?: 0}x${source?.height ?: 0} sourceHasAlpha=${source?.hasAlpha()} canvas=${size}x${size} transparentBackground=true draw=$placement outputBytes=${out.size()} placeholder=${image == null}")
                     out.toByteArray()
                 }
             } finally { canvasImage.recycle() }
         } finally { source?.recycle() }
     }
+    private fun isFullyTransparent(image: Bitmap): Boolean {
+        if (!image.hasAlpha()) return false
+        // Scan one row at a time to avoid allocating an extra full-resolution pixel buffer.
+        val row = IntArray(image.width)
+        for (y in 0 until image.height) {
+            image.getPixels(row, 0, image.width, 0, y, image.width, 1)
+            if (row.any { it ushr 24 != 0 }) return false
+        }
+        return true
+    }
+
 }

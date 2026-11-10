@@ -106,6 +106,6 @@ internal object ArtworkEncoder {
         }
         return null
     }
-    private const val MAX_SIDE = 320
+    private const val MAX_SIDE = 256
     private const val MAX_TRANSFER_BYTES = 64 * 1024
 }
