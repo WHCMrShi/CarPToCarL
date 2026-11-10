@@ -49,6 +49,10 @@ class DiagnosticLogArchiveTest {
         val main = temp.newFile()
         val writer = SessionLogFile(main, "marker", maxBytes = 30)
         val evidence = listOf(
+            "WIFI-ID: observation unavailable type=SecurityException",
+            "WIFI-POLICY: ownedSuggestionsRemoved=1 status=0 remaining=0 ready=true",
+            "WIFI-MEMORY: waiting for current target presence",
+            "BT-PROFILE: cancelled",
             "IDLE: check source=service lateMs=1200 verdict=UI_VISIBLE",
             "APPROACH: target ACL disconnected",
             "SVC: lock-release wakeHeld=false wifiHeld=false",

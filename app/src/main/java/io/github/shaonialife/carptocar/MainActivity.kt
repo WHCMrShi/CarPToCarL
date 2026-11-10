@@ -203,7 +203,7 @@ class MainActivity : AppCompatActivity() {
      * 单权限申请入口。**只用于「通知」这类不属于连接前提的权限。**
      *
      * 连接前提的权限不能走这里：Android 12+ 的 `BLUETOOTH_CONNECT`、
-     * `NEARBY_WIFI_DEVICES`（以及 12/12L 的定位）是各自独立的条目，逐个申请就会
+     * `NEARBY_WIFI_DEVICES` 和用于 SSID 身份核对的定位权限是独立条目，逐个申请就会
      * 连续弹出好几个内容几乎一样的系统框（框里都带应用名），用户看到的是
      * 「怎么一直要我点」。连接前统一走 [connectionPermissionLauncher]——
      * 一次请求、一个框。
@@ -266,11 +266,8 @@ class MainActivity : AppCompatActivity() {
     /**
      * 连接前必须拿到的权限（缺哪个列哪个）。
      *
-     * - 13+：`BLUETOOTH_CONNECT`（iAP2 控制通道）+ `NEARBY_WIFI_DEVICES`
-     *   （`WifiNetworkSpecifier`／热点建议；缺了它 `requestNetwork` 会**静默挂起**，
-     *   既不回调也不抛异常，现场表现是「发起加入后一条日志都没有」）；
-     * - 12/12L：`BLUETOOTH_CONNECT` + `ACCESS_FINE_LOCATION`（那时应用专属网络
-     *   还靠定位权限来判定可连接的 WiFi）。
+     * - 蓝牙连接权限用于 iAP2；13+ 还申请附近 WiFi 权限。
+     * - 所有支持版本申请精确位置权限，用于读取 SSID 核对目标网络身份。
      */
     private fun requiredConnectionPermissions(): List<String> {
         val missing = mutableListOf<String>()
@@ -281,7 +278,9 @@ class MainActivity : AppCompatActivity() {
             if (!isGranted(Manifest.permission.NEARBY_WIFI_DEVICES)) {
                 missing += Manifest.permission.NEARBY_WIFI_DEVICES
             }
-        } else if (!isGranted(Manifest.permission.ACCESS_FINE_LOCATION)) {
+        }
+        if (!isGranted(Manifest.permission.ACCESS_FINE_LOCATION)) {
+            missing += Manifest.permission.ACCESS_COARSE_LOCATION
             missing += Manifest.permission.ACCESS_FINE_LOCATION
         }
         return missing
@@ -295,11 +294,11 @@ class MainActivity : AppCompatActivity() {
     private fun promptConnectionPermissionDenied(missing: Collection<String>) {
         if (!permissionHintShown.compareAndSet(false, true)) return
         val names =
-            missing.joinToString("、") { permission ->
+            missing.distinctBy { if (it == Manifest.permission.ACCESS_COARSE_LOCATION) Manifest.permission.ACCESS_FINE_LOCATION else it }.joinToString("、") { permission ->
                 when (permission.substringAfterLast('.')) {
                     "BLUETOOTH_CONNECT" -> "附近的蓝牙设备"
                     "NEARBY_WIFI_DEVICES" -> "附近的 WLAN 设备"
-                    "ACCESS_FINE_LOCATION" -> "位置信息"
+                    "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION" -> "精确位置"
                     else -> permission.substringAfterLast('.')
                 }
             }
@@ -307,10 +306,8 @@ class MainActivity : AppCompatActivity() {
             activity = this,
             title = "缺少「$names」权限",
             message =
-                "没有这项权限，系统不允许 App 加入车机热点，也不允许通过蓝牙与车机通信，" +
-                    "连接必然失败。\n\n这是 Android 的系统级授权，只能由你点一次「允许」，" +
-                    "没有任何应用能绕过。请到「设置 > 应用 > 权限 > 附近的设备」里打开，" +
-                    "然后重新点「启动连接」。",
+                "连接蓝牙和热点需要附近设备权限；核对当前热点名称需要精确位置权限。" +
+                    "我们不读取手机坐标。请到应用权限设置允许对应权限后重试。",
             actions =
                 listOf(
                     DarkMessageDialog.Action("知道了") {},
@@ -498,14 +495,13 @@ class MainActivity : AppCompatActivity() {
             connectionPermissionLauncher.launch(missing.toTypedArray())
             return
         }
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && !locationServiceEnabled()) {
+        if (!locationServiceEnabled()) {
             DarkMessageDialog.show(
                 activity = this,
                 title = "需要开启位置服务",
                 message =
-                    "Android 12 加入车机热点（应用专属 WiFi）要求位置服务开启——系统用它判定" +
-                        "可连接的 WiFi，不会记录你的位置。\n\n请打开位置服务后重试（打开后" +
-                        "热点会静默自动连上，不需要在 WLAN 列表里手动点选）。",
+                    "读取已连接热点的名称需要开启位置服务，用于复用车机热点、减少重复选网。" +
+                        "我们不读取手机坐标。开启后请重试。",
                 actions =
                     listOf(
                         DarkMessageDialog.Action("取消") {},
@@ -518,7 +514,7 @@ class MainActivity : AppCompatActivity() {
                         },
                     ),
             )
-            log("WIFI: 位置服务未开启——Android 12 下应用专属网络不可用，本次连接未发起")
+            log("WIFI: 位置服务未开启——无法核对当前热点名称，本次连接未发起")
             return
         }
         val on =

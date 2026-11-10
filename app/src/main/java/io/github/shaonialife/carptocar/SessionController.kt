@@ -198,8 +198,7 @@ object SessionController {
     private const val SPECIFIER_JOIN_GRACE_MS = 20_000L
 
     /**
-     * 建议网络（[registerSuggestion]）生效后，等系统自动关联车机热点的上限。
-     * 建议已被用户授权时系统通常 1~3 秒内就连上，比 specifier 快且无弹框。
+     * 历史关联等待预算，保留现有调用路径的超时尺度；不再注册 suggestion。
      */
     private const val SUGGESTION_JOIN_WAIT_MS = 8_000L
 
@@ -1576,7 +1575,6 @@ object SessionController {
         if (!canClearRememberedWifi()) return false
         val target = TargetDevicePrefs.get(context)?.address ?: return true
         val memory = io.github.shaonialife.carptocar.net.CarWifiMemory(context)
-        val previous = memory.load(target)
         rememberedWifiWork.end()
         rememberedWifi = null
         rememberedEndpoint = null
@@ -1587,9 +1585,8 @@ object SessionController {
         lastWifiPsk = null
         lastGoodEndpoint = null
         memory.clear(target)
-        previous?.let { wifiConnector?.removeSuggestion(it.wifi) }
         ssidSink?.invoke("")
-        appendLog("WIFI-MEMORY: cleared selected vehicle credentials and application suggestion; pairing identity unchanged")
+        appendLog("WIFI-MEMORY: cleared selected vehicle credentials; pairing identity unchanged")
         true
     }
 
@@ -1663,9 +1660,26 @@ object SessionController {
             } ?: return@run
             if (!work.isCurrent || !cacheWork.isCurrent || !sessionWanted ||
                 TargetDevicePrefs.get(context)?.address?.equals(target, true) != true) return@run
+            val valid = {
+                work.isCurrent && cacheWork.isCurrent && sessionWanted && !connectCancelled &&
+                    freshWifiThisStart == null && !isStreaming() &&
+                    TargetDevicePrefs.get(context)?.address?.equals(target, true) == true
+            }
+            appendLog("WIFI-MEMORY: waiting for current target presence before cached hotspot request")
+            if (!io.github.shaonialife.carptocar.net.VehicleNetworkPolicy.awaitPresence(
+                valid = valid,
+                present = {
+                    io.github.shaonialife.carptocar.net.VehicleNetworkPolicy.present(
+                        target, io.github.shaonialife.carptocar.bt.CarApproachPrefs.aclConnected(context),
+                        if (BtSessionGate.iap2Ready) BtSessionGate.activePeerAddress else null,
+                        wifiConnector?.isAssociatedTo(saved.wifi.ssid) == true,
+                    )
+                },
+                now = { android.os.SystemClock.elapsedRealtime() }, sleep = { Thread.sleep(it) },
+            ) || !valid()) return@run
+            appendLog("WIFI-MEMORY: current target present; admitting cached hotspot request")
             cacheWork.runIfCurrent { lastCarWifi = saved.wifi; lastWifiPsk = saved.wifi.passphrase; ssidSink?.invoke(saved.wifi.ssid) }
             appendLog("WIFI-MEMORY: bounded preconnect using verified credentials; BT continues independently")
-            cacheWork.runIfCurrent { wifiConnector?.registerSuggestion(saved.wifi.ssid, saved.wifi.passphrase, saved.wifi.securityType) }
             val result = joinCarWifiSpecifier(saved.wifi, false, work = cacheWork)
             if (result !is WifiCarPlayConnector.JoinResult.Joined) return@run
             if (!work.isCurrent || !cacheWork.isCurrent || !sessionWanted ||
@@ -1877,6 +1891,7 @@ object SessionController {
         // RTSP 全量报文落盘（files/rtsp-YYYYMMDD.log）
         io.github.shaonialife.carptocar.util.RtspDump.init(context.filesDir)
         // 用户明确要连：解冻恢复的前提之一（断开后再解冻不该自己爬起来）
+        wifiConnector?.startIdentityObservation()
         val firstStart = !sessionWanted && !isStreaming() && !sessionStarting.get()
         sessionWanted = true
         if (firstStart) { lastCarWifi = null; lastWifiPsk = null; freshWifiThisStart = null; lastGoodEndpoint = null; unreadableWifiTarget = null }
@@ -1984,6 +1999,7 @@ object SessionController {
         ctrlAdvertiser?.stop()
         endpointBrowser?.stop()
         wifiConnector?.release()
+        wifiConnector?.stopIdentityObservation()
         wifiWatchdog?.stop()
         boundCarSsid = null
         sessionStarting.set(false)
@@ -2217,10 +2233,6 @@ object SessionController {
             // 1) WLAN 开关。shell 不可用时跳过检查——requestNetwork 会以 Unavailable 反馈。
             if (shellReady && shellWifiDisabled() && !waitForWifiEnabled()) return@run
             if (cancelled()) return@run
-            // 1.5) 登记 WiFi 建议（幂等）：用户授权过一次后，系统会自己把手机连上
-            // 车机热点，后续不再出现「连接到此网络？」确认框——这是无人点屏场景的
-            // 唯一可行路径（BMW iD9 只给 27s，人来不及点就断链）。
-            work.runIfCurrent { wifiConnector?.registerSuggestion(wifi.ssid, wifi.passphrase, wifi.securityType) }
             // 2) 首选应用专属网络（不影响 4G/5G、不会被系统切回、不需要任何特权）
             when (val result = joinCarWifiSpecifier(wifi, shellReady, work = work)) {
                 is WifiCarPlayConnector.JoinResult.Joined -> Unit
@@ -4402,6 +4414,7 @@ object SessionController {
                     var lastWakeAt = 0L
                     val wakeCarPlayWindow: (Int) -> Unit = { refused ->
                         mutate {
+                            phaseHint = "连接 CarPlay 服务连续失败，可在车机上主动连接"
                             val now = android.os.SystemClock.uptimeMillis()
                             if (wakeCount < CARPLAY_WAKE_MAX_TIMES && now - lastWakeAt >= CARPLAY_WAKE_GAP_MS) {
                                 lastWakeAt = now
@@ -5474,12 +5487,6 @@ object SessionController {
             connectBudget.enter(ConnectStage.WIFI)
             Bg.run("wifi-join-on-endpoint") {
                 if (attemptCancelled()) return@run
-                // 第一步永远是登记「WiFi 建议」——幂等、不等结果、不弹框。
-                // 用户授权过一次之后，系统会在进入范围时自动关联车机热点，
-                // 届时下面那条 specifier 请求会立刻拿到 onAvailable（网络已存在，
-                // 系统不再要求确认），整条链路才能真正做到「上车即连」。
-                val connector = wifiConnector
-                mutate { connector?.registerSuggestion(wifiConfig.ssid, wifiConfig.passphrase, wifiConfig.securityType) }
                 while (!attemptCancelled()) {
                     // Shizuku 已移除：没有 shell 特权。
                     val shellReady = false
