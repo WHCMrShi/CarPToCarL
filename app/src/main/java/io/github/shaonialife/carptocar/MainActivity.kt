@@ -1576,12 +1576,25 @@ class MainActivity : AppCompatActivity() {
     private fun bindDisplayCard() {
         val navigationSwitch = findViewById<SwitchCompat>(R.id.switchInstrumentNavigation)
         val audioModeSwitch = findViewById<SwitchCompat>(R.id.switchAudioStability)
-        audioModeSwitch.isChecked = io.github.shaonialife.carptocar.audio.AudioModePrefs.load(this) == io.github.shaonialife.carptocar.audio.AudioMode.STABILITY
-        audioModeSwitch.setOnCheckedChangeListener { _, enabled ->
-            val mode = if (enabled) io.github.shaonialife.carptocar.audio.AudioMode.STABILITY else io.github.shaonialife.carptocar.audio.AudioMode.QUALITY
+        val aacComparison = findViewById<SwitchCompat>(R.id.switchAudioAac44k)
+        val savedAudioMode = io.github.shaonialife.carptocar.audio.AudioModePrefs.load(this)
+        audioModeSwitch.isChecked = savedAudioMode != io.github.shaonialife.carptocar.audio.AudioMode.QUALITY
+        aacComparison.isChecked = savedAudioMode == io.github.shaonialife.carptocar.audio.AudioMode.AAC_44K_TEST
+        aacComparison.visibility = if (audioModeSwitch.isChecked) View.VISIBLE else View.GONE
+        fun saveAudioMode() {
+            val mode = when {
+                !audioModeSwitch.isChecked -> io.github.shaonialife.carptocar.audio.AudioMode.QUALITY
+                aacComparison.isChecked -> io.github.shaonialife.carptocar.audio.AudioMode.AAC_44K_TEST
+                else -> io.github.shaonialife.carptocar.audio.AudioMode.STABILITY
+            }
             io.github.shaonialife.carptocar.audio.AudioModePrefs.save(this, mode)
             android.widget.Toast.makeText(this, "${mode.label}，断开后重新连接生效", android.widget.Toast.LENGTH_SHORT).show()
         }
+        audioModeSwitch.setOnCheckedChangeListener { _, enabled ->
+            aacComparison.visibility = if (enabled) View.VISIBLE else View.GONE
+            saveAudioMode()
+        }
+        aacComparison.setOnCheckedChangeListener { _, _ -> saveAudioMode() }
         io.github.shaonialife.carptocar.media.NavigationNowPlaying.ensure(this)
         navigationSwitch.isChecked = io.github.shaonialife.carptocar.media.NavigationNowPlaying.isNavigation()
         navigationSwitch.setOnCheckedChangeListener { _, enabled ->

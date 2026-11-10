@@ -3203,7 +3203,7 @@ object SessionController {
                     "（本车机记忆：${AudioProfileMemory.describe(entry)}；" +
                     "封装=${tuning.detail}）",
             )
-            // 只尝试用户所选的编码与48K采样率；同格式可尝试车机声明的其他通路，
+            // 只尝试用户所选的编码与采样率（含手动44.1K对照）；同格式可尝试车机声明的其他通路，
             // SETUP失败也不跨格式回退。通话重建仍沿用已激活的具体profile。
             var chosen: AudioProfile? = null
             var streamInfo: AirPlayClient.AudioStreamInfo? = null

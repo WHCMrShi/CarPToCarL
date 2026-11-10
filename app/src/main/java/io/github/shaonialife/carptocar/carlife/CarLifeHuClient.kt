@@ -1499,10 +1499,10 @@ class CarLifeHuClient(
                             val format = parseAudioInit(payload)
                             if (format != null) {
                                 channel.expectation.format(android.os.SystemClock.uptimeMillis())
-                                val (rate, channelConfig, _) = format
+                                val (rate, channelConfig, sampleFormat) = format
                                 channel.rate = rate
                                 channel.channels = channelsOf(channelConfig)
-                                log("CARLIFE: TTS 音频格式宣告 ${channel.rate}Hz ${channel.channels}ch（导航播报通道）")
+                                log("CARLIFE: TTS 音频格式宣告 ${channel.rate}Hz ${channel.channels}ch ${sampleFormat}bit（channelConfig=$channelConfig，导航播报通道）")
                                 onTtsFormat(channel.rate, channel.channels)
                             }
                         } else if (length > 0) {

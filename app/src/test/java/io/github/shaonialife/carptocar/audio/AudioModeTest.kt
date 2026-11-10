@@ -19,5 +19,7 @@ class AudioModeTest {
         assertEquals(emptyList<AudioProfile>(), AudioMode.STABILITY.order(listOf(pcm, other, input)))
         assertEquals(emptyList<AudioProfile>(), AudioMode.STABILITY.order(emptyList()))
         assertEquals(listOf(aac), AudioMode.STABILITY.order(listOf(pcm, aac, aac)))
+        assertEquals(listOf(other), AudioMode.AAC_44K_TEST.order(listOf(pcm, aac, other)))
+        assertTrue(AudioMode.AAC_44K_TEST.order(listOf(pcm, aac)).isEmpty())
     }
 }

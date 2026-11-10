@@ -174,7 +174,9 @@ class AudioSender(
     /** 首个音频包标记（打完就清）；AAC 自检只跑一次。 */
     private var markerPending = true
     private var selfChecked = false
+    private val aacProbe = AacPassthroughProbe()
     private val aacResampler = StreamingPcmResampler(sampleRate)
+    private val reportedSourceFormats = IntArray(8) { Int.MIN_VALUE }
 
     /** 每包/每帧对应的 PCM 字节数（PCM 通路=一包的负载；AAC 通路=一帧的输入）。 */
     private val framePcmBytes: Int
@@ -598,6 +600,15 @@ class AudioSender(
 
     private fun processPcmLocked(srcPcm: ByteArray, size: Int, srcRate: Int, srcChannels: Int, gap: Boolean) {
         if (!running.get()) return
+        val sourceFormatKey = srcRate * 4 + srcChannels
+        val reportSlot = if (sourceFormatKey in reportedSourceFormats) -1 else reportedSourceFormats.indexOf(Int.MIN_VALUE)
+        if (reportSlot >= 0) {
+            // Media/TTS may alternate every block. Report each format once, not every alternation.
+            reportedSourceFormats[reportSlot] = sourceFormatKey
+            log("AUDIO-ROUTE: inputRate=$srcRate inputChannels=$srcChannels inputPcm=s16le " +
+                "targetRate=$sampleRate targetChannels=$CHANNELS codec=$codec streamType=$streamType " +
+                "resampler=${if (codec == AudioCodec.AAC_LC && srcRate > 0 && srcRate != sampleRate) "streaming-phase-preserved" else "native-or-channel-alignment"}")
+        }
         if (gap) {
             pcmFrames.clear(); if (codec == AudioCodec.AAC_LC) { aacFrames.clear(); aacResampler.reset() }; markerPending = true
             // Count discontinuities in the bounded stage summary, preserving reset semantics.
@@ -690,6 +701,14 @@ class AudioSender(
             } else {
                 val encoder = aacEncoder ?: return false
                 val payloads = encoder.encode(pcm, size, offset)
+                aacProbe.observe(pcm, offset, size, payloads)?.let { frames ->
+                    if (frames.isEmpty()) log("AAC-PROBE: skipped oversized output window")
+                    else Thread({
+                        val decoded = AacLcEncoder.decodePeak(frames, sampleRate, CHANNELS)
+                        log("AAC-PROBE: afterNonzeroInput=true frames=${frames.size} bytes=${frames.sumOf { it.size }} " +
+                            "decodedPeak=${decoded?.first} decodedSamples=${decoded?.second}; local codec check only, receiver decryption/output unverified")
+                    }, "aac-passthrough-probe").apply { isDaemon = true; start() }
+                }
                 val success = payloads.all { sendPayload(it) }
                 if (!success) stop()
                 success
@@ -736,7 +755,7 @@ class AudioSender(
         if (syncSent > 0 && syncIcmpDeferrals > 0) {
             log(
                 "AUDIO: 同步包共发出 $syncSent 个，其中 $syncIcmpDeferrals 次被车机 controlPort 的 " +
-                    "ICMP 拒绝（已就地补发，锚点未丢）",
+                    "ICMP 拒绝（仅本地补发，不证明车机收到或采用锚点）",
             )
         }
         log("AUDIO: 已停止（共发 $packetsSent 包 / ${bytesSent / 1024}KB）")
@@ -804,7 +823,7 @@ class AudioSender(
                     if (syncIcmpDeferrals == 1L) {
                         log(
                             "AUDIO: 车机 controlPort 未监听（ICMP 端口不可达）——每包延后一拍报错，" +
-                                "已就地在同一套接字补发，锚点仍每秒一包（此提示只打一次）",
+                                "已在同一套接字补发；本地发送不证明车机收到锚点（此提示只打一次）",
                         )
                     }
                 }
@@ -868,8 +887,7 @@ class AudioSender(
                         if (sent && !syncFirstSent) {
                             syncFirstSent = true
                             log(
-                                "AUDIO: 首个同步包已发出（X 位=1）——" +
-                                    "车机若仍无声，说明它没在等这个锚点",
+                                "AUDIO: 首个同步包本地发送成功（X 位=1）；车机接收与采用未确认",
                             )
                         }
                         try {

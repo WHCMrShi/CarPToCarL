@@ -97,11 +97,8 @@ class AacLcEncoder(
             }
 
         /**
-         * 自检：用平台解码器把一帧裸 AAC 解回 PCM，返回 `(峰值, 样本数)`；解不出返回 null。
-         *
-         * 为什么需要（2026-10-20 第三次实测）：车机「收包但不发声」时，最容易搞错的是
-         * 归因——是编码器吐了坏流/静音，还是车机侧没播。本机解码一遍就能证伪：
-         * 峰值 > 0 说明比特流有效且非静音，问题必在车机侧；峰值 = 0 说明编码器在出静音。
+         * 本机裸AAC解码验证，返回峰值/样本数，解不出返回null。
+         * 这只验证本机编码产物，不证明线上密文、车机解码或扬声器路由正确。
          *
          * 注意：这里**绝不能**对帧做任何字节换序（旧实现把所有负载统一按大端 s16 换序，
          * 连 AAC 比特流也换掉了——车机解码器直接判坏帧，这就是「有包无声」的根因）。
@@ -110,24 +107,44 @@ class AacLcEncoder(
             frame: ByteArray,
             sampleRate: Int,
             channels: Int,
-        ): Pair<Int, Int>? {
+        ): Pair<Int, Int>? = decodePeak(listOf(frame), sampleRate, channels)
+
+        fun audioSpecificConfig(sampleRate: Int, channels: Int): ByteArray {
+            val bits = (2 shl 11) or (frequencyIndex(sampleRate) shl 7) or (channels shl 3)
+            return byteArrayOf((bits shr 8).toByte(), bits.toByte())
+        }
+
+        fun decodePeak(frames: List<ByteArray>, sampleRate: Int, channels: Int): Pair<Int, Int>? {
             var created: MediaCodec? = null
             try {
+                require(frames.size in 1..16 && frames.all { it.size in 1..8192 })
                 val format = MediaFormat.createAudioFormat(MIME, sampleRate, channels)
+                format.setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(audioSpecificConfig(sampleRate, channels)))
                 val codec = MediaCodec.createDecoderByType(MIME)
                 created = codec
                 codec.configure(format, null, null, 0)
                 codec.start()
-                val inputIndex = codec.dequeueInputBuffer(200_000L)
-                if (inputIndex < 0) return null
-                val input = codec.getInputBuffer(inputIndex) ?: return null
-                input.clear()
-                input.put(frame)
-                codec.queueInputBuffer(inputIndex, 0, frame.size, 0L, 0)
                 val info = MediaCodec.BufferInfo()
-                val deadline = System.nanoTime() + 600_000_000L
+                val deadline = System.nanoTime() + 1_500_000_000L
+                var submitted = 0
+                var eos = false
+                var peak = 0
+                var samples = 0
                 while (System.nanoTime() < deadline) {
-                    val outputIndex = codec.dequeueOutputBuffer(info, 60_000L)
+                    if (!eos) {
+                        val inputIndex = codec.dequeueInputBuffer(0)
+                        if (inputIndex >= 0) {
+                            val input = codec.getInputBuffer(inputIndex) ?: return null
+                            input.clear()
+                            val frame = frames.getOrNull(submitted)
+                            if (frame != null) input.put(frame)
+                            codec.queueInputBuffer(inputIndex, 0, frame?.size ?: 0,
+                                submitted * FRAME_SAMPLES * 1_000_000L / sampleRate,
+                                if (frame == null) MediaCodec.BUFFER_FLAG_END_OF_STREAM else 0)
+                            if (frame == null) eos = true else submitted++
+                        }
+                    }
+                    val outputIndex = codec.dequeueOutputBuffer(info, 10_000L)
                     if (outputIndex == MediaCodec.INFO_TRY_AGAIN_LATER ||
                         outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED ||
                         outputIndex == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED
@@ -136,9 +153,8 @@ class AacLcEncoder(
                     }
                     if (outputIndex < 0) continue
                     val output = codec.getOutputBuffer(outputIndex)
-                    var peak = 0
-                    var samples = 0
                     if (output != null && info.size > 0) {
+                        output.order(java.nio.ByteOrder.LITTLE_ENDIAN)
                         output.position(info.offset)
                         output.limit(info.offset + info.size)
                         while (output.remaining() >= 2) {
@@ -149,9 +165,9 @@ class AacLcEncoder(
                         }
                     }
                     codec.releaseOutputBuffer(outputIndex, false)
-                    if (samples > 0) return peak to samples
+                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
                 }
-                return null
+                return if (samples > 0) peak to samples else null
             } catch (_: Exception) {
                 return null
             } finally {
