@@ -10,8 +10,7 @@ internal class WifiIdentityProof(private val clock: () -> Long, private val ttlM
     @Synchronized fun record(target: String?, receiver: String?, localAddress: String?): Boolean {
         val expected = mac(target) ?: return false
         val raw = receiver?.trim() ?: return false
-        val matches = mac(raw) == expected || raw.toLongOrNull()?.takeIf { it in 0..0xffffffffffffL }
-            ?.toString(16)?.padStart(12, '0')?.uppercase() == expected
+        val matches = matchesReceiver(expected, raw)
         val local = localAddress?.substringBefore('%') ?: return false
         if (!matches || local == "::1" || local == "0.0.0.0" || local.startsWith("127.")) return false
         evidence = Evidence(expected, local, clock())
@@ -26,6 +25,14 @@ internal class WifiIdentityProof(private val clock: () -> Long, private val ttlM
             localAddresses.any { it.substringBefore('%') == proof.local }
     }
 
-    private fun mac(raw: String?): String? = raw?.replace(":", "")?.replace("-", "")
+    companion object {
+        fun matchesReceiver(target: String?, receiver: String?): Boolean {
+            val expected = mac(target) ?: return false
+            val raw = receiver?.trim() ?: return false
+            return mac(raw) == expected || raw.toLongOrNull()?.takeIf { it in 0..0xffffffffffffL }
+                ?.toString(16)?.padStart(12, '0')?.uppercase() == expected
+        }
+        private fun mac(raw: String?): String? = raw?.replace(":", "")?.replace("-", "")
         ?.uppercase()?.takeIf { it.length == 12 && it.all { c -> c in '0'..'9' || c in 'A'..'F' } }
+    }
 }

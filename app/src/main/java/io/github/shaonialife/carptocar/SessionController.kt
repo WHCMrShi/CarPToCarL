@@ -862,6 +862,7 @@ object SessionController {
     /** 用户当前是否希望保持连接（「启动连接」置 true、「断开」置 false）——解冻恢复的前置条件。 */
     @Volatile
     private var sessionWanted: Boolean = false
+    internal val connectionRequested: Boolean get() = sessionWanted
 
     /**
      * 当前连接阶段的一句话提示（英雄卡副标题用，详细过程看日志）。
@@ -893,15 +894,17 @@ object SessionController {
      * 置 [connectCancelled] 让卡在 WiFi 加入等分片检查的配对线程在 ≤200ms 内退场；
      * **不停 BT 组件**（车机大概率立刻回连，监听必须留着）。新轮次起步处会清掉本标志。
      */
+    @Volatile private var preTcpHandover = io.github.shaonialife.carptocar.net.PreTcpHandover({ android.os.SystemClock.elapsedRealtime() })
+
     private fun noteBtHandover(decision: String) {
         val client = currentClient
         val generation = pendingCtrlInvite.currentGeneration()
         val networkVerified = boundCarSsid?.let { runCatching { carWifiReady(it) }.getOrNull() }
         appendLog("HANDOVER-DIAG: btClosed decision=$decision uptimeMs=${android.os.SystemClock.uptimeMillis()} " +
-            "inviteGeneration=$generation pendingInviteAgeMs=${generation?.let(pendingCtrlInvite::peekAge)} " +
+            "inviteGeneration=$generation pendingInviteAgeMs=${generation?.let(pendingCtrlInvite::peekAge)} recentInviteAgeMs=${generation?.let(pendingCtrlInvite::recentAge)} " +
             "targetConfigured=${runCatching { appContext?.let { io.github.shaonialife.carptocar.bt.TargetDevicePrefs.get(it) != null } }.getOrNull()} credentialsCached=${lastCarWifi != null} " +
             "boundTargetCached=${boundCarSsid != null} networkCached=${wifiConnector?.currentNetwork != null} " +
-            "policyWifiReady=$networkVerified client=${client?.let(System::identityHashCode)} " +
+            "policyWifiReady=$networkVerified physicalNetwork=${wifiConnector?.diagnosticBinding()} client=${client?.let(System::identityHashCode)} " +
             "controlAlive=${client?.controlConnectionAlive == true} setupPending=${sessionStarting.get()} " +
             "videoRunning=${videoSender?.isRunning == true} sourceStreaming=${CarLifeHijack.isStreaming} " +
             "workCurrent=${connectionWork.capture().isCurrent} cancelled=$connectCancelled; snapshot is current state, not callback-origin proof")
@@ -909,21 +912,46 @@ object SessionController {
 
     fun onSenderLinkClosed(link: io.github.shaonialife.carptocar.bt.BtLinkOwnership.Token) {
         if (!link.isCurrent) { appendLog("BT-LIFECYCLE: ignored replaced close owner=${link.id} direction=${link.direction}"); return }
+        val work = connectionWork.capture()
+        val setup = setupWork.capture()
+        val window = preTcpHandover
+        val wifiReady = boundCarSsid?.let(::carWifiReady) == true
+        val recent = pendingCtrlInvite.currentGeneration()?.let(pendingCtrlInvite::recentAge) != null
         if (videoSender?.isRunning == true) { noteBtHandover("KEEP_VIDEO"); return }
-        val client = currentClient
-        if (sessionStarting.get() && client?.controlConnectionAlive == true &&
-            boundCarSsid?.let(::carWifiReady) == true) {
+        if (sessionStarting.get() && currentClient?.controlConnectionAlive == true && wifiReady) {
             noteBtHandover("KEEP_LIVE_SETUP")
-            appendLog("CONNECT-DIAG: BT ended during live WiFi/AirPlay negotiation; retain bounded setup attempt client=${System.identityHashCode(client)}")
             return
         }
-        if (sessionStarting.compareAndSet(true, false)) {
-            connectCancelled = true
-            noteBtHandover("CANCEL_SETUP")
-            appendLog(">>> 本轮蓝牙链路断开——释放「会话处理中」，等待车机重连端点接手")
-            // 未推流就断链 = 这一轮没连上：报文快照落盘（成功过的轮次在 markLinked 时已丢弃）
-            SessionTrace.sessionEnd("蓝牙链路断开，未进入推流")
-        } else noteBtHandover("NO_PENDING_SETUP")
+        fun cancelSetup(reason: String) {
+            var retired: AirPlayClient? = null
+            work.runIfCurrent { setup.runIfCurrent {
+                if (sessionStarting.get() && (reason != "BT_SETUP_CLOSED" || link.isCurrent)) {
+                    noteBtHandover(reason) // Capture evidence before cancellation changes network policy.
+                    connectCancelled = true
+                    sessionStarting.set(false)
+                    setupWork.end()
+                    retired = currentClient
+                    appendLog("CONNECT-DIAG: setup cancelled reason=$reason btDirection=${link.direction} btOwner=${link.id}")
+                    SessionTrace.sessionEnd(reason)
+                }
+            } }
+            retired?.dispose() // Only the captured old instance; never dispose a replacement client.
+        }
+        val claim = window.retain(sessionWanted && !connectCancelled && work.isCurrent && setup.isCurrent &&
+            sessionStarting.get() && wifiReady && recent)
+        if (claim != null) {
+            noteBtHandover("KEEP_PRE_TCP")
+            if (claim.first) Bg.run("bt-handover-grace") {
+                sleepQuietly(claim.remainingMs)
+                if (!work.isCurrent || !setup.isCurrent || preTcpHandover !== window) return@run
+                if (videoSender?.isRunning == true ||
+                    (currentClient?.controlConnectionAlive == true && boundCarSsid?.let(::carWifiReady) == true)) return@run
+                cancelSetup("BT_PRE_TCP_GRACE_EXPIRED")
+            }
+            return
+        }
+        if (link.isCurrent && sessionStarting.get()) cancelSetup("BT_SETUP_CLOSED")
+        else noteBtHandover("NO_PENDING_SETUP")
     }
 
     /**
@@ -1265,6 +1293,7 @@ object SessionController {
     private fun onCtrlInvite(receiverId: String?) {
         if (!sessionWanted || connectCancelled) return
         val inviteGeneration = pendingCtrlInvite.currentGeneration() ?: return
+        val target = appContext?.let { TargetDevicePrefs.get(it)?.address }
         if (isStreaming()) {
             onCtrlInviteWhileStreaming(receiverId)
             return
@@ -1275,7 +1304,7 @@ object SessionController {
             return
         }
         // 所有非推流态邀请统一记账，等待窗口不再依赖无有效期的累计计数。
-        if (!pendingCtrlInvite.record(inviteGeneration)) return
+        if (!pendingCtrlInvite.record(inviteGeneration, io.github.shaonialife.carptocar.net.WifiIdentityProof.matchesReceiver(target, receiverId))) return
         val endpoint = lastGoodEndpoint
         if (endpoint == null) {
             appendLog(
@@ -3935,7 +3964,10 @@ object SessionController {
         }
         var accepted: WorkEpoch.Ticket? = null
         work.runIfCurrent {
-            if (!compatSuppressed && sessionStarting.compareAndSet(false, true)) accepted = setupWork.replace()
+            if (!compatSuppressed && sessionStarting.compareAndSet(false, true)) {
+                accepted = setupWork.replace()
+                preTcpHandover = io.github.shaonialife.carptocar.net.PreTcpHandover({ android.os.SystemClock.elapsedRealtime() })
+            }
         }
         val setup = accepted
         if (setup == null) {
@@ -4079,7 +4111,7 @@ object SessionController {
                 if (attemptCancelled()) return@run
                 try {
                     if (attemptCancelled()) {
-                        appendLog("AIRPLAY: 用户已取消——中止配对")
+                        appendLog("AIRPLAY: 当前建链已取消或退役——中止配对")
                         finishAttempt()
                         return@run
                     }
@@ -4111,7 +4143,7 @@ object SessionController {
                         )
                     }
                     if (attemptCancelled()) {
-                        appendLog("AIRPLAY: 用户已取消——中止配对")
+                        appendLog("AIRPLAY: 当前建链已取消或退役——中止配对")
                         finishAttempt()
                         return@run
                     }
@@ -4171,6 +4203,7 @@ object SessionController {
                                 )
                             },
                         ).also { created ->
+                            created.pairingCancellation = attemptCancelled
                             created.onAuthenticationComplete = {
                                 mutate {
                                     if (currentClient === created && !created.authenticationFailed) {
@@ -4312,7 +4345,7 @@ object SessionController {
                     }
                     if (attemptCancelled()) {
                         mutate { retireSession() }
-                        appendLog("AIRPLAY: 用户已取消——中止配对")
+                        appendLog("AIRPLAY: 当前建链已取消或退役——中止配对")
                         finishAttempt()
                         return@run
                     }
@@ -4347,7 +4380,7 @@ object SessionController {
                         keys = connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.PAIRING) { client.runPairing() }
                         if (attemptCancelled()) {
                             mutate { retireSession() }
-                            appendLog("AIRPLAY: 用户已取消——中止配对")
+                            appendLog("AIRPLAY: 当前建链已取消或退役——中止配对")
                             finishAttempt()
                             return@run
                         }

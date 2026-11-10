@@ -37,6 +37,7 @@ object CarIdleGuard {
     private var budgetIdentity: String? = null
     private var lastVerdict: CarIdlePolicy.Verdict? = null
     private var stopGeneration = 0L
+    private val resumeWindow = IdleResumeWindow()
 
     private fun prefs(context: Context) = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -52,13 +53,16 @@ object CarIdleGuard {
     }
 
     /** 首次启动时没有收到过 ACL 断开广播，也必须有有限的空等预算。 */
+    @Synchronized
     fun beginStartup(context: Context) {
         cancel(context)
+        resumeWindow.reset()
         state(context).start(SystemClock.elapsedRealtime())
         persist(context)
     }
 
     /** 起 30 秒计时（重复广播保留较早期限，不延长恢复窗口）。 */
+    @Synchronized
     fun schedule(context: Context) {
         state(context).disconnected(SystemClock.elapsedRealtime())
         persist(context)
@@ -87,6 +91,7 @@ object CarIdleGuard {
     }
 
     /** 车机回连（或用户主动给了新指令）时撤掉计时。 */
+    @Synchronized
     fun cancel(context: Context) {
         stopGeneration++
         state(context).clear()
@@ -108,10 +113,16 @@ object CarIdleGuard {
     }
 
     /** 服务心跳持续检查：闹钟延迟或到点仍在推流均不能丢失后续收尾。 */
+    @Synchronized
     fun check(context: Context, source: String = "service"): Boolean {
         val state = state(context)
         val previousDeadline = state.deadline
         val now = SystemClock.elapsedRealtime()
+        if (resumeWindow.defer(now, SessionController.connectionRequested)) {
+            DebugFileLog.append(context, "IDLE: long observer gap; defer final close for bounded event settling, deadline unchanged")
+            return false
+        }
+        val generation = stopGeneration
         val target = TargetDevicePrefs.get(context)?.address
         val protocolPresent = BtSessionGate.iap2Ready && BtSessionGate.activePeerAddress?.let { target == null || it.equals(target, true) } == true
         val aclPresent = CarApproachPrefs.aclConnected(context)
@@ -132,6 +143,9 @@ object CarIdleGuard {
         }
         if (verdict == CarIdlePolicy.Verdict.STILL_CONNECTED) cancel(context)
         if (!CarIdlePolicy.shouldStopConnections(verdict)) return false
+        if (generation != stopGeneration || CarApproachPrefs.aclConnected(context) ||
+            (BtSessionGate.iap2Ready && BtSessionGate.activePeerAddress?.let { target == null || it.equals(target, true) } == true) ||
+            SessionController.isStreaming()) return false
         shutdown(
             context,
             reason = "无目标蓝牙、无画面且等待预算已到期（保留界面，停止重试并释放保活资源）",
@@ -150,6 +164,7 @@ object CarIdleGuard {
      *   立刻又把 App 拉起来（那会变成「断开 → 自动重连」的死循环）；车机真断开时
      *   这个标记会由 [CarApproachReceiver] 自动清除，不影响下次靠近。
      */
+    @Synchronized
     fun shutdown(
         context: Context,
         reason: String,

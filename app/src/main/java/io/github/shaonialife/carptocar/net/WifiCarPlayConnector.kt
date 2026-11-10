@@ -86,6 +86,13 @@ class WifiCarPlayConnector(
         }
         return usable
     }
+    /** Physical binding snapshot, deliberately independent of cancellation policy. */
+    fun diagnosticBinding(): String {
+        val network = boundNetwork.get()
+        val live = network != null && runCatching { connectivityManager.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true }.getOrDefault(false)
+        val bound = network != null && runCatching { connectivityManager.boundNetworkForProcess == network }.getOrDefault(false)
+        return "cached=${network != null},callback=${callback.get() != null},wifi=$live,processBound=$bound"
+    }
     private val identityProof = WifiIdentityProof({ SystemClock.elapsedRealtime() })
     @Volatile private var retryIdentity: (() -> Unit)? = null
 

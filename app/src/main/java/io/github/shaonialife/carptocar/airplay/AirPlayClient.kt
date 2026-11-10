@@ -273,6 +273,9 @@ class AirPlayClient(
     @Volatile
     var cancelled: Boolean = false
 
+    @Volatile var pairingCancellation: () -> Boolean = { false }
+    private fun pairingStopped(): Boolean = cancelled || disposed || Thread.currentThread().isInterrupted || pairingCancellation()
+
     /** 配对重试循环是否仍在跑（主控据此判断「晚到端点」应热更新还是忽略）。 */
     @Volatile
     var pairingInProgress: Boolean = false
@@ -366,7 +369,7 @@ class AirPlayClient(
         // 「退避」只多给一次重试机会：够了（一次退避基本就是车机刚被上一次中断搅了状态机），
         // 又不会在一台「其实已配对、只是回退避码」的车机上把 120s 窗口空转掉。
         var backoffRetried = false
-        while (System.currentTimeMillis() < deadline && !cancelled) {
+        while (System.currentTimeMillis() < deadline && !pairingStopped()) {
             attempt++
             // 每轮重试前吸收一次 mDNS 新结果：网关兜底地址连不通时，车机的
             // _airplay._tcp 可能已经在后台发现到，及时换过去比空转 120s 强。
@@ -391,6 +394,7 @@ class AirPlayClient(
                 Thread.sleep(2_000)
                 continue
             }
+            if (pairingStopped()) return null
             refusedStreak = 0
             attemptedPairing = true
             // 本轮起点：用于判定失败到底是车机给的，还是我们自己 close() 掐断的。
@@ -3419,6 +3423,7 @@ class AirPlayClient(
         path: String,
         body: ByteArray,
     ): ByteArray {
+        if (pairingStopped()) throw IOException("配对工作已取消或退役")
         val extra =
             buildList {
                 add("X-Apple-HKP" to "2")
@@ -3433,6 +3438,7 @@ class AirPlayClient(
                 extraHeaders = extra,
             )
         // 诊断（真车 403 排查）：请求长度 + 应答状态行/长度/头部字节
+        if (pairingStopped()) throw IOException("配对工作已取消或退役")
         val headHex = responseBody.take(16).joinToString(" ") { "%02x".format(it) }
         log(
             "AIRPLAY: $path req=${body.size}B -> [$statusLine] resp=${responseBody.size}B" +

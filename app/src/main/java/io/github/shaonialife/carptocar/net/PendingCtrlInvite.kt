@@ -8,6 +8,7 @@ internal class PendingCtrlInvite(
     private var generation = 0L
     private var active = false
     private var invitedAt: Long? = null
+    private var recentAt: Long? = null
 
     @Synchronized
     fun begin() {
@@ -16,6 +17,7 @@ internal class PendingCtrlInvite(
         generation++
         active = true
         invitedAt = null
+        recentAt = null
     }
 
     @Synchronized
@@ -23,22 +25,31 @@ internal class PendingCtrlInvite(
         generation++
         active = false
         invitedAt = null
+        recentAt = null
     }
 
     @Synchronized
     fun currentGeneration(): Long? = generation.takeIf { active }
 
     @Synchronized
-    fun record(expectedGeneration: Long): Boolean {
+    fun record(expectedGeneration: Long, verifiedTarget: Boolean = true): Boolean {
         if (!active || generation != expectedGeneration) return false
         invitedAt = clock()
+        recentAt = if (verifiedTarget) invitedAt else null
         return true
     }
 
     @Synchronized fun invalidate(expectedGeneration: Long): Boolean {
         if (!active || generation != expectedGeneration) return false
         invitedAt = null
+        recentAt = null
         return true
+    }
+
+    /** Recent evidence survives consumption, but not explicit invalidation or a user round change. */
+    @Synchronized fun recentAge(expectedGeneration: Long): Long? {
+        if (!active || generation != expectedGeneration) return null
+        return recentAt?.let { (clock() - it).takeIf { age -> age in 0..ttlMs } }
     }
 
     /** Diagnostics only: same TTL/generation checks as consume, without consuming or refreshing. */

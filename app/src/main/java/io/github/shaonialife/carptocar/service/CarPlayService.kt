@@ -68,8 +68,9 @@ class CarPlayService : Service() {
                     val seconds = frozen / 1_000
                     val stalled = freezeWatch.stallMillis(frozen) / 1_000
                     SessionController.appendLog(
-                        "PROC: 进程被系统冻结 ${seconds} 秒（心跳中断 ${stalled}s）——" +
-                            "冻结期间不发帧、不回 keepAlive，车机多半已按超时撤掉会话",
+                        "PROC: 主线程心跳迟到 ${seconds} 秒（心跳中断 ${stalled}s）；" +
+                            "可能为休眠、冻结或主线程阻塞；wakeHeld=${wakeLock?.isHeld == true} wifiHeld=${wifiLock?.isHeld == true} " +
+                            "elapsedMs=${android.os.SystemClock.elapsedRealtime()} uptimeMs=${android.os.SystemClock.uptimeMillis()}",
                     )
                     // 短暂迟到（< 10s）只记录不惊动：会话通常没受伤，重建反而多一次断链
                     if (frozen >= FreezeWatch.RECOVER_MIN_FROZEN_MS) {
