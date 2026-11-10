@@ -3172,19 +3172,19 @@ object SessionController {
         val lease = audioEpoch.capture(client) ?: return false
         return try {
             // 车机身份 → 只用于「本车机哪些音频档位踩过雷」的持久化记忆。
-            val identity = client.receiverIdentity()
+            val mode = audioMode
+            val identity = mode.memoryIdentity(client.receiverIdentity())
             // 音频封装参数已定案（见 AudioTuning），不再提供切换
-            val tuning = AudioTuning.RAW_SPF
+            val tuning = io.github.shaonialife.carptocar.audio.protocolFor(if (audioMode == io.github.shaonialife.carptocar.audio.AudioMode.QUALITY) io.github.shaonialife.carptocar.audio.AudioCodec.PCM else io.github.shaonialife.carptocar.audio.AudioCodec.AAC_LC)
             var entry = AudioProfileMemory.load(context.applicationContext, identity)
             if (entry.disabled) {
                 // 以前「全部档位都导致拆链」会自动退成只推视频，并要用户去弹窗里手点
                 // 「清除记忆」。Q4 现在优先尝试原生 48k PCM，历史拒绝结论需要重新验证，
                 // 旧结论不再可信：用户既然主动选了「开启声音」，就直接清记忆重试。
-                AudioProfileMemory.clearAll(context.applicationContext)
+                AudioProfileMemory.reset(context.applicationContext, identity)
                 entry = AudioProfileMemory.load(context.applicationContext, identity)
                 appendLog("AUDIO: 本车机（$identity）有「全部档位拆链」的旧记忆，已自动清除并重试")
             }
-            val mode = audioMode
             val candidates = client.audioCandidates(preferCompat = false)
             val remembered = AudioProfileMemory.order(candidates, entry, preferNativePcm = mode == io.github.shaonialife.carptocar.audio.AudioMode.QUALITY)
             val ordered = mode.order(remembered)
@@ -3254,6 +3254,34 @@ object SessionController {
         }
     }
 
+    private val aacRecoveryBudget by lazy { io.github.shaonialife.carptocar.audio.AacRecoveryBudget() }
+
+    /** Explicitly scoped to the current AAC media sender; never changes PCM or the selected mode. */
+    fun retryCurrentAacAudio(): Boolean = audioSender?.let { scheduleAacRecovery(it, "manual silence check", manual = true) } ?: false
+
+    private fun scheduleAacRecovery(source: AudioSender, reason: String, manual: Boolean): Boolean {
+        val owner = currentClient ?: return false
+        val profile = activeAudioProfile ?: return false
+        if (!source.isAac || audioSender !== source || profile.codec != io.github.shaonialife.carptocar.audio.AudioCodec.AAC_LC ||
+            profile.audioType != "media" || !source.isRunning || !owner.controlConnectionAlive || !owner.audioRecoveryAllowed() ||
+            !sessionWanted || connectCancelled) return false
+        val lease = audioEpoch.capture(owner) ?: return false
+        val work = connectionWork.capture()
+        val ticket = aacRecoveryBudget.reserve(owner, android.os.SystemClock.elapsedRealtime(), manual) ?: return false
+        appendLog("AAC-RECOVERY: queued manual=$manual profile=${profile.label} sender=${System.identityHashCode(source)} reason=$reason; audio only, audibility unverified")
+        Bg.run("aac-only-recovery") {
+            try {
+                if (!ticket.current || !work.isCurrent || !audioEpoch.isCurrent(lease) || currentClient !== owner || audioSender !== source) {
+                    appendLog("AAC-RECOVERY: retired request; no stream changes")
+                    return@run
+                }
+                val result = rebuildAudioChannel("AAC $reason", owner, source)
+                appendLog("AAC-RECOVERY: completed result=$result manual=$manual; verify actual sound, no automatic format fallback")
+            } finally { ticket.finish() }
+        }
+        return true
+    }
+
     private fun installAudio(lease: SessionEpoch.Lease, candidate: AudioSender, state: () -> Unit): Boolean {
         if (!audioEpoch.isCurrent(lease) || !candidate.startPassthrough()) { candidate.stop(); return false }
         var previous: AudioSender? = null
@@ -3297,7 +3325,7 @@ object SessionController {
      * 绝不能把「本来还有声」搞成「彻底没声」。
      */
     @Synchronized
-    fun rebuildAudioChannel(reason: String, expectedClient: AirPlayClient? = currentClient): Boolean {
+    fun rebuildAudioChannel(reason: String, expectedClient: AirPlayClient? = currentClient, expectedSender: AudioSender? = null): Boolean {
         val client = currentClient ?: return false
         if (client !== expectedClient) return false
         val lease = audioEpoch.capture(client) ?: return false
@@ -3306,11 +3334,12 @@ object SessionController {
         val profile = activeAudioProfile ?: return false
         val context = appContext?.applicationContext ?: return false
         val old = audioSender ?: return false
+        if (expectedSender != null && (old !== expectedSender || !old.isAac || !client.audioRecoveryAllowed())) return false
         if (!old.isRunning) return false
-        appendLog("AUDIO: $reason → 重建音频流（接收端音频输出在通话期间被释放，需新建流才会重开）")
+        appendLog("AUDIO: $reason → 尝试仅重建音频流，保持视频与当前编码档位")
         val info =
             try {
-                connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.AUDIO_SETUP) { client.runAudioStream(secret, profile, AudioTuning.RAW_SPF) }
+                connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.AUDIO_SETUP) { client.runAudioStream(secret, profile, io.github.shaonialife.carptocar.audio.protocolFor(profile.codec)) }
             } catch (error: Exception) {
                 appendLog("AUDIO: 重建协商异常 - ${error.message}")
                 null
@@ -3319,6 +3348,7 @@ object SessionController {
             appendLog("AUDIO: 重建协商失败——保持原音频流继续推（不降级成无声）")
             return false
         }
+        if (expectedSender != null && (audioSender !== expectedSender || !client.audioRecoveryAllowed() || !audioEpoch.isCurrent(lease))) return false
         // 新流已就绪：停旧发送端。旧流不再有包，接收端会在超时后自行回收。
         // 看门狗线程跟随 audioSender 字段：换流后自动续上，所以这里**不该**置
         // callWatcher = null —— 那只丢引用、旧线程仍在跑，紧接着 startCallWatcher()
@@ -3333,7 +3363,7 @@ object SessionController {
                 sampleRate = info.sampleRate,
                 codec = profile.codec,
                 streamType = profile.streamType,
-                adtsFrames = AudioTuning.RAW_SPF.adts,
+                adtsFrames = io.github.shaonialife.carptocar.audio.protocolFor(profile.codec).adts,
                 controlPort = info.controlPort,
             )
         if (!installAudio(lease, sender) { activeAudioStartedAt = android.os.SystemClock.uptimeMillis() }) {
@@ -3346,7 +3376,7 @@ object SessionController {
         connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.RECORD) { client.record() }
         appendLog(
             "AUDIO: 音频流重建完成（新 dataPort=${info.dataPort} " +
-                "controlPort=${info.controlPort}）——若仍无声，说明卡在车机音源选择而非本机",
+                "controlPort=${info.controlPort}）；本地完成，不代表已确认车内可听",
         )
         return true
     }
@@ -3415,7 +3445,7 @@ object SessionController {
         )
         val info =
             try {
-                connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.AUDIO_SETUP) { client.runAudioStream(secret, target, AudioTuning.RAW_SPF) }
+                connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.AUDIO_SETUP) { client.runAudioStream(secret, target, io.github.shaonialife.carptocar.audio.protocolFor(target.codec)) }
             } catch (error: Exception) {
                 appendLog("AUDIO: 切换协商异常 - ${error.message}")
                 null
@@ -3436,7 +3466,7 @@ object SessionController {
                 sampleRate = info.sampleRate,
                 codec = target.codec,
                 streamType = target.streamType,
-                adtsFrames = AudioTuning.RAW_SPF.adts,
+                adtsFrames = io.github.shaonialife.carptocar.audio.protocolFor(target.codec).adts,
                 controlPort = info.controlPort,
             )
         if (!installAudio(lease, sender) {
@@ -3673,35 +3703,16 @@ object SessionController {
             appendLog("AUDIO: 档位 ${profile.label} 存活 ${lived / 1000}s 且收到真实 PCM——记录传输候选可用；不代表已确认车内可听")
             return
         }
-        val allKeys = audioCandidateKeys(identity)
+        val allKeys = audioCandidateKeys()
         AudioProfileMemory.recordRejected(ctx, identity, profile.key, allKeys)
-        val after = AudioProfileMemory.load(ctx, identity)
-        appendLog(
-            "AUDIO: ⚠ 档位 ${profile.label} 起流 ${lived / 1000}s 后整条会话被车机拆掉——" +
-                "判定为本车机不兼容档位（已记入名单）。" +
-                if (after.disabled) {
-                    "全部档位均不兼容：下次连接将自动只推视频（车机侧无声音）。"
-                } else {
-                    "下次点「启动连接」会自动换用下一档；也可直接选「开启声音（兼容档）」。"
-                },
-        )
-        uiHintSink?.invoke(
-            if (after.disabled) {
-                "本车机音频不兼容，下次连接将自动只推视频"
-            } else {
-                "该音频档位导致断开，已记录；重连会自动换档"
-            },
-        )
+        appendLog("AUDIO: 档位 ${profile.label} 在${lived / 1000}s内拆链，观察仅记入当前模式；保持所选编码/采样率，不自动换档")
+        uiHintSink?.invoke("当前音频档短时拆链已记录；重连仍使用所选模式")
     }
 
-    /** 该车机上「所有可能用到的档位键」——用于判断是否已全部试穿。 */
-    private fun audioCandidateKeys(identity: String): Set<String> =
-        runCatching {
-            val client = currentClient ?: return@runCatching emptySet()
-            val preferred = client.audioCandidates(preferCompat = audioPreferCompat).map { it.key }
-            val alternate = client.audioCandidates(preferCompat = !audioPreferCompat).map { it.key }
-            (preferred + alternate).toSet()
-        }.getOrDefault(emptySet())
+    private fun audioCandidateKeys(): Set<String> = runCatching {
+        val client = currentClient ?: return@runCatching emptySet()
+        audioMode.order(client.audioCandidates(preferCompat = false)).map { it.key }.toSet()
+    }.getOrDefault(emptySet())
 
     /**
      * 端点补全：优先吸收 mDNS 解析出的地址，再决定是否等待/兜底。

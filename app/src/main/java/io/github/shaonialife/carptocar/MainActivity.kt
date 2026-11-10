@@ -1577,10 +1577,16 @@ class MainActivity : AppCompatActivity() {
         val navigationSwitch = findViewById<SwitchCompat>(R.id.switchInstrumentNavigation)
         val audioModeSwitch = findViewById<SwitchCompat>(R.id.switchAudioStability)
         val aacComparison = findViewById<SwitchCompat>(R.id.switchAudioAac44k)
+        val retryAac = findViewById<TextView>(R.id.btnRetryAacAudio)
+        retryAac.setOnClickListener {
+            if (SessionController.retryCurrentAacAudio()) snack("已请求仅重建AAC音频，请观察声音是否恢复")
+            else snack("仅当前AAC媒体连接可用；恢复进行中或车机临时占用音频时请稍后重试")
+        }
         val savedAudioMode = io.github.shaonialife.carptocar.audio.AudioModePrefs.load(this)
         audioModeSwitch.isChecked = savedAudioMode != io.github.shaonialife.carptocar.audio.AudioMode.QUALITY
         aacComparison.isChecked = savedAudioMode == io.github.shaonialife.carptocar.audio.AudioMode.AAC_44K_TEST
         aacComparison.visibility = if (audioModeSwitch.isChecked) View.VISIBLE else View.GONE
+        retryAac.visibility = aacComparison.visibility
         fun saveAudioMode() {
             val mode = when {
                 !audioModeSwitch.isChecked -> io.github.shaonialife.carptocar.audio.AudioMode.QUALITY
@@ -1592,6 +1598,7 @@ class MainActivity : AppCompatActivity() {
         }
         audioModeSwitch.setOnCheckedChangeListener { _, enabled ->
             aacComparison.visibility = if (enabled) View.VISIBLE else View.GONE
+            retryAac.visibility = aacComparison.visibility
             saveAudioMode()
         }
         aacComparison.setOnCheckedChangeListener { _, _ -> saveAudioMode() }

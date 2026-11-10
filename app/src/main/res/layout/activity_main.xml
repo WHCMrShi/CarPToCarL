@@ -1061,6 +1061,13 @@
                     android:textColor="@color/m3_on_surface"
                     android:thumb="@drawable/sw_thumb"
                     app:track="@drawable/sw_track" />
+                <TextView
+                    android:id="@+id/btnRetryAacAudio"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:gravity="center_vertical"
+                    android:text="@string/audio_aac_retry"
+                    android:textColor="@color/m3_on_surface" />
                 <!-- 流分辨率缩放 -->
                 <TextView
                     android:layout_width="wrap_content"

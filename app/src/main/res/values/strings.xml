@@ -14,4 +14,5 @@
     <string name="audio_stability_mode">稳定模式（关闭为质量模式）</string>
     <string name="audio_mode_note">质量：48K PCM；稳定：48K AAC。可手动启用44.1K AAC对照测试。断开后重新连接生效，不自动换档。</string>
     <string name="audio_aac_44k_test">44.1K AAC 对照测试（关闭为48K AAC）</string>
+    <string name="audio_aac_retry">重建当前AAC音频（无声时测试）</string>
 </resources>

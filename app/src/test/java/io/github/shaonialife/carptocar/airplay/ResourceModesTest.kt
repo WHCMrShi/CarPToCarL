@@ -4,6 +4,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ResourceModesTest {
+    @Test fun audioRecoveryRespectsMuteBorrowAndPermanentAudioOwnership() {
+        val modes = ResourceModes()
+        assertTrue(modes.canRecoverAudio())
+        change(modes, 2, 3, "audioOff")
+        assertFalse(modes.canRecoverAudio())
+        assertTrue(modes.canRecoverScreen())
+        change(modes, 2, 4, "audioOff")
+        assertTrue(modes.canRecoverAudio())
+        change(modes, 2, 1)
+        modes.requestUi()
+        assertFalse(modes.canRecoverAudio())
+    }
     private fun change(m: ResourceModes, id: Int, type: Int, borrow: String? = null, reason: String = "test") {
         val resource = mutableMapOf<String, Any>("resourceID" to id, "transferType" to type)
         borrow?.let { resource["borrowID"] = it }

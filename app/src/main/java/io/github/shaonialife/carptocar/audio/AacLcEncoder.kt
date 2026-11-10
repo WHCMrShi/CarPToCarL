@@ -216,6 +216,7 @@ class AacLcEncoder(
     fun start(): Boolean =
         synchronized(lock) {
             if (started) return true
+            var initializing: MediaCodec? = null
             try {
                 val format =
                     MediaFormat.createAudioFormat(MIME, sampleRate, channels).apply {
@@ -227,6 +228,7 @@ class AacLcEncoder(
                         setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, inputFrameBytes)
                     }
                 val created = MediaCodec.createEncoderByType(MIME)
+                initializing = created
                 created.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
                 created.start()
                 codec = created
@@ -241,8 +243,12 @@ class AacLcEncoder(
                     "name=${created.name} hardwareReported=${info.isHardwareAccelerated} softwareOnly=${info.isSoftwareOnly}"
                 }.getOrDefault("codecInfo=unavailable")
                 log("AUDIO-DIAG: AAC encoder $implementation")
+                initializing = null
                 true
             } catch (error: Exception) {
+                runCatching { initializing?.stop() }
+                runCatching { initializing?.release() }
+                codec = null
                 log("AUDIO: AAC-LC 编码器启动失败 - ${error.message}（本档位放弃）")
                 started = false
                 false
@@ -305,7 +311,9 @@ class AacLcEncoder(
                 // 不是「异常」，是一次可预期的收尾竞态，记一行即可，别继续喂。
                 codec = null
                 started = false
-                log("AUDIO: AAC 编码器已释放，停止编码（${error.message}）——收尾竞态，已忽略")
+                runCatching { encoder.stop() }
+                runCatching { encoder.release() }
+                log("AUDIO: AAC 编码器状态失效，停止编码并释放（${error.message}）；交由AAC恢复策略判断")
             } catch (error: Exception) {
                 log("AUDIO: AAC 编码异常 - ${error.message}")
             }

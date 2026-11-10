@@ -67,7 +67,9 @@ class AacLcEncoderTest {
     @Test
     fun tuningIsFixedToRawFrames() {
         // 定案：裸 AAC 帧 + spf=1024 + 到达时间戳，只有这一组，不再提供切换
-        assertEquals(1, AudioTuning.entries.size)
+        assertEquals(AudioTuning.RAW_SPF, protocolFor(AudioCodec.AAC_LC))
+        assertEquals(AudioTuning.PCM_NATIVE, protocolFor(AudioCodec.PCM))
+        assertEquals(352, PcmOutputSettings.protocol.spf)
         assertTrue(!AudioTuning.RAW_SPF.adts)
         assertEquals(1024, AudioTuning.RAW_SPF.spf)
         assertTrue(!AudioTuning.RAW_SPF.highAccuracyTimestamps)
