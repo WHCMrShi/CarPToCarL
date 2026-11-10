@@ -1,0 +1,7 @@
+# 2026-11-10 235114; build 81e4fa7035dd
+# 去重、按毫秒时间排序的选段；未列出的事件不代表未发生。
+# 排除附带的旧 session_trace_fail 快照；替换地址/目标身份，不含协议负载。
+# 仅供时序分析，不能逐字节重放。tcp-failed unique total=0
+[23:51:09.868] CONNECT-DIAG: schema=20261108-v9 revision=81e4fa7035dd version=1.2.31-q4-debug sdk=36; export includes bounded early/recent diagnostics, idle deadlines and network leases
+[23:51:10.633] CONNECT-DIAG: start requested running=false phase=null; mediaMode=质量（48K PCM）; strict format
+[23:51:10.642] WIFI: 状态心跳已启动（起点 wifi=[] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）

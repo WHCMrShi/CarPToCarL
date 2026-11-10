@@ -1,0 +1,152 @@
+# 2026-11-10 232642; build 81e4fa7035dd
+# 去重、按毫秒时间排序的选段；未列出的事件不代表未发生。
+# 排除附带的旧 session_trace_fail 快照；替换地址/目标身份，不含协议负载。
+# 仅供时序分析，不能逐字节重放。tcp-failed unique total=3
+[23:19:16.712] CONNECT-DIAG: schema=20261108-v9 revision=81e4fa7035dd version=1.2.31-q4-debug sdk=36; export includes bounded early/recent diagnostics, idle deadlines and network leases
+[23:19:17.763] CONNECT-DIAG: start requested running=false phase=null; mediaMode=稳定（48K AAC）; strict format
+[23:19:17.778] WIFI: 状态心跳已启动（起点 wifi=[] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:19:17.860] WIFI: 系统事件 onAvailable → wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:19:19.435] CARLIFE: 控制端口已连接，直接用于版本握手（无探测连接）
+[23:19:19.575] CARLIFE: 版本匹配成功（协议 3.0）
+[23:19:19.578] CARLIFE-DIAG: handshake=matched elapsedMs=105
+[23:19:22.319] CARLIFE: ✓ 收到 CarLife 首帧（4654B，keyFrame=true）
+[23:19:26.651] CONNECT-DIAG: start requested running=false phase=已取消连接; mediaMode=对照测试（44.1K AAC）; strict format
+[23:19:26.660] WIFI: 状态心跳已启动（起点 wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:19:31.220] CARLIFE: 控制端口已连接，直接用于版本握手（无探测连接）
+[23:19:31.437] CARLIFE: 版本匹配成功（协议 3.0）
+[23:19:31.438] CARLIFE-DIAG: handshake=matched elapsedMs=202
+[23:19:33.734] CARLIFE: ✓ 收到 CarLife 首帧（4350B，keyFrame=true）
+[23:19:38.413] WIFI-POLICY: local-only; removedOwnedSuggestions=0 status=0 ready=true; saved networks and encrypted credentials unchanged
+[23:19:41.817] WIFI: 心跳 → wifi=[wlan0/<IP>] car=wlan0/<IP> default=rmnet_data3/<IP> ssid=<TARGET> processBound=wlan0/<IP> defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:19:48.533] CONNECT-DIAG: tcp-failed host=<IP> port=7000 portSource=FALLBACK type=ConnectException error=failed to connect to /<IP> (port 7000) from /<IP> (port 38598) after 2000ms: isConnected failed: ECONNREFUSED (Connection refused) connection=b87a211 setup=8fd01a7 inviteGeneration=3
+[23:19:52.557] CONNECT-DIAG: tcp-failed host=<IP> port=7000 portSource=FALLBACK type=ConnectException error=failed to connect to /<IP> (port 7000) from /<IP> (port 38610) after 2000ms: isConnected failed: ECONNREFUSED (Connection refused) connection=b87a211 setup=8fd01a7 inviteGeneration=3
+[23:19:53.598] NSD: 发现服务 CarPlay (_airplay._tcp.)，解析中…
+[23:19:53.627] CTRL: ✓ 车机 ctrl 邀请（第 1 次，receiver=<TARGET-ID>）——已收到连接请求，服务是否可用待验证
+[23:19:54.590] AIRPLAY: TCP 已连通 <IP>:7000 portSource=MDNS（本机 <IP>） connection=b87a211 setup=8fd01a7 inviteGeneration=3
+[23:19:57.567] AIRPLAY: 音频 SETUP 往返 139ms [RTSP/1.0 200 OK]
+[23:20:03.946] CARLIFE: 媒体 引擎音频开始（0x30002）
+[23:20:03.950] AUDIO-ROUTE: inputRate=48000 inputChannels=2 inputPcm=s16le targetRate=44100 targetChannels=2 codec=AAC_LC streamType=102 resampler=streaming-phase-preserved
+[23:20:04.017] AUDIO-DIAG: ingress queuedBytes=36864 queuedMs=191 droppedBlocks=2 queueAgeMaxMs=10 workerMaxUs=50546
+[23:20:04.327] AAC-PROBE: backend=b0d80fe rate=44100 afterNonzeroInput=true frames=16 bytes=9374 decodedPeak=9012 decodedSamples=32768; local codec check only, receiver output unverified
+[23:20:08.957] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5002 count=244 slow=2 discontinuities=1 lockWaitMaxUs=959 workInclusiveMaxUs=62295 sealMaxUs=4216 sendMaxUs=5558 final=false
+[23:20:09.034] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=0 queueAgeMaxMs=161 workerMaxUs=62342
+[23:20:27.365] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=30053 count=531 slow=0 discontinuities=0 lockWaitMaxUs=733 workInclusiveMaxUs=50362 sealMaxUs=49227 sendMaxUs=28912 final=false
+[23:20:27.725] AUDIO-DIAG: AAC-ENCODE backend=b0d80fe windowMs=30026 calls=1273 outputFrames=1272 wallMaxUs=84030 cpuMaxUs=3586; encode only, UDP measured separately
+[23:20:28.153] AUDIO-DIAG: windowMs=30011 realFeeds=1146 admittedFeeds=1146 rejectedFeeds=0 udpPackets=1290 inputGapMaxMs=55 outputGapMaxMs=163 sendMaxUs=18689 silenceSubmissions=242 codec=AAC_LC nextSeq=1290 nextSample=1320960
+[23:20:39.111] AUDIO-DIAG: ingress queuedBytes=32768 queuedMs=170 droppedBlocks=0 queueAgeMaxMs=39 workerMaxUs=148260
+[23:20:39.111] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=30154 count=1406 slow=1 discontinuities=0 lockWaitMaxUs=5578 workInclusiveMaxUs=147163 sealMaxUs=3703 sendMaxUs=6838 final=false
+[23:20:44.113] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5001 count=241 slow=4 discontinuities=1 lockWaitMaxUs=3484 workInclusiveMaxUs=127675 sealMaxUs=33175 sendMaxUs=13795 final=false
+[23:20:44.116] AUDIO-DIAG: ingress queuedBytes=0 queuedMs=0 droppedBlocks=1 queueAgeMaxMs=177 workerMaxUs=127699
+[23:20:45.616] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=18250 count=403 slow=1 discontinuities=0 lockWaitMaxUs=10 workInclusiveMaxUs=141624 sealMaxUs=131575 sendMaxUs=33408 final=false
+[23:20:48.242] NAV-MEDIA: phase=guide navigationActive=true endedDurationMs=null; album/progress=music artwork=navigation
+[23:20:49.126] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5013 count=148 slow=12 discontinuities=10 lockWaitMaxUs=167786 workInclusiveMaxUs=319804 sealMaxUs=14550 sendMaxUs=72542 final=false
+[23:20:49.127] AUDIO-DIAG: ingress queuedBytes=32768 queuedMs=170 droppedBlocks=77 queueAgeMaxMs=196 workerMaxUs=319854
+[23:20:50.623] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5005 count=39 slow=2 discontinuities=0 lockWaitMaxUs=1 workInclusiveMaxUs=279309 sealMaxUs=212549 sendMaxUs=118302 final=false
+[23:20:54.137] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5010 count=243 slow=0 discontinuities=1 lockWaitMaxUs=1760 workInclusiveMaxUs=25981 sealMaxUs=4356 sendMaxUs=2271 final=false
+[23:20:54.138] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=1 queueAgeMaxMs=154 workerMaxUs=26007
+[23:20:57.735] AUDIO-DIAG: AAC-ENCODE backend=b0d80fe windowMs=30010 calls=1204 outputFrames=1195 wallMaxUs=318765 cpuMaxUs=3264; encode only, UDP measured separately
+[23:20:58.157] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=7536 count=151 slow=1 discontinuities=0 lockWaitMaxUs=142 workInclusiveMaxUs=143043 sealMaxUs=74452 sendMaxUs=68536 final=false
+[23:20:58.180] AUDIO-DIAG: windowMs=30026 realFeeds=1400 admittedFeeds=1400 rejectedFeeds=0 udpPackets=1186 inputGapMaxMs=477 outputGapMaxMs=488 sendMaxUs=72542 silenceSubmissions=2 codec=AAC_LC nextSeq=2476 nextSample=2535424
+[23:20:59.140] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5002 count=223 slow=6 discontinuities=5 lockWaitMaxUs=382 workInclusiveMaxUs=111466 sealMaxUs=3403 sendMaxUs=8468 final=false
+[23:20:59.142] AUDIO-DIAG: ingress queuedBytes=0 queuedMs=0 droppedBlocks=12 queueAgeMaxMs=185 workerMaxUs=111495
+[23:21:03.206] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5048 count=142 slow=1 discontinuities=0 lockWaitMaxUs=59 workInclusiveMaxUs=114289 sealMaxUs=47656 sendMaxUs=45097 final=false
+[23:21:14.423] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=15283 count=714 slow=1 discontinuities=0 lockWaitMaxUs=750 workInclusiveMaxUs=66437 sealMaxUs=4879 sendMaxUs=9487 final=false
+[23:21:14.429] AUDIO-DIAG: ingress queuedBytes=0 queuedMs=0 droppedBlocks=0 queueAgeMaxMs=35 workerMaxUs=71633
+[23:21:15.040] AUDIO-DIAG: windowMs=16861 realFeeds=796 admittedFeeds=796 rejectedFeeds=0 udpPackets=731 inputGapMaxMs=218 outputGapMaxMs=141 sendMaxUs=9487 silenceSubmissions=0 final=true codec=AAC_LC
+[23:21:15.041] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=618 count=30 slow=0 discontinuities=0 lockWaitMaxUs=8 workInclusiveMaxUs=22222 sealMaxUs=1389 sendMaxUs=4261 final=true
+[23:21:18.420] CONNECT-DIAG: start requested running=false phase=null; mediaMode=对照测试（44.1K AAC）; strict format
+[23:21:18.426] WIFI: 状态心跳已启动（起点 wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:21:18.432] CARLIFE: 控制端口已连接，直接用于版本握手（无探测连接）
+[23:21:18.575] CARLIFE: 版本匹配成功（协议 3.0）
+[23:21:18.576] CARLIFE-DIAG: handshake=matched elapsedMs=102
+[23:21:20.886] CARLIFE: ✓ 收到 CarLife 首帧（3822B，keyFrame=true）
+[23:21:26.272] CARLIFE: 媒体 引擎音频开始（0x30002）
+[23:21:56.286] NSD: 发现服务 CarPlay (_airplay._tcp.)，解析中…
+[23:21:56.396] AIRPLAY: TCP 已连通 <IP>:7000 portSource=MDNS（本机 <IP>） connection=7dc164e setup=debce17 inviteGeneration=5
+[23:21:58.498] WIFI: 心跳 → wifi=[wlan0/<IP>] car=wlan0/<IP> default=rmnet_data3/<IP> ssid=<TARGET> processBound=wlan0/<IP> defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:22:01.311] CTRL: ✓ 车机 ctrl 邀请（第 1 次，receiver=<TARGET-ID>）——已收到连接请求，服务是否可用待验证
+[23:22:04.163] AIRPLAY: 音频 SETUP 往返 150ms [RTSP/1.0 200 OK]
+[23:22:04.302] AUDIO-ROUTE: inputRate=48000 inputChannels=2 inputPcm=s16le targetRate=44100 targetChannels=2 codec=AAC_LC streamType=102 resampler=streaming-phase-preserved
+[23:22:04.786] AAC-PROBE: backend=af30945 rate=44100 afterNonzeroInput=true frames=16 bytes=9531 decodedPeak=17002 decodedSamples=32768; local codec check only, receiver output unverified
+[23:22:34.039] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=30065 count=514 slow=0 discontinuities=0 lockWaitMaxUs=4 workInclusiveMaxUs=17453 sealMaxUs=16522 sendMaxUs=8857 final=false
+[23:22:34.300] AUDIO-DIAG: AAC-ENCODE backend=af30945 windowMs=30010 calls=1292 outputFrames=1291 wallMaxUs=22681 cpuMaxUs=3346; encode only, UDP measured separately
+[23:22:34.303] AUDIO-DIAG: windowMs=30002 realFeeds=1408 admittedFeeds=1408 rejectedFeeds=0 udpPackets=1291 inputGapMaxMs=54 outputGapMaxMs=89 sendMaxUs=9986 silenceSubmissions=0 codec=AAC_LC nextSeq=1291 nextSample=1321984
+[23:22:34.305] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=30001 count=1407 slow=0 discontinuities=0 lockWaitMaxUs=1433 workInclusiveMaxUs=27073 sealMaxUs=4475 sendMaxUs=9986 final=false
+[23:22:34.306] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=0 queueAgeMaxMs=26 workerMaxUs=27213
+[23:22:50.508] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=16179 count=732 slow=1 discontinuities=0 lockWaitMaxUs=3879 workInclusiveMaxUs=559728 sealMaxUs=3872 sendMaxUs=87898 final=false
+[23:22:50.566] AUDIO-DIAG: ingress queuedBytes=36864 queuedMs=191 droppedBlocks=19 queueAgeMaxMs=26 workerMaxUs=642041
+[23:22:50.633] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=16594 count=245 slow=1 discontinuities=0 lockWaitMaxUs=72 workInclusiveMaxUs=586125 sealMaxUs=580562 sendMaxUs=5559 final=false
+[23:22:55.514] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5031 count=214 slow=11 discontinuities=9 lockWaitMaxUs=3625 workInclusiveMaxUs=152327 sealMaxUs=21977 sendMaxUs=44955 final=false
+[23:22:55.591] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=29 queueAgeMaxMs=199 workerMaxUs=152350
+[23:22:59.791] AUDIO-DIAG: windowMs=25488 realFeeds=1194 admittedFeeds=1194 rejectedFeeds=0 udpPackets=1048 inputGapMaxMs=188 outputGapMaxMs=629 sendMaxUs=87898 silenceSubmissions=0 final=true codec=AAC_LC
+[23:22:59.791] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=4277 count=201 slow=0 discontinuities=0 lockWaitMaxUs=1247 workInclusiveMaxUs=33732 sealMaxUs=4752 sendMaxUs=3420 final=true
+[23:23:04.534] CONNECT-DIAG: start requested running=false phase=null; mediaMode=稳定（48K AAC）; strict format
+[23:23:04.539] WIFI: 状态心跳已启动（起点 wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:23:27.143] CARLIFE: 控制端口已连接，直接用于版本握手（无探测连接）
+[23:23:27.302] CARLIFE: 版本匹配成功（协议 3.0）
+[23:23:27.303] CARLIFE-DIAG: handshake=matched elapsedMs=102
+[23:23:28.190] NSD: 发现服务 CarPlay (_airplay._tcp.)，解析中…
+[23:23:28.249] AIRPLAY: TCP 已连通 <IP>:7000 portSource=MDNS（本机 <IP>） connection=5f2ae6b setup=167a23d inviteGeneration=7
+[23:23:29.569] WIFI: 心跳 → wifi=[wlan0/<IP>] car=wlan0/<IP> default=rmnet_data3/<IP> ssid=<TARGET> processBound=wlan0/<IP> defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:23:29.629] CARLIFE: ✓ 收到 CarLife 首帧（4270B，keyFrame=true）
+[23:23:33.125] CTRL: ✓ 车机 ctrl 邀请（第 1 次，receiver=<TARGET-ID>）——已收到连接请求，服务是否可用待验证
+[23:23:41.509] AIRPLAY: 音频 SETUP 往返 121ms [RTSP/1.0 200 OK]
+[23:23:47.631] CARLIFE: 媒体 引擎音频开始（0x30002）
+[23:23:47.736] AUDIO-ROUTE: inputRate=48000 inputChannels=2 inputPcm=s16le targetRate=48000 targetChannels=2 codec=AAC_LC streamType=102 resampler=native-or-channel-alignment
+[23:23:47.747] AUDIO-DIAG: ingress queuedBytes=36864 queuedMs=191 droppedBlocks=6 queueAgeMaxMs=0 workerMaxUs=11070
+[23:23:48.145] AAC-PROBE: backend=b962221 rate=48000 afterNonzeroInput=true frames=16 bytes=8725 decodedPeak=16978 decodedSamples=32768; local codec check only, receiver output unverified
+[23:23:49.549] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=8595 count=122 slow=1 discontinuities=0 lockWaitMaxUs=5 workInclusiveMaxUs=129482 sealMaxUs=93761 sendMaxUs=56107 final=false
+[23:23:52.768] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5020 count=245 slow=0 discontinuities=1 lockWaitMaxUs=931 workInclusiveMaxUs=43922 sealMaxUs=25575 sendMaxUs=6443 final=false
+[23:23:52.770] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=0 queueAgeMaxMs=100 workerMaxUs=81600
+[23:24:11.623] AUDIO-DIAG: AAC-ENCODE backend=b962221 windowMs=30008 calls=1386 outputFrames=1385 wallMaxUs=183781 cpuMaxUs=3866; encode only, UDP measured separately
+[23:24:12.061] AUDIO-DIAG: windowMs=30007 realFeeds=1156 admittedFeeds=1156 rejectedFeeds=0 udpPackets=1405 inputGapMaxMs=57 outputGapMaxMs=348 sendMaxUs=16144 silenceSubmissions=257 codec=AAC_LC nextSeq=1405 nextSample=1438720
+[23:24:19.580] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=30030 count=453 slow=0 discontinuities=0 lockWaitMaxUs=2 workInclusiveMaxUs=35797 sealMaxUs=33738 sendMaxUs=4951 final=false
+[23:24:22.803] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=30035 count=1408 slow=0 discontinuities=0 lockWaitMaxUs=1541 workInclusiveMaxUs=19308 sealMaxUs=6095 sendMaxUs=6157 final=false
+[23:24:22.804] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=0 queueAgeMaxMs=19 workerMaxUs=19325
+[23:24:30.829] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=8025 count=374 slow=1 discontinuities=0 lockWaitMaxUs=8698 workInclusiveMaxUs=50459 sealMaxUs=4497 sendMaxUs=6090 final=false
+[23:24:30.854] AUDIO-DIAG: ingress queuedBytes=12288 queuedMs=63 droppedBlocks=0 queueAgeMaxMs=25 workerMaxUs=62492
+[23:24:31.428] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=11810 count=173 slow=1 discontinuities=0 lockWaitMaxUs=1 workInclusiveMaxUs=260201 sealMaxUs=232893 sendMaxUs=33542 final=false
+[23:24:35.858] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5029 count=168 slow=13 discontinuities=13 lockWaitMaxUs=11 workInclusiveMaxUs=439017 sealMaxUs=23428 sendMaxUs=18004 final=false
+[23:24:35.862] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=70 queueAgeMaxMs=198 workerMaxUs=439129
+[23:24:36.431] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5041 count=96 slow=1 discontinuities=0 lockWaitMaxUs=2 workInclusiveMaxUs=214407 sealMaxUs=211142 sendMaxUs=13924 final=false
+[23:24:39.171] AUDIO-DIAG: AAC-ENCODE backend=b962221 windowMs=27546 calls=1158 outputFrames=1159 wallMaxUs=528049 cpuMaxUs=3367; encode only, UDP measured separately
+[23:24:40.894] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5035 count=177 slow=7 discontinuities=6 lockWaitMaxUs=2050 workInclusiveMaxUs=574230 sealMaxUs=15909 sendMaxUs=7143 final=false
+[23:24:40.895] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=59 queueAgeMaxMs=195 workerMaxUs=579774
+[23:24:41.455] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5023 count=38 slow=2 discontinuities=0 lockWaitMaxUs=1 workInclusiveMaxUs=579539 sealMaxUs=571609 sendMaxUs=40945 final=false
+[23:24:42.090] AUDIO-DIAG: windowMs=30029 realFeeds=1408 admittedFeeds=1408 rejectedFeeds=0 udpPackets=1281 inputGapMaxMs=388 outputGapMaxMs=690 sendMaxUs=47545 silenceSubmissions=1 codec=AAC_LC nextSeq=2686 nextSample=2750464
+[23:24:45.899] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5005 count=217 slow=7 discontinuities=4 lockWaitMaxUs=275 workInclusiveMaxUs=252363 sealMaxUs=3523 sendMaxUs=10782 final=false
+[23:24:45.901] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=17 queueAgeMaxMs=190 workerMaxUs=252423
+[23:24:46.537] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5082 count=144 slow=1 discontinuities=0 lockWaitMaxUs=8 workInclusiveMaxUs=108996 sealMaxUs=105260 sendMaxUs=31580 final=false
+[23:24:50.920] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5020 count=225 slow=6 discontinuities=4 lockWaitMaxUs=4436 workInclusiveMaxUs=196522 sealMaxUs=12767 sendMaxUs=28666 final=false
+[23:24:50.922] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=11 queueAgeMaxMs=178 workerMaxUs=197859
+[23:24:51.614] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5076 count=108 slow=1 discontinuities=0 lockWaitMaxUs=2 workInclusiveMaxUs=141163 sealMaxUs=133978 sendMaxUs=82326 final=false
+[23:24:55.956] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5036 count=236 slow=1 discontinuities=0 lockWaitMaxUs=162 workInclusiveMaxUs=73218 sealMaxUs=3679 sendMaxUs=4885 final=false
+[23:24:55.957] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=0 queueAgeMaxMs=71 workerMaxUs=73239
+[23:25:00.347] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=8733 count=299 slow=1 discontinuities=0 lockWaitMaxUs=33 workInclusiveMaxUs=277362 sealMaxUs=228097 sendMaxUs=49229 final=false
+[23:25:00.961] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5004 count=214 slow=11 discontinuities=4 lockWaitMaxUs=6167 workInclusiveMaxUs=212764 sealMaxUs=52076 sendMaxUs=42218 final=false
+[23:25:00.967] AUDIO-DIAG: ingress queuedBytes=12288 queuedMs=63 droppedBlocks=18 queueAgeMaxMs=176 workerMaxUs=213257
+[23:25:05.294] AUDIO-DIAG: windowMs=23204 realFeeds=1086 admittedFeeds=1086 rejectedFeeds=0 udpPackets=1026 inputGapMaxMs=175 outputGapMaxMs=352 sendMaxUs=45028 silenceSubmissions=0 final=true codec=AAC_LC
+[23:25:05.294] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=4333 count=197 slow=2 discontinuities=3 lockWaitMaxUs=2821 workInclusiveMaxUs=280078 sealMaxUs=2391 sendMaxUs=45028 final=true
+[23:25:09.321] CONNECT-DIAG: start requested running=false phase=null; mediaMode=质量（48K PCM）; strict format
+[23:25:09.328] WIFI: 状态心跳已启动（起点 wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:25:09.336] CARLIFE: 控制端口已连接，直接用于版本握手（无探测连接）
+[23:25:09.499] CARLIFE: 版本匹配成功（协议 3.0）
+[23:25:09.502] CARLIFE-DIAG: handshake=matched elapsedMs=119
+[23:25:11.717] CARLIFE: ✓ 收到 CarLife 首帧（3822B，keyFrame=true）
+[23:25:19.297] CARLIFE: 媒体 引擎音频开始（0x30002）
+[23:25:32.119] NSD: 发现服务 CarPlay (_airplay._tcp.)，解析中…
+[23:25:32.218] AIRPLAY: TCP 已连通 <IP>:7000 portSource=MDNS（本机 <IP>） connection=b0667df setup=e1f05f0 inviteGeneration=9
+[23:25:34.769] WIFI: 心跳 → wifi=[wlan0/<IP>] car=wlan0/<IP> default=rmnet_data3/<IP> ssid=<TARGET> processBound=wlan0/<IP> defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:25:36.988] CTRL: ✓ 车机 ctrl 邀请（第 1 次，receiver=<TARGET-ID>）——已收到连接请求，服务是否可用待验证
+[23:25:39.629] AIRPLAY: 音频 SETUP 往返 115ms [RTSP/1.0 200 OK]
+[23:25:39.740] AUDIO-ROUTE: inputRate=48000 inputChannels=2 inputPcm=s16le targetRate=48000 targetChannels=2 codec=PCM streamType=100 resampler=native-or-channel-alignment
+[23:26:09.559] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=30101 count=510 slow=0 discontinuities=0 lockWaitMaxUs=40 workInclusiveMaxUs=20719 sealMaxUs=19582 sendMaxUs=9432 final=false
+[23:26:09.736] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=0 queueAgeMaxMs=28 workerMaxUs=24486
+[23:26:09.780] AUDIO-DIAG: windowMs=30039 realFeeds=1409 admittedFeeds=1409 rejectedFeeds=0 udpPackets=4097 inputGapMaxMs=52 outputGapMaxMs=49 sendMaxUs=16534 silenceSubmissions=0 codec=PCM nextSeq=4097 nextSample=1442144
+[23:26:09.781] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=30036 count=1409 slow=0 discontinuities=0 lockWaitMaxUs=73 workInclusiveMaxUs=24229 sealMaxUs=8108 sendMaxUs=6736 final=false
+[23:26:17.628] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=7843 count=362 slow=1 discontinuities=0 lockWaitMaxUs=1 workInclusiveMaxUs=87987 sealMaxUs=15861 sendMaxUs=11371 final=false
+[23:26:17.647] AUDIO-DIAG: ingress queuedBytes=12288 queuedMs=63 droppedBlocks=0 queueAgeMaxMs=15 workerMaxUs=109536
+[23:26:18.256] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=8656 count=128 slow=1 discontinuities=0 lockWaitMaxUs=2 workInclusiveMaxUs=102743 sealMaxUs=50652 sendMaxUs=42666 final=false
+[23:26:22.665] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5006 count=198 slow=7 discontinuities=11 lockWaitMaxUs=1 workInclusiveMaxUs=162033 sealMaxUs=93432 sendMaxUs=61517 final=false
+[23:26:22.673] AUDIO-DIAG: ingress queuedBytes=16384 queuedMs=85 droppedBlocks=41 queueAgeMaxMs=193 workerMaxUs=162057
+[23:26:39.816] AUDIO-DIAG: windowMs=30036 realFeeds=1408 admittedFeeds=1408 rejectedFeeds=0 udpPackets=3969 inputGapMaxMs=391 outputGapMaxMs=351 sendMaxUs=61677 silenceSubmissions=0 codec=PCM nextSeq=8066 nextSample=2839232

@@ -1,0 +1,181 @@
+# 2026-11-10 231213; build 81e4fa7035dd
+# 去重、按毫秒时间排序的选段；未列出的事件不代表未发生。
+# 排除附带的旧 session_trace_fail 快照；替换地址/目标身份，不含协议负载。
+# 仅供时序分析，不能逐字节重放。tcp-failed unique total=7
+[23:05:10.400] CONNECT-DIAG: schema=20261108-v9 revision=81e4fa7035dd version=1.2.31-q4-debug sdk=36; export includes bounded early/recent diagnostics, idle deadlines and network leases
+[23:05:11.184] CONNECT-DIAG: start requested running=false phase=null; mediaMode=稳定（48K AAC）; strict format
+[23:05:11.194] WIFI: 状态心跳已启动（起点 wifi=[] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:05:20.403] WIFI-POLICY: local-only; removedOwnedSuggestions=1 status=0 ready=true; saved networks and encrypted credentials unchanged
+[23:05:21.771] CARLIFE: 控制端口已连接，直接用于版本握手（无探测连接）
+[23:05:22.005] CARLIFE: 版本匹配成功（协议 3.0）
+[23:05:22.006] CARLIFE-DIAG: handshake=matched elapsedMs=202
+[23:05:25.199] CARLIFE: ✓ 收到 CarLife 首帧（5326B，keyFrame=true）
+[23:05:28.856] WIFI: 系统事件 onAvailable → wifi=[wlan0/<IP>] car=wlan0/<IP> default=rmnet_data3/<IP> ssid=<TARGET> processBound=wlan0/<IP> defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:05:29.120] NSD: 发现服务 CarPlay (_airplay._tcp.)，解析中…
+[23:05:29.664] AIRPLAY: TCP 已连通 <IP>:7000 portSource=MDNS（本机 <IP>） connection=895a2f7 setup=cbb4f5a inviteGeneration=1
+[23:05:29.890] CTRL: ✓ 车机 ctrl 邀请（第 1 次，receiver=<TARGET-ID>）——已收到连接请求，服务是否可用待验证
+[23:05:40.312] AIRPLAY: 音频 SETUP 往返 269ms [RTSP/1.0 200 OK]
+[23:05:40.604] WIFI: 系统事件 onLost → wifi=[] car=- default=rmnet_data3/<IP> ssid=<TARGET> processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[wlan0/<IP>] car=wlan0/<IP> default=rmnet_data3/<IP> ssid=<TARGET> processBound=wlan0/<IP> defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:05:40.944] CONNECT-DIAG: control-reader ended reason=SocketException generation=2 pending=2 connection=895a2f7 setup=cbb4f5a inviteGeneration=1
+[23:05:42.373] WIFI: 系统事件 onAvailable → wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=<TARGET> processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[] car=- default=rmnet_data3/<IP> ssid=<TARGET> processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:05:42.585] CONNECT-DIAG: video terminal reason=keepalive-recovery-exhausted after bounded data-port recovery
+[23:05:42.654] NSD: 发现服务 CarPlay (_airplay._tcp.)，解析中…
+[23:06:00.818] WIFI: 系统事件 onLost → wifi=[] car=- default=rmnet_data3/<IP> ssid=<TARGET> processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=<TARGET> processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:06:03.583] WIFI: 系统事件 onAvailable → wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=<TARGET> processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[] car=- default=rmnet_data3/<IP> ssid=<TARGET> processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:06:03.767] NSD: 发现服务 CarPlay (_airplay._tcp.)，解析中…
+[23:06:03.945] AIRPLAY: TCP 已连通 <IP>:7000 portSource=MDNS（本机 <IP>） connection=895a2f7 setup=2d026c0 inviteGeneration=1
+[23:06:04.521] WIFI: 系统事件网卡能力变化 → wifi=[wlan0/<IP>] car=wlan0/<IP> default=rmnet_data3/<IP> ssid=<TARGET> processBound=wlan0/<IP> defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=<TARGET> processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:06:07.024] CTRL: ✓ 车机 ctrl 邀请（第 2 次，receiver=<TARGET-ID>）——已收到连接请求，服务是否可用待验证
+[23:06:09.292] AIRPLAY: 音频 SETUP 往返 100ms [RTSP/1.0 200 OK]
+[23:06:25.294] CARLIFE: 控制端口已连接，直接用于版本握手（无探测连接）
+[23:06:26.084] CARLIFE: 版本匹配成功（协议 3.0）
+[23:06:26.086] CARLIFE-DIAG: handshake=matched elapsedMs=766
+[23:06:26.631] WIFI: 心跳 → wifi=[wlan0/<IP>] car=wlan0/<IP> default=wlan0/<IP> ssid=<TARGET> processBound=wlan0/<IP> defaultInternet=true defaultValidated=false defaultTrusted=true（上次 wifi=[wlan0/<IP>] car=wlan0/<IP> default=rmnet_data3/<IP> ssid=<TARGET> processBound=wlan0/<IP> defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:06:28.040] CARLIFE: ✓ 收到 CarLife 首帧（4606B，keyFrame=true）
+[23:06:31.579] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=21393 count=45 slow=1 discontinuities=0 lockWaitMaxUs=6 workInclusiveMaxUs=688461 sealMaxUs=687896 sendMaxUs=14091 final=false
+[23:06:31.612] AUDIO-DIAG: AAC-ENCODE backend=a31ca7c windowMs=22110 calls=823 outputFrames=820 wallMaxUs=899669 cpuMaxUs=4448; encode only, UDP measured separately
+[23:06:36.636] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5056 count=36 slow=2 discontinuities=0 lockWaitMaxUs=5 workInclusiveMaxUs=316178 sealMaxUs=311472 sendMaxUs=5951 final=false
+[23:06:40.024] AUDIO-DIAG: windowMs=30094 realFeeds=0 admittedFeeds=0 rejectedFeeds=0 udpPackets=1107 inputGapMaxMs=0 outputGapMaxMs=963 sendMaxUs=66155 silenceSubmissions=1119 codec=AAC_LC nextSeq=1107 nextSample=1133568
+[23:06:52.842] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=16205 count=361 slow=1 discontinuities=0 lockWaitMaxUs=177 workInclusiveMaxUs=110250 sealMaxUs=98016 sendMaxUs=49954 final=false
+[23:06:52.932] CARLIFE: 媒体 引擎音频开始（0x30002）
+[23:06:52.937] AUDIO-ROUTE: inputRate=48000 inputChannels=2 inputPcm=s16le targetRate=48000 targetChannels=2 codec=AAC_LC streamType=102 resampler=native-or-channel-alignment
+[23:06:52.944] AUDIO-DIAG: ingress queuedBytes=12288 queuedMs=63 droppedBlocks=0 queueAgeMaxMs=0 workerMaxUs=6133
+[23:06:53.489] AAC-PROBE: backend=a31ca7c rate=48000 afterNonzeroInput=true frames=16 bytes=8528 decodedPeak=16504 decodedSamples=32768; local codec check only, receiver output unverified
+[23:06:57.954] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5011 count=241 slow=1 discontinuities=0 lockWaitMaxUs=2242 workInclusiveMaxUs=53247 sealMaxUs=5212 sendMaxUs=3313 final=false
+[23:06:57.955] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=0 queueAgeMaxMs=99 workerMaxUs=53268
+[23:07:01.612] AUDIO-DIAG: AAC-ENCODE backend=a31ca7c windowMs=30005 calls=1286 outputFrames=1273 wallMaxUs=496489 cpuMaxUs=4517; encode only, UDP measured separately
+[23:07:02.697] CONNECT-DIAG: control-reader ended reason=SocketException generation=2 pending=1 connection=895a2f7 setup=2d026c0 inviteGeneration=1
+[23:07:03.090] WIFI: 系统事件 onLost → wifi=[-] car=- default=rmnet_data3/<IP> ssid=<TARGET> processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[wlan0/<IP>] car=wlan0/<IP> default=wlan0/<IP> ssid=<TARGET> processBound=wlan0/<IP> defaultInternet=true defaultValidated=false defaultTrusted=true）
+[23:07:03.186] AUDIO-DIAG: windowMs=23162 realFeeds=462 admittedFeeds=462 rejectedFeeds=0 udpPackets=1035 inputGapMaxMs=63 outputGapMaxMs=298 sendMaxUs=82174 silenceSubmissions=577 final=true codec=AAC_LC
+[23:07:03.188] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5232 count=220 slow=0 discontinuities=0 lockWaitMaxUs=5017 workInclusiveMaxUs=44415 sealMaxUs=10302 sendMaxUs=4941 final=true
+[23:07:03.209] AUDIO-DIAG: ingress queuedBytes=0 queuedMs=0 droppedBlocks=0 queueAgeMaxMs=44 workerMaxUs=559555
+[23:07:05.314] CONNECT-DIAG: video terminal reason=frame-write-recovery-exhausted after bounded data-port recovery
+[23:07:06.962] WIFI: 心跳 → wifi=[] car=- default=rmnet_data3/<IP> ssid=<TARGET> processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[-] car=- default=rmnet_data3/<IP> ssid=<TARGET> processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:07:10.391] WIFI: 系统事件 onAvailable → wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=<TARGET> processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[] car=- default=rmnet_data3/<IP> ssid=<TARGET> processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:07:10.536] NSD: 发现服务 CarPlay (_airplay._tcp.)，解析中…
+[23:07:21.975] WIFI: 心跳 → wifi=[wlan0/<IP>] car=wlan0/<IP> default=wlan0/<IP> ssid=<TARGET> processBound=wlan0/<IP> defaultInternet=true defaultValidated=false defaultTrusted=true（上次 wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=<TARGET> processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:07:22.344] NSD: 发现服务 CarPlay (_airplay._tcp.)，解析中…
+[23:07:22.412] AIRPLAY: TCP 已连通 <IP>:7000 portSource=MDNS（本机 <IP>） connection=895a2f7 setup=97e47b2 inviteGeneration=1
+[23:07:27.195] CTRL: ✓ 车机 ctrl 邀请（第 3 次，receiver=<TARGET-ID>）——已收到连接请求，服务是否可用待验证
+[23:07:27.334] CARLIFE: 控制端口已连接，直接用于版本握手（无探测连接）
+[23:07:27.452] CARLIFE: 版本匹配成功（协议 3.0）
+[23:07:27.453] CARLIFE-DIAG: handshake=matched elapsedMs=102
+[23:07:29.377] AIRPLAY: 音频 SETUP 往返 123ms [RTSP/1.0 200 OK]
+[23:07:29.775] CARLIFE: ✓ 收到 CarLife 首帧（3934B，keyFrame=true）
+[23:07:32.006] WIFI: 心跳 → wifi=[wlan0/<IP>] car=wlan0/<IP> default=rmnet_data3/<IP> ssid=<TARGET> processBound=wlan0/<IP> defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[wlan0/<IP>] car=wlan0/<IP> default=wlan0/<IP> ssid=<TARGET> processBound=wlan0/<IP> defaultInternet=true defaultValidated=false defaultTrusted=true）
+[23:07:34.477] AUDIO-DIAG: AAC-ENCODE backend=546ffd1 windowMs=5041 calls=93 outputFrames=93 wallMaxUs=583873 cpuMaxUs=3382; encode only, UDP measured separately
+[23:07:35.048] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5039 count=55 slow=3 discontinuities=0 lockWaitMaxUs=2 workInclusiveMaxUs=437322 sealMaxUs=430098 sendMaxUs=36268 final=false
+[23:07:39.843] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5013 count=48 slow=1 discontinuities=0 lockWaitMaxUs=1 workInclusiveMaxUs=101135 sealMaxUs=66217 sendMaxUs=88038 final=false
+[23:07:46.443] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=6606 count=111 slow=1 discontinuities=0 lockWaitMaxUs=258 workInclusiveMaxUs=117339 sealMaxUs=90650 sendMaxUs=26652 final=false
+[23:07:51.472] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5027 count=138 slow=1 discontinuities=0 lockWaitMaxUs=46 workInclusiveMaxUs=105676 sealMaxUs=103925 sendMaxUs=74604 final=false
+[23:07:52.832] CARLIFE: 媒体 引擎音频开始（0x30002）
+[23:07:52.842] AUDIO-ROUTE: inputRate=48000 inputChannels=2 inputPcm=s16le targetRate=48000 targetChannels=2 codec=AAC_LC streamType=102 resampler=native-or-channel-alignment
+[23:07:53.297] AAC-PROBE: backend=546ffd1 rate=48000 afterNonzeroInput=true frames=16 bytes=8561 decodedPeak=16504 decodedSamples=32768; local codec check only, receiver output unverified
+[23:07:55.841] AUDIO-DIAG: ingress queuedBytes=8192 queuedMs=42 droppedBlocks=0 queueAgeMaxMs=46 workerMaxUs=54238
+[23:07:56.769] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5298 count=129 slow=1 discontinuities=0 lockWaitMaxUs=1 workInclusiveMaxUs=470577 sealMaxUs=468607 sendMaxUs=17232 final=false
+[23:07:57.118] AAC-RECOVERY: queued manual=false profile=t102/media/0x800000(48000Hz,AAC_LC,250 ms) sender=210561017 reason=backend=546ffd1 real-input discontinuity intervalMs=770; audio only, audibility unverified
+[23:07:57.251] AUDIO: AAC backend=546ffd1 real-input discontinuity intervalMs=770 → 尝试仅重建音频流，保持视频与当前编码档位
+[23:07:57.406] AIRPLAY: 音频 SETUP 被拒 [RTSP/1.0 400 Bad Request]——按真 iPhone 的写法补齐 ct=4 sr=48000 后重试一次
+[23:07:57.583] CONNECT-DIAG: control-reader ended reason=SocketException generation=2 pending=2 connection=895a2f7 setup=97e47b2 inviteGeneration=1
+[23:07:57.598] AUDIO-DIAG: windowMs=27737 realFeeds=228 admittedFeeds=228 rejectedFeeds=0 udpPackets=862 inputGapMaxMs=466 outputGapMaxMs=834 sendMaxUs=142314 silenceSubmissions=690 final=true codec=AAC_LC
+[23:07:57.599] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=4746 count=175 slow=4 discontinuities=3 lockWaitMaxUs=3588 workInclusiveMaxUs=174374 sealMaxUs=4418 sendMaxUs=6585 final=true
+[23:07:57.614] AUDIO: 重建协商失败——保持原音频流继续推（不降级成无声）
+[23:07:57.615] AAC-RECOVERY: completed result=false manual=false; verify actual sound, no automatic format fallback
+[23:07:59.214] CONNECT-DIAG: video terminal reason=frame-write-recovery-exhausted after bounded data-port recovery
+[23:08:10.674] CONNECT-DIAG: start requested running=false phase=已取消连接; mediaMode=对照测试（44.1K AAC）; strict format
+[23:08:10.679] CARLIFE: 控制端口已连接，直接用于版本握手（无探测连接）
+[23:08:10.680] WIFI: 状态心跳已启动（起点 wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:08:10.797] CARLIFE: 版本匹配成功（协议 3.0）
+[23:08:10.798] CARLIFE-DIAG: handshake=matched elapsedMs=105
+[23:08:13.116] CARLIFE: ✓ 收到 CarLife 首帧（3822B，keyFrame=true）
+[23:08:15.815] WIFI: 心跳 → wifi=[wlan0/<IP>] car=wlan0/<IP> default=rmnet_data3/<IP> ssid=<TARGET> processBound=wlan0/<IP> defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:08:56.040] CONNECT-DIAG: tcp-failed host=<IP> port=7000 portSource=FALLBACK type=ConnectException error=failed to connect to /<IP> (port 7000) from /<IP> (port 39280) after 2000ms: isConnected failed: ECONNREFUSED (Connection refused) connection=aa19ae7 setup=e067937 inviteGeneration=3
+[23:09:08.134] CONNECT-DIAG: tcp-failed host=<IP> port=7000 portSource=FALLBACK type=ConnectException error=failed to connect to /<IP> (port 7000) from /<IP> (port 42214) after 2000ms: isConnected failed: ECONNREFUSED (Connection refused) connection=aa19ae7 setup=e067937 inviteGeneration=3
+[23:09:09.097] NSD: 发现服务 CarPlay (_airplay._tcp.)，解析中…
+[23:09:09.152] CTRL: ✓ 车机 ctrl 邀请（第 1 次，receiver=<TARGET-ID>）——已收到连接请求，服务是否可用待验证
+[23:09:10.151] AIRPLAY: TCP 已连通 <IP>:7000 portSource=MDNS（本机 <IP>） connection=aa19ae7 setup=e067937 inviteGeneration=3
+[23:09:12.738] AIRPLAY: 音频 SETUP 往返 145ms [RTSP/1.0 200 OK]
+[23:09:27.939] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=15418 count=243 slow=1 discontinuities=0 lockWaitMaxUs=1 workInclusiveMaxUs=111570 sealMaxUs=38261 sendMaxUs=106927 final=false
+[23:09:33.005] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5065 count=185 slow=1 discontinuities=0 lockWaitMaxUs=141 workInclusiveMaxUs=119959 sealMaxUs=25663 sendMaxUs=119791 final=false
+[23:09:33.756] CARLIFE: 媒体 引擎音频开始（0x30002）
+[23:09:33.845] AUDIO-ROUTE: inputRate=48000 inputChannels=2 inputPcm=s16le targetRate=44100 targetChannels=2 codec=AAC_LC streamType=102 resampler=streaming-phase-preserved
+[23:09:33.967] AUDIO-DIAG: ingress queuedBytes=32768 queuedMs=170 droppedBlocks=0 queueAgeMaxMs=69 workerMaxUs=51890
+[23:09:34.258] AAC-PROBE: backend=c69168b rate=44100 afterNonzeroInput=true frames=16 bytes=9133 decodedPeak=15644 decodedSamples=32768; local codec check only, receiver output unverified
+[23:09:38.873] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5026 count=241 slow=1 discontinuities=0 lockWaitMaxUs=1071 workInclusiveMaxUs=51848 sealMaxUs=3325 sendMaxUs=3719 final=false
+[23:09:42.850] AUDIO-DIAG: AAC-ENCODE backend=c69168b windowMs=30041 calls=1243 outputFrames=1243 wallMaxUs=248570 cpuMaxUs=3335; encode only, UDP measured separately
+[23:09:43.144] AUDIO-DIAG: windowMs=30009 realFeeds=442 admittedFeeds=442 rejectedFeeds=0 udpPackets=1255 inputGapMaxMs=47 outputGapMaxMs=258 sendMaxUs=82241 silenceSubmissions=851 codec=AAC_LC nextSeq=1255 nextSample=1285120
+[23:09:51.909] AAC-RECOVERY: queued manual=true profile=t102/media/0x400000(44100Hz,AAC_LC,250 ms) sender=211028464 reason=manual silence check; audio only, audibility unverified
+[23:09:51.913] AUDIO: AAC manual silence check → 尝试仅重建音频流，保持视频与当前编码档位
+[23:09:51.940] AIRPLAY: 音频 SETUP 被拒 [RTSP/1.0 400 Bad Request]——按真 iPhone 的写法补齐 ct=4 sr=44100 后重试一次
+[23:09:51.954] AIRPLAY: 音频 SETUP 重试往返 11ms [RTSP/1.0 400 Bad Request]（补齐 ct/sr 仍被拒）
+[23:09:51.957] AIRPLAY: 音频 SETUP 往返 34ms [RTSP/1.0 400 Bad Request]（带 ct/sr 的重试版）
+[23:09:51.964] AUDIO: 重建协商失败——保持原音频流继续推（不降级成无声）
+[23:09:51.967] AAC-RECOVERY: completed result=false manual=true; verify actual sound, no automatic format fallback
+[23:09:52.037] CONNECT-DIAG: control-reader ended reason=EOF generation=9 pending=0 connection=aa19ae7 setup=e067937 inviteGeneration=3
+[23:09:52.067] AUDIO-DIAG: windowMs=8923 realFeeds=418 admittedFeeds=418 rejectedFeeds=0 udpPackets=384 inputGapMaxMs=46 outputGapMaxMs=88 sendMaxUs=7500 silenceSubmissions=0 final=true codec=AAC_LC
+[23:09:52.070] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=13196 count=618 slow=0 discontinuities=0 lockWaitMaxUs=3448 workInclusiveMaxUs=22034 sealMaxUs=5721 sendMaxUs=7500 final=true
+[23:09:53.559] CONNECT-DIAG: video terminal reason=frame-write-recovery-exhausted after bounded data-port recovery
+[23:09:57.481] NSD: 发现服务 CarPlay (_airplay._tcp.)，解析中…
+[23:09:57.502] CTRL: ✓ 车机 ctrl 邀请（第 2 次，receiver=<TARGET-ID>）——已收到连接请求，服务是否可用待验证
+[23:09:57.592] AIRPLAY: TCP 已连通 <IP>:7000 portSource=MDNS（本机 <IP>） connection=aa19ae7 setup=7754515 inviteGeneration=3
+[23:09:58.028] CARLIFE: 控制端口已连接，直接用于版本握手（无探测连接）
+[23:09:58.140] CARLIFE: 版本匹配成功（协议 3.0）
+[23:09:58.141] CARLIFE-DIAG: handshake=matched elapsedMs=101
+[23:10:00.096] AIRPLAY: 音频 SETUP 往返 170ms [RTSP/1.0 200 OK]
+[23:10:00.405] CARLIFE: ✓ 收到 CarLife 首帧（4126B，keyFrame=true）
+[23:10:05.485] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5070 count=61 slow=2 discontinuities=0 lockWaitMaxUs=1 workInclusiveMaxUs=467522 sealMaxUs=386082 sendMaxUs=79924 final=false
+[23:10:05.897] AUDIO-DIAG: AAC-ENCODE backend=9971ad windowMs=5741 calls=113 outputFrames=112 wallMaxUs=1091724 cpuMaxUs=4432; encode only, UDP measured separately
+[23:10:10.513] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5027 count=94 slow=2 discontinuities=0 lockWaitMaxUs=1 workInclusiveMaxUs=108677 sealMaxUs=108115 sendMaxUs=50509 final=false
+[23:10:15.576] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5054 count=70 slow=3 discontinuities=0 lockWaitMaxUs=1 workInclusiveMaxUs=177305 sealMaxUs=23913 sendMaxUs=167112 final=false
+[23:10:20.070] CARLIFE: 媒体 引擎音频开始（0x30002）
+[23:10:20.176] AUDIO-ROUTE: inputRate=48000 inputChannels=2 inputPcm=s16le targetRate=44100 targetChannels=2 codec=AAC_LC streamType=102 resampler=streaming-phase-preserved
+[23:10:20.193] AUDIO-DIAG: ingress queuedBytes=36864 queuedMs=191 droppedBlocks=6 queueAgeMaxMs=0 workerMaxUs=10477
+[23:10:20.568] AAC-PROBE: backend=9971ad rate=44100 afterNonzeroInput=true frames=16 bytes=9328 decodedPeak=13976 decodedSamples=32768; local codec check only, receiver output unverified
+[23:10:20.591] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5023 count=197 slow=2 discontinuities=0 lockWaitMaxUs=19380 workInclusiveMaxUs=181580 sealMaxUs=181060 sendMaxUs=38031 final=false
+[23:10:25.215] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5027 count=245 slow=2 discontinuities=2 lockWaitMaxUs=253 workInclusiveMaxUs=80678 sealMaxUs=2135 sendMaxUs=3129 final=false
+[23:10:25.217] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=0 queueAgeMaxMs=113 workerMaxUs=80687
+[23:10:30.626] AUDIO-DIAG: windowMs=30036 realFeeds=506 admittedFeeds=506 rejectedFeeds=0 udpPackets=1014 inputGapMaxMs=50 outputGapMaxMs=2395 sendMaxUs=165592 silenceSubmissions=563 codec=AAC_LC nextSeq=1014 nextSample=1038336
+[23:10:31.291] AUDIO-DIAG: windowMs=664 realFeeds=30 admittedFeeds=30 rejectedFeeds=0 udpPackets=30 inputGapMaxMs=43 outputGapMaxMs=48 sendMaxUs=1985 silenceSubmissions=0 final=true codec=AAC_LC
+[23:10:31.291] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=6077 count=285 slow=0 discontinuities=0 lockWaitMaxUs=1357 workInclusiveMaxUs=16317 sealMaxUs=2354 sendMaxUs=4203 final=true
+[23:10:36.684] CONNECT-DIAG: start requested running=false phase=null; mediaMode=质量（48K PCM）; strict format
+[23:10:36.688] WIFI: 状态心跳已启动（起点 wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:10:36.700] CARLIFE: 控制端口已连接，直接用于版本握手（无探测连接）
+[23:10:36.780] NSD: 发现服务 CarPlay (_airplay._tcp.)，解析中…
+[23:10:36.816] CARLIFE: 版本匹配成功（协议 3.0）
+[23:10:36.817] CARLIFE-DIAG: handshake=matched elapsedMs=103
+[23:10:39.002] CARLIFE: ✓ 收到 CarLife 首帧（3790B，keyFrame=true）
+[23:10:41.796] WIFI: 心跳 → wifi=[wlan0/<IP>] car=wlan0/<IP> default=rmnet_data3/<IP> ssid=<TARGET> processBound=wlan0/<IP> defaultInternet=true defaultValidated=true defaultTrusted=true（上次 wifi=[wlan0/<IP>] car=- default=rmnet_data3/<IP> ssid=- processBound=- defaultInternet=true defaultValidated=true defaultTrusted=true）
+[23:10:51.113] CARLIFE: 媒体 引擎音频开始（0x30002）
+[23:10:53.053] CTRL: ✓ 车机 ctrl 邀请（第 1 次，receiver=<TARGET-ID>）——已收到连接请求，服务是否可用待验证
+[23:10:56.140] AIRPLAY: TCP 已连通 <IP>:7000 portSource=FALLBACK（本机 <IP>） connection=b015c80 setup=4c392b9 inviteGeneration=5
+[23:10:58.851] AIRPLAY: 音频 SETUP 往返 103ms [RTSP/1.0 200 OK]
+[23:10:58.892] AUDIO-ROUTE: inputRate=48000 inputChannels=2 inputPcm=s16le targetRate=48000 targetChannels=2 codec=PCM streamType=100 resampler=native-or-channel-alignment
+[23:11:05.846] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=6943 count=317 slow=1 discontinuities=0 lockWaitMaxUs=1 workInclusiveMaxUs=117668 sealMaxUs=11371 sendMaxUs=12062 final=false
+[23:11:05.878] AUDIO-DIAG: ingress queuedBytes=36864 queuedMs=191 droppedBlocks=2 queueAgeMaxMs=106 workerMaxUs=154827
+[23:11:09.627] CARLIFE: 媒体 引擎音频停止（0x30003）——来电或音频路由被切走
+[23:11:10.842] CARLIFE: 媒体 引擎音频开始（0x30002）
+[23:11:10.845] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5005 count=140 slow=1 discontinuities=2 lockWaitMaxUs=3 workInclusiveMaxUs=322162 sealMaxUs=5279 sendMaxUs=22334 final=false
+[23:11:10.885] AUDIO-DIAG: ingress queuedBytes=0 queuedMs=0 droppedBlocks=12 queueAgeMaxMs=150 workerMaxUs=322198
+[23:11:13.828] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=15112 count=349 slow=1 discontinuities=0 lockWaitMaxUs=4535 workInclusiveMaxUs=141487 sealMaxUs=139683 sendMaxUs=19074 final=false
+[23:11:15.879] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5033 count=236 slow=1 discontinuities=0 lockWaitMaxUs=91 workInclusiveMaxUs=60271 sealMaxUs=27508 sendMaxUs=59080 final=false
+[23:11:15.926] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=0 queueAgeMaxMs=60 workerMaxUs=60284
+[23:11:18.868] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5040 count=194 slow=2 discontinuities=0 lockWaitMaxUs=1 workInclusiveMaxUs=138952 sealMaxUs=127177 sendMaxUs=62683 final=false
+[23:11:19.050] NAV-MEDIA: phase=guide navigationActive=true endedDurationMs=null; album/progress=music artwork=navigation
+[23:11:20.913] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5033 count=234 slow=1 discontinuities=1 lockWaitMaxUs=2 workInclusiveMaxUs=223635 sealMaxUs=11961 sendMaxUs=210613 final=false
+[23:11:20.955] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=2 queueAgeMaxMs=156 workerMaxUs=227247
+[23:11:28.893] AUDIO-DIAG: windowMs=30001 realFeeds=1318 admittedFeeds=1318 rejectedFeeds=0 udpPackets=3993 inputGapMaxMs=1960 outputGapMaxMs=322 sendMaxUs=275144 silenceSubmissions=210 codec=PCM nextSeq=3993 nextSample=1405536
+[23:11:38.249] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=17335 count=808 slow=1 discontinuities=0 lockWaitMaxUs=877 workInclusiveMaxUs=100818 sealMaxUs=6191 sendMaxUs=17770 final=false
+[23:11:38.255] AUDIO-DIAG: ingress queuedBytes=20480 queuedMs=106 droppedBlocks=0 queueAgeMaxMs=15 workerMaxUs=105679
+[23:11:40.270] CARLIFE: 媒体 引擎音频停止（0x30003）——来电或音频路由被切走
+[23:11:40.402] CARLIFE: 媒体 引擎音频开始（0x30002）
+[23:11:46.401] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=8152 count=346 slow=1 discontinuities=0 lockWaitMaxUs=4688 workInclusiveMaxUs=51215 sealMaxUs=31559 sendMaxUs=18833 final=false
+[23:11:46.402] AUDIO-DIAG: ingress queuedBytes=12288 queuedMs=63 droppedBlocks=0 queueAgeMaxMs=122 workerMaxUs=52324
+[23:11:46.707] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=27838 count=784 slow=1 discontinuities=0 lockWaitMaxUs=190 workInclusiveMaxUs=280378 sealMaxUs=243517 sendMaxUs=36816 final=false
+[23:11:51.401] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5000 count=231 slow=3 discontinuities=2 lockWaitMaxUs=0 workInclusiveMaxUs=198440 sealMaxUs=23354 sendMaxUs=23467 final=false
+[23:11:51.422] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=4 queueAgeMaxMs=176 workerMaxUs=198460
+[23:11:54.975] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=8268 count=218 slow=1 discontinuities=0 lockWaitMaxUs=3 workInclusiveMaxUs=112498 sealMaxUs=49521 sendMaxUs=111564 final=false
+[23:11:56.411] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=5010 count=212 slow=5 discontinuities=3 lockWaitMaxUs=1 workInclusiveMaxUs=382307 sealMaxUs=45893 sendMaxUs=366361 final=false
+[23:11:56.455] AUDIO-DIAG: ingress queuedBytes=4096 queuedMs=21 droppedBlocks=25 queueAgeMaxMs=172 workerMaxUs=382318
+[23:11:58.936] AUDIO-DIAG: windowMs=30042 realFeeds=1370 admittedFeeds=1370 rejectedFeeds=0 udpPackets=3947 inputGapMaxMs=917 outputGapMaxMs=366 sendMaxUs=366361 silenceSubmissions=52 codec=PCM nextSeq=7940 nextSample=2794880
+[23:12:05.574] AUDIO-DIAG: windowMs=6638 realFeeds=310 admittedFeeds=310 rejectedFeeds=0 udpPackets=907 inputGapMaxMs=67 outputGapMaxMs=60 sendMaxUs=7445 silenceSubmissions=0 final=true codec=PCM
+[23:12:05.574] MEDIA-STAGE: audio packetSample=first-per-input-block windowMs=9163 count=429 slow=0 discontinuities=0 lockWaitMaxUs=1 workInclusiveMaxUs=24799 sealMaxUs=11630 sendMaxUs=5710 final=true

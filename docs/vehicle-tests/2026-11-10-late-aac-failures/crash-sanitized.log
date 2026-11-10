@@ -1,0 +1,11 @@
+# 独立异常附件摘要；后三份导出重复包含同一次异常，不是三次崩溃。
+# 不保留设备身份、进程ID和原协议负载；方法名定位，不用运行时行号替代bcef70f源码行号。
+2026-11-10 23:19:13 build=1.2.31-q4-debug/81e4fa7035dd thread=iap2-bt-client
+java.lang.InterruptedException
+java.util.concurrent.CountDownLatch.await
+io.github.shaonialife.carptocar.bt.BtProfiles.proxy
+io.github.shaonialife.carptocar.bt.BtProfiles.connectedNames
+io.github.shaonialife.carptocar.bt.BtProfiles.disconnectAddress
+io.github.shaonialife.carptocar.bt.BtProfiles.disconnect
+io.github.shaonialife.carptocar.bt.Iap2BluetoothClient.connectLoop
+SYSTEM EXIT 2026-11-10 23:19:13 reason=4 status=0 description=crash
