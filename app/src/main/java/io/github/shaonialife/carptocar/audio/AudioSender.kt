@@ -174,6 +174,7 @@ class AudioSender(
     /** 首个音频包标记（打完就清）；AAC 自检只跑一次。 */
     private var markerPending = true
     private var selfChecked = false
+    private val aacResampler = StreamingPcmResampler(sampleRate)
 
     /** 每包/每帧对应的 PCM 字节数（PCM 通路=一包的负载；AAC 通路=一帧的输入）。 */
     private val framePcmBytes: Int
@@ -598,7 +599,7 @@ class AudioSender(
     private fun processPcmLocked(srcPcm: ByteArray, size: Int, srcRate: Int, srcChannels: Int, gap: Boolean) {
         if (!running.get()) return
         if (gap) {
-            pcmFrames.clear(); if (codec == AudioCodec.AAC_LC) aacFrames.clear(); markerPending = true
+            pcmFrames.clear(); if (codec == AudioCodec.AAC_LC) { aacFrames.clear(); aacResampler.reset() }; markerPending = true
             // Count discontinuities in the bounded stage summary, preserving reset semantics.
         }
         if (codec == AudioCodec.PCM) {
@@ -613,9 +614,10 @@ class AudioSender(
         }
         // Same-rate stereo input is borrowed synchronously; only partial-frame tails are copied.
         if ((srcRate <= 0 || srcRate == sampleRate) && srcChannels != 1) {
+            aacResampler.reset()
             aacFrames.feed(srcPcm, size, forwardAacFrame)
         } else {
-            val aligned = alignPcm(srcPcm, size, srcRate, srcChannels)
+            val aligned = aacResampler.convert(srcPcm, size, srcRate.takeIf { it > 0 } ?: sampleRate, if (srcChannels == 1) 1 else 2)
             aacFrames.feed(aligned, aligned.size, forwardAacFrame)
         }
     }
