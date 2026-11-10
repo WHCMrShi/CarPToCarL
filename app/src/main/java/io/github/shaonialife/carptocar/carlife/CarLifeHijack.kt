@@ -189,9 +189,9 @@ object CarLifeHijack {
         private set
     @Volatile private var nowPlayingState: CarLifeNowPlayingState? = null
 
-    internal fun fallbackNowPlaying(): io.github.shaonialife.carptocar.iap2.CarPlayNowPlaying? {
+    internal fun fallbackNowPlaying(includeArtwork: Boolean = true): io.github.shaonialife.carptocar.iap2.CarPlayNowPlaying? {
         val (info, value) = nowPlayingState?.snapshot() ?: return null
-        return value.copy(artworkSource = artworkFor(info))
+        return if (includeArtwork) value.copy(artworkSource = artworkFor(info)) else value.copy(artworkSource = null)
     }
 
     /** 媒体信息变化监听（歌名/歌手变化时触发）。 */

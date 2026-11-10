@@ -70,15 +70,15 @@ internal object NavigationNowPlaying {
     @Synchronized fun receive(owner: Any, event: HudTurn) {
         if (source === owner) state.receive(owner, event, SystemClock.elapsedRealtime())
     }
-    @Synchronized fun value(): CarPlayNowPlaying? {
+    @Synchronized fun value(music: CarPlayNowPlaying?): CarPlayNowPlaying? {
         if (!selected) return null
         val view = state.display(SystemClock.elapsedRealtime())
         if (lastPhase != view.phase || lastActive != view.navigationActive) {
             lastPhase = view.phase; lastActive = view.navigationActive
-            log("NAV-MEDIA: phase=${view.phase} navigationActive=${view.navigationActive} endedDurationMs=${view.endedDurationMs}; progress=distance-percent paused=true")
+            log("NAV-MEDIA: phase=${view.phase} navigationActive=${view.navigationActive} endedDurationMs=${view.endedDurationMs}; album/progress=music artwork=navigation")
         }
         val bytes = view.icon
         val art = artwork.source("navigation-icon-${view.iconVersion}", view.iconVersion) { NavigationIcon.render(bytes, log) }
-        return view.nowPlaying(art)
+        return view.nowPlaying(art, music)
     }
 }

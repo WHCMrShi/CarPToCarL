@@ -372,14 +372,18 @@ object SessionController {
     private val nowPlayingLog = io.github.shaonialife.carptocar.util.LogThrottle(10_000)
 
     private fun buildNowPlaying(): CarPlayNowPlaying? {
-        io.github.shaonialife.carptocar.media.NavigationNowPlaying.value()?.let { return it }
+        val navigation = io.github.shaonialife.carptocar.media.NavigationNowPlaying.isNavigation()
         val session = MediaSessionsState.nowPlaying
         val system = session != null && session.title != null
-        val value = if (system) {
+        var value = if (system) {
             session!!.toCarPlayNowPlaying(android.os.SystemClock.elapsedRealtime())
         } else {
-            CarLifeHijack.fallbackNowPlaying()
+            CarLifeHijack.fallbackNowPlaying(includeArtwork = !navigation)
         }
+        io.github.shaonialife.carptocar.media.NavigationNowPlaying.value(value)?.let { return it }
+        // Selection may have changed while obtaining the snapshot. Restore the normal fallback
+        // as a whole, rather than attaching a potentially different track's cover to old fields.
+        if (navigation && !system) value = CarLifeHijack.fallbackNowPlaying()
         if (value != null && nowPlayingLog.allow("source")) {
             appendLog("NOWPLAYING-DIAG: source=${if (system) "MediaSession" else "CarLife"} durationMs=${value.durationMs} elapsedMs=${value.elapsedMs} status=${value.status}")
         }

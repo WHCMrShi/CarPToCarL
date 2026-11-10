@@ -5,13 +5,17 @@ import java.util.Locale
 /** Per-HU input, independent of the selected instrument display mode. No Android or transport IO. */
 data class HudTurn(val action: Int, val turn: Int, val road: String, val distance: Int, val icon: ByteArray?)
 internal data class NavigationDisplay(
-    val title: String, val album: String, val artist: String, val duration: Int,
-    val elapsed: Int, val icon: ByteArray?, val iconVersion: Long, val phase: String,
+    val title: String, val artist: String,
+    val icon: ByteArray?, val iconVersion: Long, val phase: String,
     val navigationActive: Boolean, val endedDurationMs: Long?,
 ) {
-    fun nowPlaying(artwork: ArtworkSource? = null) = io.github.shaonialife.carptocar.iap2.CarPlayNowPlaying(
-        title, artist, album, duration, io.github.shaonialife.carptocar.iap2.Iap2NowPlaying.STATUS_PAUSED,
-        elapsed, appName = "导航", artworkSource = artwork,
+    fun nowPlaying(artwork: ArtworkSource? = null, music: io.github.shaonialife.carptocar.iap2.CarPlayNowPlaying? = null) = io.github.shaonialife.carptocar.iap2.CarPlayNowPlaying(
+        title, artist, music?.title?.takeIf { it.isNotBlank() } ?: "暂无音乐",
+        music?.durationMs?.coerceAtLeast(0) ?: 0,
+        music?.status ?: io.github.shaonialife.carptocar.iap2.Iap2NowPlaying.STATUS_PAUSED,
+        music?.elapsedMs?.coerceIn(0, music.durationMs.coerceAtLeast(0)) ?: 0,
+        shuffleMode = music?.shuffleMode ?: 0, repeatMode = music?.repeatMode ?: 0,
+        appName = "导航", artworkSource = artwork,
     )
 }
 
@@ -24,6 +28,7 @@ internal class NavigationState {
     private var endAt: Long? = null
     private var pending: HudTurn? = null
     private var pendingAt = 0L
+    // These segment markers only retain the existing missing-icon policy, never media progress.
     private var pendingStart: Int? = null
     private var lastShow: HudTurn? = null
     private var lastShowAt = 0L
@@ -37,8 +42,8 @@ internal class NavigationState {
     @Synchronized fun clear() { reset(); owner = null }
     private fun reset() {
         active = false; startedAt = null; endedDurationMs = null; phase = "idle"; endAt = null
-        pending = null; segment = null; initial = 0; current = null; setImage(null)
-        pendingStart = null; lastShow = null
+        pending = null; current = null; setImage(null)
+        pendingStart = null; lastShow = null; segment = null; initial = 0
     }
     private fun activate(now: Long) {
         if (active) return
@@ -58,7 +63,7 @@ internal class NavigationState {
                 activate(now)
             } else if (event.distance == 0 && (phase != "end" || active || pending != null)) {
                 val duration = startedAt?.let { (now - it).coerceAtLeast(0) }
-                reset(); endedDurationMs = duration; phase = "end"; endAt = now + 5_000
+                reset(); endedDurationMs = duration; phase = "end"; endAt = now + 10_000
             }
             return
         }
@@ -107,16 +112,13 @@ internal class NavigationState {
         expire(now)
         val turn = current
         val guide = phase == "guide" && turn != null
-        val elapsed = if (guide && initial > 0) (((initial - turn!!.distance).toLong() * 100_000) / initial).coerceIn(0, 100_000).toInt() else 0
         return NavigationDisplay(
             title = if (guide) "${formatDistance(turn!!.distance)} ${turnName(turn.turn) ?: turn.road}" else when (phase) {
                 "end" -> "导航结束"
                 else -> "等待导航"
             },
-            album = if (guide) turn!!.road.ifBlank { BLANK } else BLANK,
-            artist = if (phase == "end") "驾驶时长：${endedDurationMs?.let(::formatDrivingDuration) ?: "--:--"}" else BLANK,
-            duration = if (guide && initial > 0) 100_000 else 0,
-            elapsed = elapsed, icon = image, iconVersion = imageVersion, phase = phase,
+            artist = if (guide) turn!!.road.ifBlank { BLANK } else if (phase == "end") "驾驶时长：${endedDurationMs?.let(::formatDrivingDuration) ?: "--:--"}" else BLANK,
+            icon = image, iconVersion = imageVersion, phase = phase,
             navigationActive = active, endedDurationMs = endedDurationMs,
         )
     }
