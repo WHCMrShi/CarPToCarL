@@ -313,6 +313,7 @@ class AirPlayClient(
      *
      * @return true = 端点确有变化（已切换）；false = 与当前一致，未做任何事
      */
+    @Synchronized
     fun updateEndpoint(
         newEndpoint: Iap2SenderSession.CarPlayEndpoint,
         reason: String,
@@ -323,7 +324,11 @@ class AirPlayClient(
                 old.airPlayPort == newEndpoint.airPlayPort &&
                 old.publicKey == newEndpoint.publicKey &&
                 old.deviceIdentifier == newEndpoint.deviceIdentifier
-        if (unchanged) return false
+        if (unchanged) {
+            // A fallback becoming an announced port changes provenance, not the live socket.
+            endpoint = newEndpoint
+            return false
+        }
         endpoint = newEndpoint
         endpointGeneration++
         val inFlight = pendingResponses.isNotEmpty()
@@ -340,6 +345,16 @@ class AirPlayClient(
         )
         if (!deferClose) close()
         return true
+    }
+
+    /** Do not let a refresh computed before a late 0x4301 overwrite that newer announcement. */
+    @Synchronized
+    private fun updateRefreshedEndpoint(
+        expected: Iap2SenderSession.CarPlayEndpoint,
+        refreshed: Iap2SenderSession.CarPlayEndpoint,
+    ): Boolean {
+        if (endpoint !== expected) return false
+        return updateEndpoint(refreshed, "配对期间 mDNS 刷新")
     }
 
     fun runPairing(windowMillis: Long = PAIRING_WINDOW_MILLIS): PairVerifyClient.ControlKeys? {
@@ -373,8 +388,9 @@ class AirPlayClient(
             attempt++
             // 每轮重试前吸收一次 mDNS 新结果：网关兜底地址连不通时，车机的
             // _airplay._tcp 可能已经在后台发现到，及时换过去比空转 120s 强。
-            endpointRefresher?.invoke(endpoint)?.let { refreshed ->
-                updateEndpoint(refreshed, "配对期间 mDNS 刷新")
+            val refreshBase = endpoint
+            endpointRefresher?.invoke(refreshBase)?.let { refreshed ->
+                updateRefreshedEndpoint(refreshBase, refreshed)
             }
             // 低频钩子：主控据此重新公告 ctrl mDNS（车机 Bonjour 可能漏掉首次公告）
             if (attempt == 1 || attempt % RETRY_TICK_ATTEMPTS == 0) {

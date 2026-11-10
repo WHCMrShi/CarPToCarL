@@ -1,5 +1,7 @@
 package io.github.shaonialife.carptocar
 
+import io.github.shaonialife.carptocar.net.AirPlayEndpointPorts
+
 import io.github.shaonialife.carptocar.util.SessionEpoch
 
 import android.content.Context
@@ -1520,7 +1522,7 @@ object SessionController {
         a.ssid == b.ssid && a.passphrase == b.passphrase && a.securityType == b.securityType
 
     private fun cachedEndpoint(wifi: Iap2SenderSession.WifiConfiguration) = Iap2SenderSession.CarPlayEndpoint(
-        wifi.ssid, wifi.passphrase, wifi.channel, wifi.securityType, 7000, null, null, null, emptyList(),
+        wifi.ssid, wifi.passphrase, wifi.channel, wifi.securityType, 0, null, null, null, emptyList(),
     )
 
     /** Invalidate only the cached attempt; the normal BT path stays available. */
@@ -3680,10 +3682,10 @@ object SessionController {
         var effective = endpoint
         val cached = endpointBrowser?.awaitEndpoint(0)
         if (cached != null) {
-            effective = mergeBrowserEndpoint(effective, cached, source, needPort = effective.airPlayPort <= 0)
+            effective = mergeBrowserEndpoint(effective, cached, source)
         }
         val needHost = !EndpointHosts.hasUsable(effective.ipAddresses)
-        val needPort = effective.airPlayPort <= 0
+        val needPort = !AirPlayEndpointPorts.valid(effective.airPlayPort)
         if (!needHost && !needPort) return effective
 
         phaseHint = "mDNS 解析车机地址…"
@@ -3695,7 +3697,7 @@ object SessionController {
             endpointBrowser?.awaitEndpoint(ENDPOINT_RESOLVE_WAIT_MS) ?: run {
                 // 兜底：热点场景车机 IP = 网关（Audi 实测 .1，但取网关更通用）。
                 // mDNS 在部分网络/机型上不稳定（2026-10-11 实测车机 mDNS 时有时无）；
-                // 网关地址 + 默认端口 7000 直接连，AirPlay 端口是固定约定。
+                // 网关 + 7000 仅是有界兜底；后续车机 mDNS 端口必须能够替换它。
                 //
                 // **必须收全部默认网关，不能只取一条**：2026-11-04 奥迪 4910 实测
                 // 默认路由里排第一的是 IPv6 链路本地 fe80::1086:…，只取首条就等于
@@ -3707,15 +3709,14 @@ object SessionController {
                         ">>> [$source] mDNS 未发现，兜底使用网关地址 ${gateways.joinToString(" / ")}:7000" +
                             "（车机热点网关=车机，${gateways.size} 个候选按 IPv4 优先）",
                     )
-                    return effective.copy(
+                    return AirPlayEndpointPorts.fallback(effective.copy(
                         ipAddresses = gateways + effective.ipAddresses,
-                        airPlayPort = if (needPort) 7000 else effective.airPlayPort,
-                    )
+                    ))
                 }
                 appendLog(">>> [$source] mDNS 未发现车机 AirPlay 服务（车机可能尚未启动无线会话）")
                 return effective
             }
-        return mergeBrowserEndpoint(effective, info, source, needPort)
+        return mergeBrowserEndpoint(effective, info, source)
     }
 
     /**
@@ -3727,7 +3728,6 @@ object SessionController {
         endpoint: Iap2SenderSession.CarPlayEndpoint,
         info: android.net.nsd.NsdServiceInfo,
         source: String,
-        needPort: Boolean,
     ): Iap2SenderSession.CarPlayEndpoint {
         var result = endpoint
         val address = info.host?.hostAddress
@@ -3738,9 +3738,7 @@ object SessionController {
             result = result.copy(ipAddresses = listOf(address) + result.ipAddresses)
             appendLog(">>> [$source] mDNS 解析到车机地址 $address:${info.port}")
         }
-        if (needPort && info.port > 0) {
-            result = result.copy(airPlayPort = info.port)
-        }
+        result = AirPlayEndpointPorts.fromMdns(result, info.port)
         // TXT 公钥兜底（pair-verify 校验用；0x4301 缺失时只能从这里拿）
         if (result.publicKey == null) {
             txtValue(info, "pk")?.let { result = result.copy(publicKey = it) }
@@ -3837,31 +3835,7 @@ object SessionController {
         source: String,
     ): Iap2SenderSession.CarPlayEndpoint? {
         val info = endpointBrowser?.awaitEndpoint(0) ?: return null
-        var result = endpoint
-        val address = info.host?.hostAddress
-        if (address != null &&
-            EndpointHosts.candidates(listOf(address)).isNotEmpty() &&
-            result.ipAddresses.none { EndpointHosts.stripScope(it) == EndpointHosts.stripScope(address) }
-        ) {
-            result = result.copy(ipAddresses = listOf(address) + result.ipAddresses)
-        }
-        if (result.airPlayPort <= 0 && info.port > 0) {
-            result = result.copy(airPlayPort = info.port)
-        }
-        if (result.publicKey == null) {
-            txtValue(info, "pk")?.let { result = result.copy(publicKey = it) }
-        }
-        if (result.deviceIdentifier == null) {
-            txtValue(info, "deviceid")?.let { result = result.copy(deviceIdentifier = it) }
-        }
-        if (result.sourceVersion == null) {
-            txtValue(info, "srcvers")?.let { result = result.copy(sourceVersion = it) }
-        }
-        if (result.advertisedFeatures == null) {
-            AirPlayFeatures.parse(txtValue(info, "features"))?.let {
-                result = result.copy(advertisedFeatures = it)
-            }
-        }
+        val result = mergeBrowserEndpoint(endpoint, info, source)
         if (result == endpoint) return null
         appendLog(
             ">>> [$source] 配对期间 mDNS 刷新端点 → " +
@@ -3887,8 +3861,7 @@ object SessionController {
         late: Iap2SenderSession.CarPlayEndpoint,
         fallback: Iap2SenderSession.CarPlayEndpoint,
     ): Iap2SenderSession.CarPlayEndpoint =
-        late.copy(
-            airPlayPort = if (late.airPlayPort > 0) late.airPlayPort else fallback.airPlayPort,
+        AirPlayEndpointPorts.preferAnnouncement(late, fallback).copy(
             ipAddresses = (late.ipAddresses + fallback.ipAddresses).distinct(),
             publicKey = late.publicKey ?: fallback.publicKey,
             deviceIdentifier = late.deviceIdentifier ?: fallback.deviceIdentifier,
