@@ -102,6 +102,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-local.ps1 -N
 
 新电脑首次拉取可用 `git clone --branch codex/audi-q4-etron https://github.com/WHCMrShi/CarPToCarL.git`，再进入目录执行准备/构建。工具链固定 JDK 17 / Gradle 8.10.2 / SDK 34 / Build Tools 34.0.0，Windows 细节见 [本机构建说明](../../local-build-windows.md)。不要将 `.tools/`、APK、原日志或密钥提交。
 
-APK 是 Debug 签名，applicationId 为 `io.github.shaonialife.carptocar`，versionCode `10231`、versionName `1.2.31-q4-debug`。另一台电脑新生成的 debug keystore 可能不同，不能覆盖已有安装；可以直接使用这次交付 APK，或在 Git 之外安全迁移自己原有的调试密钥。不要为了签名冲突直接清除应用数据。最终 APK 与交付记录在第一台电脑的 `dist/`，**不会随 Git 自动到另一台电脑**，需要另行复制。
+APK 是 Debug 签名，applicationId 为 `io.github.shaonialife.carptocar`，versionCode `10231`、versionName `1.2.31-q4-debug`。用户已确认两台电脑共用同一份 keystore，无需再次迁移签名；继续使用该密钥构建，交付记录保留最终 APK 的签名核验。最终 APK 与交付记录在第一台电脑的 `dist/`，**不会随 Git 自动到另一台电脑**，需要另行复制。
 
 后续继续在本分支提交、推送，不 force-push；文档与业务修复分开提交。每次实车新证据继续更新 [交互模型](../../q4-carplay-interaction-model.md)。
