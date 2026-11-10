@@ -198,7 +198,7 @@ class NavigationStateTest {
         for (id in listOf(6, 12)) assertArrayEquals(byteArrayOf(32, 32, 32, 0), fields.single { it.id == id }.value)
     }
     @Test fun unmappedShowAndUpdateUseRoadWithoutChangingIconOrProgress() {
-        for (code in listOf(25, 26, 999)) {
+        for (code in listOf(0, 25, 26, 27, 28) + (45..68) + listOf(-1, 77, 999)) {
             val state = NavigationState().apply { begin(owner) }
             state.receive(owner, event(1, code, "隧道道路", 1000, byteArrayOf(1)), 0)
             assertEquals("1.0公里 隧道道路", state.display(300).nowPlaying().title)
@@ -221,6 +221,47 @@ class NavigationStateTest {
             state.receive(owner, event(2, 25, road, 26), 0)
             assertEquals("26米 $road", state.display(300).nowPlaying().title)
         }
+    }
+
+    @Test fun extendedCarPlusActionsReachMediaTitleOnShowAndUpdate() {
+        val actions = mapOf(
+            32 to "靠左直行进入辅路", 33 to "靠右直行进入辅路",
+            34 to "靠左直行", 35 to "靠右直行",
+            36 to "左分叉直行", 37 to "中间分叉直行", 38 to "右分叉直行",
+            39 to "走左侧分叉进入辅路", 40 to "走中间分叉进入辅路", 41 to "走右侧分叉进入辅路",
+            42 to "左分叉直行进入辅路", 43 to "中间分叉直行进入辅路", 44 to "右分叉直行进入辅路",
+            69 to "前方驶出环岛", 70 to "左侧驶出环岛", 71 to "左后方驶出环岛", 72 to "左前方驶出环岛",
+            73 to "右侧驶出环岛", 74 to "右后方驶出环岛", 75 to "右前方驶出环岛", 76 to "环岛内掉头",
+        )
+        for ((code, text) in actions) {
+            val state = NavigationState().apply { begin(owner) }
+            state.receive(owner, event(1, code, "原始道路", 1000), 0)
+            assertEquals("code=$code", "1.0公里 $text", state.display(300).nowPlaying().title)
+            val icon = byteArrayOf(8, 9)
+            state.receive(owner, event(2, code, "下一道路", 500, icon), 1000)
+            val view = state.display(1300)
+            val media = view.nowPlaying()
+            assertEquals("code=$code", "500米 $text", media.title)
+            assertEquals("下一道路", media.album)
+            assertEquals(NavigationState.BLANK, media.artist)
+            assertEquals(100_000, media.durationMs)
+            assertEquals(50_000, media.elapsedMs)
+            assertArrayEquals(icon, view.icon)
+        }
+    }
+
+    @Test fun originalTurnActionsRemainUnchanged() {
+        val original = listOf(
+            "直行", "右前方转弯", "右转", "右后方转弯", "掉头",
+            "左后方转弯", "左转", "左前方转弯", "进入环岛", "出环岛",
+            "靠左行驶", "靠右行驶", "靠左进入主路", "左分叉直行", "靠右进入主路",
+            "右分叉直行", "分叉路走中间", "靠左驶入辅路", "靠右驶入辅路",
+            "走左侧分叉", "走右侧分叉", "走中间分叉", "出发点", "到达目的地",
+        )
+        for ((index, text) in original.withIndex()) assertEquals(text, NavigationState.turnName(index + 1))
+        assertEquals("进入轮渡", NavigationState.turnName(29))
+        assertEquals("离开轮渡", NavigationState.turnName(30))
+        assertEquals("经过收费站", NavigationState.turnName(31))
     }
 
 }
