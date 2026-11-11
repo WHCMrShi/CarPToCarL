@@ -69,12 +69,13 @@ object PanelWindow {
         heightFraction: Float?,
     ) {
         val metrics = activity.resources.displayMetrics
-        val width = (metrics.widthPixels * WIDTH_FRACTION).toInt()
+        val bounds = activity.windowManager.currentWindowMetrics.bounds
+        val width = (bounds.width() * WIDTH_FRACTION).toInt().coerceAtMost((560 * metrics.density).toInt())
         val height =
             if (heightFraction == null) {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             } else {
-                (metrics.heightPixels * heightFraction).toInt()
+                (bounds.height() * heightFraction).toInt()
             }
         dialog.window?.setLayout(width, height)
     }

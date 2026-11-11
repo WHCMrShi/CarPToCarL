@@ -3,7 +3,9 @@
      与「免责声明」「选择目标车机」同一套视觉：bg_dialog_panel + M3 令牌 + 胶囊按钮。
      系统 AlertDialog 默认浅色主题与本应用深色 UI 割裂（2026-10-18 真机暴露），
      需要提示框时统一走 DarkMessageDialog 而不是裸 AlertDialog。 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="@drawable/bg_dialog_panel"
@@ -12,7 +14,6 @@
     android:paddingTop="18dp"
     android:paddingEnd="18dp"
     android:paddingBottom="14dp">
-
     <TextView
         android:id="@+id/msgTitle"
         android:layout_width="match_parent"
@@ -20,7 +21,6 @@
         android:textColor="@color/m3_on_surface"
         android:textSize="17sp"
         android:textStyle="bold" />
-
     <!-- 正文：超长时滚动（最大 46% 屏高，由代码设上限），底部按钮始终可见 -->
     <ScrollView
         android:id="@+id/msgScroll"
@@ -28,16 +28,14 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:scrollbars="vertical">
-
         <TextView
             android:id="@+id/msgBody"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:lineSpacingExtra="4dp"
             android:textColor="@color/m3_on_var"
-            android:textSize="12.5sp" />
+            android:textSize="14sp" />
     </ScrollView>
-
     <LinearLayout
         android:id="@+id/msgActions"
         android:layout_width="match_parent"

@@ -10,7 +10,11 @@
         <item name="android:navigationBarColor">#000000</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
-        <item name="android:colorBackground">#101418</item>
+        <item name="android:colorBackground">@color/m3_surface</item>
+        <item name="android:windowBackground">@color/m3_surface</item>
+        <item name="android:forceDarkAllowed">false</item>
+        <item name="colorAccent">@color/m3_primary</item>
+        <item name="colorControlHighlight">@color/m3_ripple</item>
     </style>
 
     <!-- 车机桌面（dock/网格）：窗口透明——壁纸由 GL 合成器画在最底层，

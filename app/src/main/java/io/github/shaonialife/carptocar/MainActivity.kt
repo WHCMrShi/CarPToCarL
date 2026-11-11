@@ -808,15 +808,10 @@ class MainActivity : AppCompatActivity() {
         renderConsole(SessionController.logText())
 
         setUpUiControls()
-        // 以横屏启动时不会触发 onConfigurationChanged，这里按当前方向定一次排布。
-        // 首次调用时 contentArea 未测量（width=0，只能退回屏宽估算），
-        // 布局完成后再精确重算一次，避免英雄卡宽度与右栏让位差几个像素。
-        val startLandscape =
-            resources.configuration.orientation ==
-                android.content.res.Configuration.ORIENTATION_LANDSCAPE
-        applyContentLayout(startLandscape)
+        // 首次启动和窗口尺寸变化都按可用窗口宽度选择栏数。
+        applyContentLayout()
         findViewById<android.widget.FrameLayout>(R.id.contentArea).post {
-            if (!isFinishing && !isDestroyed) applyContentLayout(startLandscape)
+            if (!isFinishing && !isDestroyed) applyContentLayout()
         }
 
         // 免责声明：未接受当前版本时强制弹（不可取消、需倒计时 + 滑到底）。
@@ -916,19 +911,10 @@ class MainActivity : AppCompatActivity() {
         // ---- 连接准备 ----
         // 启动后自动连接：默认开启。打开 App 即发起连接，不必每次点英雄卡；
         // 需要手动控制连接启动时关掉它。
-        val autoConnectNote = findViewById<TextView>(R.id.autoConnectNote)
         val switchAutoConnect = findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.switchAutoConnect)
         switchAutoConnect.isChecked = AutoConnectPrefs.enabled(this)
-        autoConnectNote.text =
-            if (switchAutoConnect.isChecked) {
-                "打开 App 即自动发起连接（默认开启）"
-            } else {
-                "关闭后需手动点「启动连接」"
-            }
         switchAutoConnect.setOnCheckedChangeListener { _, checked ->
             AutoConnectPrefs.setEnabled(this, checked)
-            autoConnectNote.text =
-                if (checked) "打开 App 即自动发起连接（默认开启）" else "关闭后需手动点「启动连接」"
             log("AUTOCONNECT: 启动后自动连接已${if (checked) "开启" else "关闭"}")
         }
 
@@ -936,18 +922,8 @@ class MainActivity : AppCompatActivity() {
         // 前提是「目标车机」已指定——否则一律不动作，避免误连测试台/其它已配对设备。
         val switchCarApproach =
             findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.switchCarApproach)
-        val carApproachNote = findViewById<TextView>(R.id.carApproachNote)
-        fun renderCarApproachNote() {
-            val target = TargetDevicePrefs.get(this)
-            carApproachNote.text =
-                when {
-                    !switchCarApproach.isChecked -> "关闭后只在打开 App 时自动连接"
-                    target == null -> "未指定目标车机——先在下方「蓝牙配对」里选定车机"
-                    else -> "「${target.name}」靠近时自动打开 App 并连接（静默检测，不扫描）"
-                }
-        }
         switchCarApproach.isChecked = CarApproachPrefs.enabled(this)
-        renderCarApproachNote()
+
 
         // 开关默认就是开的，用户可能从没碰过它——进界面时按 7 天节流提醒一次。
         // 延后 3 秒且要求「免责声明已接受」，避免和首次启动的免责声明弹窗叠在一起。
@@ -965,7 +941,7 @@ class MainActivity : AppCompatActivity() {
         }
         switchCarApproach.setOnCheckedChangeListener { _, checked ->
             CarApproachPrefs.setEnabled(this, checked)
-            renderCarApproachNote()
+
             log(
                 "APPROACH: 靠近车机自动启动已${if (checked) "开启" else "关闭"}" +
                     (if (checked && TargetDevicePrefs.get(this) == null) "（尚未指定目标车机，暂不会触发）" else ""),
@@ -1349,9 +1325,19 @@ class MainActivity : AppCompatActivity() {
         ctaLabel.setTextColor(getColor(colorRes))
         ctaIcon.imageTintList =
             android.content.res.ColorStateList
-                .valueOf(getColor(colorRes))
+                .valueOf(getColor(if (bgRes == R.drawable.bg_cta_fill) R.color.q4_action_accent else colorRes))
         ctaIcon.setImageResource(iconRes)
         ctaLabel.text = label
+        ctaButton.contentDescription = label
+        ctaButton.accessibilityDelegate = object : View.AccessibilityDelegate() {
+            override fun onInitializeAccessibilityNodeInfo(
+                host: View,
+                info: android.view.accessibility.AccessibilityNodeInfo,
+            ) {
+                super.onInitializeAccessibilityNodeInfo(host, info)
+                info.className = android.widget.Button::class.java.name
+            }
+        }
         ctaButton.isEnabled = true
         ctaButton.alpha = if (blocked) CTA_BLOCKED_ALPHA else 1f
     }
@@ -1381,20 +1367,9 @@ class MainActivity : AppCompatActivity() {
         // 「使用车机 GPS」（默认开）：只控制要不要把车机 0xFFFB 定位转成 CarLife 0x18010。
         // 关掉即回到「完全用手机定位」，随时可来回切（下一条定位就按新值走）。
         val gpsSwitch = findViewById<SwitchCompat>(R.id.switchCarGps)
-        val gpsNote = findViewById<TextView>(R.id.carGpsNote)
         gpsSwitch.isChecked = CarGpsOption.enabled
-        if (!CarGpsOption.enabled) {
-            gpsNote.text = "已关闭：CarLife 只用手机自己的定位（不再接收车机 GPS）。"
-        }
         gpsSwitch.setOnCheckedChangeListener { _, checked ->
             CarGpsOption.save(ctx, checked)
-            gpsNote.text =
-                if (checked) {
-                    "车机有定位时把它的坐标转给 CarLife，车内手机信号差时更准；" +
-                        "车机只发无坐标样本时自动不发。"
-                } else {
-                    "已关闭：CarLife 只用手机自己的定位（不再接收车机 GPS）。"
-                }
             snack(if (checked) "已启用：使用车机 GPS" else "已关闭：只用手机定位")
         }
 
@@ -1583,8 +1558,7 @@ class MainActivity : AppCompatActivity() {
         dialog.setOnShowListener {
             // 面板自带圆角：窗口底色必须透明，否则四角露出方角
             dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-            val width = (resources.displayMetrics.widthPixels * PanelWindow.WIDTH_FRACTION).toInt()
-            dialog.window?.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+            PanelWindow.apply(dialog, this)
         }
         dialog.show()
         startTargetScan(dialog)
@@ -2461,41 +2435,36 @@ class MainActivity : AppCompatActivity() {
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         if (isFinishing || isDestroyed) return
-        applyContentLayout(landscape = newConfig.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
+        applyContentLayout()
         PanelWindow.resizeShowing(this)
-        // 目标车机弹窗不走 DarkMessageDialog，单独重算
-        targetPicker?.window?.let {
-            val width = (resources.displayMetrics.widthPixels * PanelWindow.WIDTH_FRACTION).toInt()
-            it.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
     }
 
     /**
-     * 内容区排布：竖屏单列（英雄卡与详情同在一个 ScrollView）⇄
-     * 横屏双栏（英雄卡**固定在左侧**，只有右侧详情列滚动）。
-     *
-     * 横屏为什么要把英雄卡移出 ScrollView：它和详情同属一个滚动容器时，
-     * 滑右栏会把英雄卡一起带走（用户实测反馈）。移入 [contentArea] 后它是固定层，
-     * 滚动只作用于 mainScroll；右侧内容通过 ScrollView 的左内边距让位。
-     *
-     * onCreate 也要调用一次——旋转不重建，但**以横屏启动**不会触发
-     * onConfigurationChanged。
+     * 窄窗口单栏，宽窗口双栏；大字体提高双栏阈值。
+     * 两栏分别滚动，短窗口里主操作也能滚到，不被裁掉。
      */
-    private fun applyContentLayout(landscape: Boolean) {
-        val contentArea = findViewById<android.widget.FrameLayout>(R.id.contentArea)
+    private fun applyContentLayout() {
         val scroll = findViewById<android.widget.ScrollView>(R.id.mainScroll)
         val row = findViewById<android.widget.LinearLayout>(R.id.contentRow)
         val hero = findViewById<android.widget.LinearLayout>(R.id.heroCard)
         val detail = findViewById<android.widget.LinearLayout>(R.id.detailColumn)
         val density = resources.displayMetrics.density
-        val gap = (12 * density).toInt()
+        val gap = (16 * density).toInt()
+        val windowWidth = resources.configuration.screenWidthDp
+        val landscape = windowWidth >= if (resources.configuration.fontScale > 1.3f) 840 else 600
+        val heroPane = findViewById<android.widget.ScrollView>(R.id.heroPane)
+        val page = findViewById<android.widget.LinearLayout>(R.id.pageColumn)
+        page.layoutParams = (page.layoutParams as android.widget.FrameLayout.LayoutParams).apply {
+            width = (windowWidth.coerceAtMost(1200) * density).toInt()
+            gravity = android.view.Gravity.CENTER_HORIZONTAL
+        }
         val padTop = ((if (landscape) 12 else 24) * density).toInt()
         val padBottom = ((if (landscape) 12 else 20) * density).toInt()
         hero.setPadding(hero.paddingStart, padTop, hero.paddingEnd, padBottom)
         if (landscape) {
             if (hero.parent === row) {
                 row.removeView(hero)
-                contentArea.addView(hero)
+                heroPane.addView(hero)
             }
             // 宽度用**屏幕宽减页面内边距**推算，不读 contentArea.width：
             // 旋转瞬间后者还是旧方向的测量值（竖屏 1168 → 英雄卡只有 537px，
@@ -2503,25 +2472,32 @@ class MainActivity : AppCompatActivity() {
             val pagePadding =
                 (16 * resources.displayMetrics.density * 2).toInt()
             val available =
-                (resources.displayMetrics.widthPixels - pagePadding).coerceAtLeast(1)
+                (windowWidth.coerceAtMost(1200) * density - pagePadding).toInt().coerceAtLeast(1)
             val heroWidth = (available * 0.46f).toInt().coerceAtLeast(1)
             // 高度必须 WRAP_CONTENT：FrameLayout 会把 MATCH_PARENT/WRAP 视作铺满，
             // 铺满会把按钮顶到卡片底缘、副标题挤成三行（真机截图暴露）
-            hero.layoutParams =
+            heroPane.visibility = View.VISIBLE
+            heroPane.layoutParams =
                 android.widget.FrameLayout
                     .LayoutParams(
                         heroWidth,
                         android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
                     ).apply { gravity = android.view.Gravity.START or android.view.Gravity.TOP }
             // 右侧内容让出英雄卡宽度（含间距）：滚动条仍在屏幕右缘
-            scroll.setPadding(heroWidth + gap, scroll.paddingTop, scroll.paddingEnd, scroll.paddingBottom)
+            hero.layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+            heroPane.layoutParams.height = android.view.ViewGroup.LayoutParams.MATCH_PARENT
+            scroll.setPaddingRelative(heroWidth + gap, scroll.paddingTop, 0, scroll.paddingBottom)
             (detail.layoutParams as android.widget.LinearLayout.LayoutParams).apply {
                 width = android.view.ViewGroup.LayoutParams.MATCH_PARENT
                 weight = 0f
             }
         } else {
-            if (hero.parent === contentArea) {
-                contentArea.removeView(hero)
+            heroPane.visibility = View.GONE
+            if (hero.parent === heroPane) {
+                heroPane.removeView(hero)
                 row.addView(
                     hero,
                     0,
@@ -2537,7 +2513,7 @@ class MainActivity : AppCompatActivity() {
                 topMargin = gap
                 marginEnd = 0
             }
-            scroll.setPadding(0, scroll.paddingTop, scroll.paddingEnd, scroll.paddingBottom)
+            scroll.setPaddingRelative(0, scroll.paddingTop, 0, scroll.paddingBottom)
             (detail.layoutParams as android.widget.LinearLayout.LayoutParams).apply {
                 width = android.view.ViewGroup.LayoutParams.MATCH_PARENT
                 weight = 0f

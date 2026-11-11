@@ -66,7 +66,7 @@ object DarkMessageDialog {
         bodyView.text = message
 
         val density = activity.resources.displayMetrics.density
-        val vertical = actions.size > 2
+        val vertical = actions.size > 2 || activity.resources.configuration.fontScale > 1.3f
         actionRow.orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
         actionRow.gravity = if (vertical) Gravity.END else Gravity.END or Gravity.CENTER_VERTICAL
 
@@ -126,7 +126,9 @@ object DarkMessageDialog {
     ): TextView =
         TextView(activity).apply {
             text = action.label
-            textSize = 13f
+            textSize = 14f
+            minimumHeight = (48 * density).toInt()
+            isFocusable = true
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             gravity = Gravity.CENTER
             val padH = (16 * density).toInt()
