@@ -323,27 +323,15 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    /** 「取消连接」确认弹窗（防误触）：中止当前连接尝试并断开蓝牙/WiFi 链路。 */
-    private fun promptCancelConnecting() {
-        DarkMessageDialog.show(
-            activity = this,
-            title = "取消连接？",
-            message = "将停止当前连接尝试：蓝牙与 WiFi 链路都会断开，需重新点「启动连接」。",
-            actions =
-                listOf(
-                    DarkMessageDialog.Action("继续连接") {},
-                    DarkMessageDialog.Action("取消连接", DarkMessageDialog.Emphasis.DANGER) {
-                        // 关闭仍在等待的「加入热点」确认弹窗（其 onChoice(null) 会与
-                        // connectCancelled 一起让 autoJoin 流程立即中止）
-                        wifiJoinDialog?.cancel()
-                        wifiJoinDialog = null
-                        // 用户主动取消：同样抑制「靠近车机」的自动拉起，避免取消后立刻又被唤起
-                        CarApproachPrefs.setSuppressed(this, true)
-                        pendingStartAfterPermission.set(false)
-                        SessionController.cancelConnecting(this)
-                    },
-                ),
-        )
+    private var cancelHold: io.github.shaonialife.carptocar.ui.HoldToCancel? = null
+
+    private fun cancelConnectingFromButton() {
+        if (heroState != HeroState.CONNECTING || SessionController.videoSender?.isRunning == true) return
+        wifiJoinDialog?.cancel()
+        wifiJoinDialog = null
+        CarApproachPrefs.setSuppressed(this, true)
+        pendingStartAfterPermission.set(false)
+        SessionController.cancelConnecting(this)
     }
 
     /**
@@ -940,11 +928,17 @@ class MainActivity : AppCompatActivity() {
                 HeroState.CONNECTED -> promptDisconnect()
                 // 前置检查：蓝牙权限/开关 → 音频选择（Shizuku 已移除，不再有硬门禁）
                 HeroState.IDLE -> proceedToConnect { ensureBluetoothReady { startConnectionNow() } }
-                // 连接中可取消：卡在错误网络/等待回连时用户主动脱身（弹窗防误触）
-                HeroState.CONNECTING -> promptCancelConnecting()
+                // 连接中仅由长按确认，短按不取消。
+                HeroState.CONNECTING -> Unit
                 null -> {}
             }
         }
+
+        cancelHold = io.github.shaonialife.carptocar.ui.HoldToCancel(
+            ctaButton,
+            allowed = { heroState == HeroState.CONNECTING && SessionController.videoSender?.isRunning != true },
+            confirm = { cancelConnectingFromButton() },
+        )
 
         // ---- 连接准备 ----
         // 启动后自动连接：默认开启。打开 App 即发起连接，不必每次点英雄卡；
@@ -1424,7 +1418,7 @@ class MainActivity : AppCompatActivity() {
             }
             HeroState.CONNECTING -> {
                 heroSubline.text = SessionController.phaseHint ?: DEFAULT_CONNECTING_HINT
-                styleCta(R.drawable.bg_cta_fill, R.color.m3_on_primary, R.drawable.ic_close, "取消连接")
+                styleCta(R.drawable.bg_cta_fill, R.color.m3_on_primary, R.drawable.ic_close, "长按取消连接")
                 audioTag.visibility = View.GONE
             }
             HeroState.CONNECTED -> {
@@ -1449,6 +1443,7 @@ class MainActivity : AppCompatActivity() {
         label: String,
         blocked: Boolean = false,
     ) {
+        cancelHold?.cancel()
         ctaButton.setBackgroundResource(bgRes)
         ctaLabel.setTextColor(getColor(colorRes))
         ctaIcon.imageTintList =
@@ -2687,12 +2682,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        cancelHold?.cancel()
         super.onPause()
         AppUiPresence.markPaused()
         mainHandler.removeCallbacks(heroTick)
     }
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) cancelHold?.cancel()
+    }
+
     override fun onDestroy() {
+        cancelHold?.cancel()
         super.onDestroy()
         // 强制声明不得随 Activity 销毁残留窗口（旋转时 Activity 重建，onResume 会续弹）
         runCatching { activeDisclaimer?.dismiss() }
