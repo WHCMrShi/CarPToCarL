@@ -1490,11 +1490,10 @@ class MainActivity : AppCompatActivity() {
             pendingBondAddress = null
             updateReadyRow()
         }
-        dialog.setOnShowListener {
-            // 面板自带圆角：窗口底色必须透明，否则四角露出方角
-            dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-            PanelWindow.apply(dialog, this)
-        }
+        // 首帧前完成内容和窗口尺寸初始化，扫描结果只改变列表内容。
+        dialog.create()
+        PanelWindow.apply(dialog, this, heightFraction = 0.85f)
+        view.requestFocus()
         dialog.show()
         startTargetScan(dialog)
     }
@@ -1565,14 +1564,14 @@ class MainActivity : AppCompatActivity() {
             )
         row.findViewById<TextView>(R.id.devName).apply {
             text = name
-            setTextColor(getColor(if (highlighted) R.color.q4_accent_text else R.color.m3_on_surface))
+            setTextColor(getColor(if (highlighted) R.color.q4_action_accent else R.color.m3_on_surface))
         }
         row.findViewById<TextView>(R.id.devAddr).text = address
         row.findViewById<TextView>(R.id.devAction).apply {
             // 当前项使用红色描边与对勾，避免只靠颜色区分选择状态。
             if (highlighted) {
                 text = "✓ $action"
-                setTextColor(getColor(R.color.q4_accent_text))
+                setTextColor(getColor(R.color.q4_action_accent))
                 background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_tbtn)
             } else {
                 text = action
@@ -1683,7 +1682,7 @@ class MainActivity : AppCompatActivity() {
         scannedTargets[address] = TargetPickerEntry(address, name, rssi, bonded = false)
         val list = dialog.findViewById<LinearLayout>(R.id.scannedList) ?: return
         // 扫描仍在继续：状态行保留并计数，用户知道还可以继续等其它设备。
-        // 刻意不走 updatePickerStatus——它会把列表滚到状态行，发现新设备时抢滚动位置。
+        // 发现新设备只更新计数，保持当前列表位置。
         dialog.findViewById<TextView>(R.id.scanStatus)?.apply {
             text = "继续扫描中…已发现 ${scannedTargets.size} 台未配对设备"
             setTextColor(getColor(R.color.m3_mono_dim))
@@ -1736,7 +1735,7 @@ class MainActivity : AppCompatActivity() {
      *
      * 弹窗是**独立窗口**（更高层级 + 全屏遮罩），Activity 里的 snackbar 必然被它盖住
      * ——用户只能看到底部一条被压暗的色块（2026-10-18 反馈）。系统 Toast 属更高窗口层，
-     * 能浮在弹窗之上；同时更新弹窗内的状态行（滚动到可见位置）作为长期可见的说明。
+     * 能浮在弹窗之上；同时更新弹窗内的状态行作为长期可见的说明。
      */
     private fun pickerNotice(message: String) {
         pickerToast(message)
@@ -1753,7 +1752,7 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    /** 更新弹窗内的状态行并滚动到可见位置（`scanStatus` 在「附近的设备」标题下）。 */
+    /** 更新扫描状态，不改变用户正在浏览的列表位置。 */
     private fun updatePickerStatus(
         message: String,
         warn: Boolean = false,
@@ -1763,33 +1762,6 @@ class MainActivity : AppCompatActivity() {
         status.text = message
         status.setTextColor(getColor(if (warn) R.color.m3_amber else R.color.m3_mono_dim))
         status.visibility = View.VISIBLE
-        // 状态行在视口外才滚动（用户在浏览上面的已配对列表时不该被抢走位置）。
-        status.post {
-            val scroll = dialog.findViewById<android.widget.ScrollView>(R.id.pickerScroll) ?: return@post
-            val content = scroll.getChildAt(0) ?: return@post
-            val top = offsetWithin(status, content)
-            val bottom = top + status.height
-            val visibleTop = scroll.scrollY
-            val visibleBottom = visibleTop + scroll.height
-            if (top < visibleTop || bottom > visibleBottom) {
-                val y = top - (12 * resources.displayMetrics.density).toInt()
-                scroll.smoothScrollTo(0, y.coerceAtLeast(0))
-            }
-        }
-    }
-
-    /** view 相对 ancestor 的内容偏移（沿父链累加 top；ancestor 必须是其祖先）。 */
-    private fun offsetWithin(
-        view: View,
-        ancestor: View,
-    ): Int {
-        var current: View? = view
-        var y = 0
-        while (current != null && current !== ancestor) {
-            y += current.top
-            current = current.parent as? View
-        }
-        return y
     }
 
     /** 配对状态变化：成功后设为目标并关弹窗；失败给出提示。 */

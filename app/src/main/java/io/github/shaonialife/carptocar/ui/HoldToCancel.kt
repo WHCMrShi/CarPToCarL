@@ -10,6 +10,8 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 
+private const val HOLD_DURATION_MS = 800L
+
 /** A deliberate hold; uses elapsed time so disabling animations cannot skip confirmation. */
 @SuppressLint("ClickableViewAccessibility")
 internal class HoldToCancel(
@@ -29,8 +31,8 @@ internal class HoldToCancel(
                 return
             }
             val elapsed = SystemClock.uptimeMillis() - start
-            progress?.level = (elapsed * 10_000 / 1_200).coerceIn(0, 10_000).toInt()
-            if (elapsed >= 1_200) {
+            progress?.level = (elapsed * 10_000 / HOLD_DURATION_MS).coerceIn(0, 10_000).toInt()
+            if (elapsed >= HOLD_DURATION_MS) {
                 cancel()
                 view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
                 confirm()

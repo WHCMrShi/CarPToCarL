@@ -256,71 +256,6 @@
                                         android:layout_marginStart="0dp"
                                         android:layout_weight="1"
                                         android:orientation="vertical">
-                                        <LinearLayout
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:gravity="center_vertical"
-                                            android:orientation="horizontal">
-                                            <TextView
-                                                android:layout_width="wrap_content"
-                                                android:layout_height="wrap_content"
-                                                android:text="蓝牙配对"
-                                                android:textColor="@color/m3_on_surface"
-                                                android:textSize="16sp" />
-                                        </LinearLayout>
-                                        <TextView
-                                            android:id="@+id/btDesc"
-                                            android:layout_width="wrap_content"
-                                            android:layout_height="wrap_content"
-                                            android:layout_marginTop="2dp"
-                                            android:text="与车机蓝牙配对后 · 连接自动回连"
-                                            android:textColor="@color/m3_on_var"
-                                            android:textSize="14sp" />
-                                        <LinearLayout
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:orientation="horizontal"
-                                            android:gravity="end|center_vertical">
-                                            <TextView
-                                                android:id="@+id/btnPickTarget"
-                                                android:layout_width="wrap_content"
-                                                android:layout_height="wrap_content"
-                                                android:layout_marginStart="0dp"
-                                                android:background="@drawable/bg_tbtn"
-                                                android:gravity="center"
-                                                android:paddingStart="10dp"
-                                                android:paddingTop="4dp"
-                                                android:paddingEnd="10dp"
-                                                android:paddingBottom="4dp"
-                                                android:text="选择设备"
-                                                android:textColor="@color/m3_primary"
-                                                android:textSize="14sp"
-                                                android:textStyle="bold"
-                                                android:minHeight="48dp"
-                                                android:focusable="true" />
-                                        </LinearLayout>
-                                    </LinearLayout>
-                                </LinearLayout>
-                                <View
-                                    android:layout_width="match_parent"
-                                    android:layout_height="1dp"
-                                    android:layout_marginStart="0dp"
-                                    android:background="@color/m3_outline_var" />
-                                <LinearLayout
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:gravity="center_vertical"
-                                    android:minHeight="60dp"
-                                    android:orientation="horizontal"
-                                    android:paddingTop="6dp"
-                                    android:paddingBottom="6dp">
-
-                                    <LinearLayout
-                                        android:layout_width="0dp"
-                                        android:layout_height="wrap_content"
-                                        android:layout_marginStart="0dp"
-                                        android:layout_weight="1"
-                                        android:orientation="vertical">
                                         <TextView
                                             android:layout_width="wrap_content"
                                             android:layout_height="wrap_content"
@@ -367,6 +302,71 @@
                                                 android:paddingEnd="12dp"
                                                 android:paddingBottom="9dp"
                                                 android:text="保存"
+                                                android:textColor="@color/m3_primary"
+                                                android:textSize="14sp"
+                                                android:textStyle="bold"
+                                                android:minHeight="48dp"
+                                                android:focusable="true" />
+                                        </LinearLayout>
+                                    </LinearLayout>
+                                </LinearLayout>
+                                <View
+                                    android:layout_width="match_parent"
+                                    android:layout_height="1dp"
+                                    android:layout_marginStart="0dp"
+                                    android:background="@color/m3_outline_var" />
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center_vertical"
+                                    android:minHeight="60dp"
+                                    android:orientation="horizontal"
+                                    android:paddingTop="6dp"
+                                    android:paddingBottom="6dp">
+
+                                    <LinearLayout
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="0dp"
+                                        android:layout_weight="1"
+                                        android:orientation="vertical">
+                                        <LinearLayout
+                                            android:layout_width="match_parent"
+                                            android:layout_height="wrap_content"
+                                            android:gravity="center_vertical"
+                                            android:orientation="horizontal">
+                                            <TextView
+                                                android:layout_width="wrap_content"
+                                                android:layout_height="wrap_content"
+                                                android:text="蓝牙配对"
+                                                android:textColor="@color/m3_on_surface"
+                                                android:textSize="16sp" />
+                                        </LinearLayout>
+                                        <TextView
+                                            android:id="@+id/btDesc"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_marginTop="2dp"
+                                            android:text="与车机蓝牙配对后 · 连接自动回连"
+                                            android:textColor="@color/m3_on_var"
+                                            android:textSize="14sp" />
+                                        <LinearLayout
+                                            android:layout_width="match_parent"
+                                            android:layout_height="wrap_content"
+                                            android:orientation="horizontal"
+                                            android:gravity="end|center_vertical">
+                                            <TextView
+                                                android:id="@+id/btnPickTarget"
+                                                android:layout_width="wrap_content"
+                                                android:layout_height="wrap_content"
+                                                android:layout_marginStart="0dp"
+                                                android:background="@drawable/bg_tbtn"
+                                                android:gravity="center"
+                                                android:paddingStart="10dp"
+                                                android:paddingTop="4dp"
+                                                android:paddingEnd="10dp"
+                                                android:paddingBottom="4dp"
+                                                android:text="选择设备"
                                                 android:textColor="@color/m3_primary"
                                                 android:textSize="14sp"
                                                 android:textStyle="bold"

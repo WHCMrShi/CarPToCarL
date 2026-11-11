@@ -3,5 +3,4 @@
     <size android:width="48dp" android:height="24dp" />
     <solid android:color="@color/m3_surface_highest" />
     <corners android:radius="999dp" />
-    <stroke android:width="2dp" android:color="@color/m3_outline" />
 </shape>
