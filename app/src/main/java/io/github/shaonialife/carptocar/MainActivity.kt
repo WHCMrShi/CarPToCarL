@@ -73,11 +73,11 @@ class MainActivity : AppCompatActivity() {
 
     /** 连接中的默认副标题（无阶段提示时）。 */
     private companion object {
-        const val DEFAULT_CONNECTING_HINT = "正在准备车机蓝牙与热点连接"
+        const val DEFAULT_CONNECTING_HINT = "正在准备连接…"
         const val KEY_DISCLAIMER_DEADLINE = "disclaimer_deadline"
 
         /** 本机蓝牙地址未填写：英雄卡副标题与输入框下方提示共用同一句。 */
-        const val HINT_MAC_MISSING = "本机蓝牙地址未填写 —— 请先在下方填写并保存"
+        const val HINT_MAC_MISSING = "请先保存本机蓝牙地址"
 
         /** 未填写时被拦下的 Snackbar 文案。 */
         const val TIP_MAC_MISSING = "本机蓝牙地址未填写 —— 请先在「连接准备」里填写并保存"
@@ -1241,7 +1241,7 @@ class MainActivity : AppCompatActivity() {
                 val macMissing = effectiveBluetoothMac() == null
                 heroSubline.text =
                     when {
-                        pending != null -> "上次会话异常退出，遗留 ${pending.size} 个虚拟屏待清理"
+                        pending != null -> "待清理 ${pending.size} 个残留屏"
                         macMissing -> HINT_MAC_MISSING
                         else -> HINT_IDLE_READY
                     }
@@ -1313,7 +1313,7 @@ class MainActivity : AppCompatActivity() {
                 .toString()
                 .trim()
                 .ifEmpty { "车机热点" }
-        heroSubline.text = String.format(Locale.US, "已连接 · %s · %02d:%02d · 视频推流中", ssid, mm, ss)
+        heroSubline.text = String.format(Locale.US, "已连接 · %02d:%02d · %s", mm, ss, ssid)
     }
 
     private fun bindDisplayCard() {
@@ -1375,35 +1375,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        btDesc.text = TargetDevicePrefs.get(this)?.name ?: "未指定车机"
         if (bondedCount >= 0) {
-            val target = TargetDevicePrefs.get(this)
-            if (bondedCount > 0) {
-                btDesc.text =
-                    if (target != null) {
-                        "目标「${target.name}」· 只向该设备发请求"
-                    } else if (bondedCount > 1) {
-                        "已配对 $bondedCount 台 · 未指定目标将逐个尝试"
-                    } else {
-                        "已与 $bondedCount 台设备配对 · 连接自动回连"
-                    }
-            } else {
-                btDesc.text = "尚未配对——点「选择设备」扫描并配对车机"
-            }
-            // 目标设备已不在已配对列表（如系统里删了配对）时提示重选
-            if (target != null && bondedCount > 0) {
-                val stillBonded =
-                    try {
-                        (getSystemService(Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager)
-                            .adapter
-                            ?.bondedDevices
-                            ?.any { TargetDevicePrefs.matches(target, it.address) } == true
-                    } catch (_: SecurityException) {
-                        true
-                    }
-                if (!stillBonded) {
-                    btDesc.text = "目标「${target.name}」已不在配对列表——请重新选择设备"
-                }
-            }
             // 弹窗内可扫描并直接配对未配对设备，因此不再只在「已有配对」时显示：
             // 一台都没配对时，这里正是用户的入口。
             btnPickTarget.visibility = View.VISIBLE
@@ -2061,8 +2034,7 @@ class MainActivity : AppCompatActivity() {
     private fun consoleMaxScroll(): Int {
         val layout = logText.layout ?: return 0
         return (
-            layout.getLineBottom(layout.lineCount - 1) +
-                logText.paddingBottom - logText.height
+            layout.height + logText.totalPaddingTop + logText.totalPaddingBottom - logText.height
         ).coerceAtLeast(0)
     }
 
@@ -2070,8 +2042,8 @@ class MainActivity : AppCompatActivity() {
     private fun consoleAtBottom(): Boolean = consoleMaxScroll() - logText.scrollY <= 40
 
     private fun scrollConsoleToBottom() {
-        // +16px 过冲补齐舍入差（控制台深色底，过冲不可见；View 不钳制但视觉无感）
-        logText.scrollTo(0, consoleMaxScroll() + 16)
+        // 短内容保持顶部；长内容仅滚到实际底部，不能侵入内边距。
+        logText.scrollTo(0, consoleMaxScroll())
         logText.post { updateLogBottomButton() }
     }
 
@@ -2079,9 +2051,12 @@ class MainActivity : AppCompatActivity() {
         // 改文本前已在底部（或用户上翻阅读中）：决定本次是否自动跟底
         val follow = consoleAtBottom()
         logText.text =
-            if (SessionController.logEnabled) text else "实时显示已关闭，文件日志仍会记录，可直接导出"
+            if (SessionController.logEnabled) text else "实时显示已关闭，文件日志仍在记录"
         logText.post {
-            if (follow) scrollConsoleToBottom() else updateLogBottomButton()
+            if (!SessionController.logEnabled) {
+                logText.scrollTo(0, 0)
+                updateLogBottomButton()
+            } else if (follow) scrollConsoleToBottom() else updateLogBottomButton()
         }
     }
 

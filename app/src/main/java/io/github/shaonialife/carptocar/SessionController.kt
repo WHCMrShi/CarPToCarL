@@ -1903,7 +1903,7 @@ object SessionController {
         // 新一次用户点击 = 新的 5 分钟等待预算（断链重连不再重置，见 pendingWaitBudgetStartedAt）
         pendingWaitBudgetStartedAt = 0L
         pendingWaitGaveUp = false
-        phaseHint = "正在连接车机蓝牙，等待车机响应…"
+        phaseHint = "正在连接车机蓝牙…"
         CarPlayService
             .start(context)
         // 能力发布先于连接（catplay 的做法：CarPlayCtrlServer 在会话一开始就常驻广播
@@ -2119,7 +2119,7 @@ object SessionController {
             lastWifiPsk = wifi.passphrase
             // 完整凭据留给「网络被动断开后自动重绑」用（见 onCarWifiLost）
             lastCarWifi = wifi
-            phaseHint = "已获取热点信息，准备连接车机热点…"
+            phaseHint = "正在准备连接热点…"
             appendLog(">>> 拿到车机热点凭据（0x5703）——立即绑定 WiFi + 广播 _carplay-ctrl")
             // ctrl 广播已在 startConnection 时发布（catplay：连接前保持发布能力在线）。
             // 这里登记 SSID 并让注册对齐一次（手机若已手动连在车机热点上、自动加入不可用
@@ -2156,7 +2156,7 @@ object SessionController {
             if (valid()) {
                 boundCarSsid = null
                 wifiLinkLost = true
-                phaseHint = "车机热点已断开（$label）"
+                phaseHint = "车机热点已断开"
                 accepted = true
             }
         }
@@ -2251,7 +2251,7 @@ object SessionController {
         val cancelled = { connectCancelled || !work.isCurrent }
         if (cancelled()) return WifiCarPlayConnector.JoinResult.Unavailable
         val connector = wifiConnector ?: return WifiCarPlayConnector.JoinResult.Unavailable
-        phaseHint = "正在加入车机热点 ${wifi.ssid}…（不影响移动数据）"
+        phaseHint = "正在加入车机热点…"
         val result = joinCarWifiOnce(connector, wifi, force, work)
         if (cancelled() || compatSuppressed) {
             appendLog("CONNECT-DIAG: retired WiFi join completion after cancellation")
@@ -2265,7 +2265,7 @@ object SessionController {
                     wifiLinkLost = false
                     appendLog("WIFI: 车机热点已重新绑定——网络恢复，本轮会话需重建后才生效")
                 }
-                phaseHint = "已加入车机热点，等待车机连接邀请…"
+                phaseHint = "等待车机连接邀请…"
                 // 关键时机：bindProcessToNetwork 完成后再注册，车机才能看到 ctrl 广播
                 ctrlAdvertiser?.ensureForNetwork(wifi.ssid, force = true, network = connector.currentNetwork)
                 appendLog(">>> WiFi 已就位（车机热点），ctrl 广播已重新注册，等待车机 ctrl 邀请")
@@ -2399,7 +2399,7 @@ object SessionController {
         val retry = joinCarWifiSpecifier(wifi, shellReady, force = true, work = work)
         work.runIfCurrent {
             if (!connectCancelled && !isStreaming() && !carWifiReady(wifi.ssid) && retry == WifiCarPlayConnector.JoinResult.Unavailable)
-                phaseHint = "未能加入车机热点，可从系统 WLAN 手动处理后重试"
+                phaseHint = "热点连接失败，请在 WLAN 中连接"
         }
         return retry
     }
@@ -2433,13 +2433,13 @@ object SessionController {
             }
 
             false -> {
-                phaseHint = "已取消——连接车机热点需要开启 WLAN"
+                phaseHint = "已取消，请先开启 WLAN"
                 appendLog("WIFI: 用户取消——自动加入中止（WiFi 未开启）")
                 return false
             }
 
             null -> {
-                phaseHint = "WiFi 未开启——连接车机热点需要开启 WLAN"
+                phaseHint = "请先开启 WLAN"
                 appendLog("WIFI: 弹窗无人应答——自动加入中止（WiFi 未开启）")
                 return false
             }
@@ -2447,7 +2447,7 @@ object SessionController {
         var waited = 0
         while (shellWifiDisabled() && waited < WLAN_WAIT_TIMEOUT_MS && !connectCancelled) {
             if (waited == 0) {
-                phaseHint = "等待打开 WLAN（最长 120 秒，取消连接可中止）"
+                phaseHint = "等待开启 WLAN…"
                 appendLog("WIFI: 等待用户打开 WLAN（最长 120 秒，取消连接可中止）")
             }
             Thread.sleep(2_000)
@@ -2458,7 +2458,7 @@ object SessionController {
             return false
         }
         if (shellWifiDisabled()) {
-            phaseHint = "WiFi 未开启——无法连接车机热点"
+            phaseHint = "请先开启 WLAN"
             appendLog("WIFI: 等待超时 WiFi 仍未开启——自动加入中止，请打开 WLAN 后重新连接")
             return false
         }
@@ -2503,7 +2503,7 @@ object SessionController {
                     is WifiCarPlayConnector.JoinResult.Joined -> Unit
                     WifiCarPlayConnector.JoinResult.Unsupported -> legacyJoinCarWifi(wifi, shellReady)
                     WifiCarPlayConnector.JoinResult.Unavailable -> {
-                        phaseHint = "未能加入车机热点——请到 WLAN 设置手动连接"
+                        phaseHint = "请在 WLAN 中连接车机热点"
                         appendLog("WIFI: 重试仍未加入 \"${wifi.ssid}\"——请到系统 WLAN 手动连接")
                     }
                 }
@@ -2513,7 +2513,7 @@ object SessionController {
 
             null -> {
                 if (!needed()) return
-                phaseHint = "未能加入车机热点——请重新连接"
+                phaseHint = "热点连接失败，请重试"
                 appendLog("WIFI: 弹窗无人应答——自动加入中止")
             }
         }
@@ -2527,7 +2527,7 @@ object SessionController {
         if (!needed()) return
         copyHotspotPsk(wifi.passphrase)
         openWlanSettings(needed)
-        phaseHint = "请在 WLAN 设置中连接 ${wifi.ssid}…"
+        phaseHint = "请在 WLAN 中连接车机热点"
         appendLog(
             "WIFI: 用户选择手动连接——等待 WLAN 连上 \"${wifi.ssid}\"（最长 120 秒）；" +
                 "注意：手动连接会把该热点保存为系统网络，若它没有互联网可能影响移动数据",
@@ -2543,7 +2543,7 @@ object SessionController {
             }
         }
         if (!needed()) return
-        phaseHint = "尚未连接 ${wifi.ssid}——自动加入已中止"
+        phaseHint = "热点未连接，自动加入已停止"
         appendLog("WIFI: 手动连接等待超时——自动加入中止")
     }
 
@@ -2557,7 +2557,7 @@ object SessionController {
         shellReady: Boolean,
     ) {
         if (!shellReady) {
-            phaseHint = "手机不在车机热点——请到 WLAN 设置加入 ${wifi.ssid}"
+            phaseHint = "请在 WLAN 中连接车机热点"
             appendLog(
                 ">>> 手机不在车机热点 \"${wifi.ssid}\" 且无法自动加入（需要手动在系统 WLAN 里连一次）——" +
                     "请到 系统设置>WLAN 手动加入（密码可点「去连接」复制）",
@@ -2588,11 +2588,11 @@ object SessionController {
             return
         }
         if (choice == null) {
-            phaseHint = "未能加入车机热点——请重新连接"
+            phaseHint = "热点连接失败，请重试"
             appendLog("WIFI: 弹窗无人应答——自动加入中止")
             return
         }
-        phaseHint = "正在自动加入车机热点 ${wifi.ssid}…"
+        phaseHint = "正在加入车机热点…"
         appendLog(
             ">>> 手机当前 WiFi: ${current ?: "未连接"}（非车机热点）——" +
                 "已自动切换到 \"${wifi.ssid}\"",
@@ -2604,14 +2604,14 @@ object SessionController {
             SysShell
                 .exec("cmd wifi connect-network ${shellQuote(wifi.ssid)} $security", 10_000L)
         if (!result.ok) {
-            phaseHint = "自动加入热点失败——请到 WLAN 设置加入 ${wifi.ssid}"
+            phaseHint = "请在 WLAN 中连接车机热点"
             appendLog(
                 "WIFI: connect-network 失败（${result.output.take(80).ifEmpty { "exit=${result.exitCode}" }}）" +
                     "——请到 系统设置>WLAN 手动加入（密码可点「去连接」复制）",
             )
             return
         }
-        phaseHint = "正在加入车机热点 ${wifi.ssid}…若被切回原 WiFi，请在 WLAN 中手动连接"
+        phaseHint = "正在加入车机热点…"
         appendLog("WIFI: connect-network 已发起（自动保存网络，等待切换…）")
         // 系统切换是异步的（断开当前网/扫描/关联/DHCP，2-10 秒）：轮询 SSID 确认。
         repeat(20) {
@@ -2632,7 +2632,7 @@ object SessionController {
             }
             Thread.sleep(800)
         }
-        phaseHint = "未能在热点驻留——请到 WLAN 设置手动连接 ${wifi.ssid}"
+        phaseHint = "热点已切走，请在 WLAN 中重连"
         uiHintSink?.invoke("未能在热点驻留——请到 WLAN 设置中主动连接 ${wifi.ssid}")
         appendLog(
             ">>> WiFi 自动加入超时（可能被系统切回原 WiFi）——" +
@@ -2669,12 +2669,12 @@ object SessionController {
         }
         work.runIfCurrent {
             if (bound && !cancelled()) {
-                phaseHint = "已加入车机热点，等待车机连接邀请…"
+                phaseHint = "等待车机连接邀请…"
                 // 关键时机：bindProcessToNetwork 完成后再注册，车机才能看到 ctrl 广播
                 ctrlAdvertiser?.ensureForNetwork(ssid, force = true, network = wifiConnector?.currentNetwork)
                 appendLog(">>> WiFi 已绑定车机热点，ctrl 广播已重新注册，等待车机 ctrl 邀请（随后才回 0x4301）")
             } else if (!cancelled()) {
-                phaseHint = "手机不在车机热点——请到 WLAN 设置加入 $ssid"
+                phaseHint = "请在 WLAN 中连接车机热点"
                 appendLog(
                     ">>> 等待 ${WIFI_BIND_WAIT_S}s 仍未绑定到 \"$ssid\"——" +
                         "请在 系统设置>WLAN 手动加入该热点后重新连接",
@@ -2911,7 +2911,7 @@ object SessionController {
             }
             // 英雄卡副标题同步：否则界面一直显示默认的「蓝牙 iAP2 握手 → …」，
             // 用户看到的是「一直在握手」，实际早已连上、在等车机下发凭据。
-            phaseHint = "已连上车机，正在等它下发热点信息（最多 ${PENDING_START_SESSION_WAIT_MS / 60_000} 分钟）· 请保持 Wi-Fi 开启"
+            phaseHint = "等待车机热点信息…"
             appendLog(
                 ">>> [$source] 进入保活等待：车机声明会发 0x4301 但窗口内未到。" +
                     "蓝牙链路保持（最多 ${PENDING_START_SESSION_WAIT_MS / 60_000} 分钟，从点「启动连接」算起），" +
@@ -3005,7 +3005,7 @@ object SessionController {
             }
             if (!cancelled() && !sessionStarting.get() && pendingWatchGeneration.get() == generation) {
                 pendingWaitGaveUp = true
-                phaseHint = "未收到车机热点信息，本次连接已停止"
+                phaseHint = "未收到热点信息，连接已停止"
                 appendLog(
                     ">>> [$source] 空端点等待 ${PENDING_START_SESSION_WAIT_MS / 60_000} 分钟超时——" +
                         "车机始终未下发 0x4301（0x4300 各种报文体都试过了，见上方「0x4300 报文体形态」与" +
@@ -3704,7 +3704,7 @@ object SessionController {
         val needPort = !AirPlayEndpointPorts.valid(effective.airPlayPort)
         if (!needHost && !needPort) return effective
 
-        phaseHint = "正在查找车机 CarPlay 服务…"
+        phaseHint = "正在查找 CarPlay…"
         appendLog(">>> [$source] 0x4301 端点不完整（port=${effective.airPlayPort} ips=${effective.ipAddresses}），取 mDNS 车机 _airplay._tcp…")
         // 用常驻发现器的缓存（绑网时已开始后台发现，通常此时已命中）。
         // 此前现起一次发现并硬重试 3×6s：车机 mDNS 稳定时白等，不稳定时又拖满 18s。
@@ -4250,7 +4250,7 @@ object SessionController {
                 ">>> [$source] 端点无 AP 信息（车机未在窗口内下发 0x4301）——蓝牙保持保活等待晚到 0x4301；" +
                     "检测到手机已连 WiFi 时会询问是否按车机热点继续",
             )
-            phaseHint = "等待车机提供连接信息…"
+            phaseHint = "等待车机连接信息…"
             finishAttempt()
             watchForPendingStartSession(endpoint, source, setup)
             return
@@ -4263,7 +4263,7 @@ object SessionController {
         // 解冻恢复只能靠这份快照重走交接（见 onProcessResumed）。
         if (!mutate {
             lastGoodEndpoint = endpoint
-            phaseHint = "正在确认车机热点地址…"
+            phaseHint = "正在确认热点地址…"
             ssidSink?.invoke(endpoint.ssid)
         }) return
         // 0x4301 同样带热点密码（BMW iD9 不发 0x5703，AP 信息只走这条路）。
@@ -4329,7 +4329,7 @@ object SessionController {
             }
             appendLog("CONNECT-DIAG: $flowScope network-bound result=$bound source=$source network=${wifiConnector?.currentNetwork}")
             if (!bound) {
-                phaseHint = "手机不在车机热点——请到 WLAN 设置加入 ${endpoint.ssid}"
+                phaseHint = "请在 WLAN 中连接车机热点"
                 appendLog(">>> [$source] 手机当前不在该热点——请到 设置>WLAN 加入 \"${endpoint.ssid}\" 后断开重连")
                 // 这一轮到此为止（没有配对线程会接手），必须自己收尾，否则只有「本轮开始」。
                 connectBudget.end(
@@ -4403,7 +4403,7 @@ object SessionController {
                     var lastWakeAt = 0L
                     val wakeCarPlayWindow: (Int) -> Unit = { refused ->
                         mutate {
-                            phaseHint = "连接 CarPlay 服务连续失败，可在车机上主动连接"
+                            phaseHint = "连接失败，请从车机发起"
                             val now = android.os.SystemClock.uptimeMillis()
                             if (wakeCount < CARPLAY_WAKE_MAX_TIMES && now - lastWakeAt >= CARPLAY_WAKE_GAP_MS) {
                                 lastWakeAt = now
@@ -4514,7 +4514,7 @@ object SessionController {
                     // （典型：连着 DiPlay 测试台时不再噪音式探测 Audi）。会话结束/断开时解除。
                     mutate { BtSessionGate.sessionActive = true }
                     // 第一阶段：保持 BT 在位直接配对 + SETUP（协议上正确的形态）
-                    phaseHint = "正在验证 CarPlay 连接…"
+                    phaseHint = "正在验证 CarPlay…"
                     connectBudget.enter(ConnectStage.PAIRING)
                     var client = newClient()
                     if (attemptCancelled()) { client.dispose(); return@run }
@@ -4660,7 +4660,7 @@ object SessionController {
                             pairingTerminal = client.pairingTerminal,
                         ).usePlainSession
                     if (plainSession) {
-                        phaseHint = "正在建立 CarPlay 会话…"
+                        phaseHint = "正在建立 CarPlay…"
                         appendLog(
                             "AIRPLAY: 配对不可用（${if (client.pairingUnsupported) "接收端不支持" else "配对失败"}）" +
                                 "——改用 et=NONE 明文会话 + AES-CTR 屏幕流（catplay 接收端分类 1/2）",
@@ -4696,7 +4696,7 @@ object SessionController {
                     }
                     if (pairedKeys != null) PairingMemory.clear(context)
                     if (pairedKeys != null || plainSession) {
-                        phaseHint = if (pairedKeys != null) "验证完成，正在建立画面与音频通道…" else "正在建立 CarPlay 会话…"
+                        phaseHint = if (pairedKeys != null) "正在建立影音通道…" else "正在建立 CarPlay…"
                         if (pairedKeys != null) {
                             appendLog(
                                 "AIRPLAY: ✓ 配对完成 writeKey=" +
@@ -4954,7 +4954,7 @@ object SessionController {
                                     "AIRPLAY: 本轮不再按手机尺寸兜底硬推——请重启车机侧 CarPlay" +
                                         "（中控把 CarPlay 关掉再打开，或熄火重上电）后重连",
                                 )
-                                phaseHint = "车机侧 CarPlay 服务异常，请重启车机"
+                                phaseHint = "CarPlay 异常，请重启车机"
                                 uiHintSink?.invoke(
                                     "车机侧 CarPlay 服务异常（只答应了 SETUP，事件口/信息口都不通）——" +
                                         "请在车机上把 CarPlay 关掉再打开后重试",
@@ -5362,7 +5362,7 @@ object SessionController {
                                         "、/info " + (if (setup.displayFromCar) "有 displays" else "无 displays") +
                                         "）；若反复如此请在车机上重启 CarPlay",
                                 )
-                                phaseHint = "车机未接受画面连接，请重新连接"
+                                phaseHint = "车机拒绝画面连接，请重试"
                                 uiHintSink?.invoke("车机拒绝了屏幕流（SETUP）——若反复如此请重启车机侧 CarPlay")
                                 runCatching { client.close() }
                             }
@@ -5371,7 +5371,7 @@ object SessionController {
                             // AirPlayClient.runSetup 的 deviceID 说明）。主动关闭控制通道：
                             // 否则接收端要等约 45s 视频超时才拆 BT 链路，用户只看到
                             // 「连上之后自动断开」，无从判断是会话建立失败。
-                            phaseHint = "车机未接受 CarPlay 会话，请重新连接"
+                            phaseHint = "车机拒绝会话，请重试"
                             appendLog("AIRPLAY: 会话建立失败——主动关闭控制通道，本轮结束")
                             uiHintSink?.invoke("接收端拒绝了会话建立（SETUP）——请查看日志中的 deviceID 提示")
                             runCatching { client.close() }
@@ -5516,14 +5516,14 @@ object SessionController {
             }
             if (android.os.SystemClock.uptimeMillis() - lastHintAt > 5_000) {
                 lastHintAt = android.os.SystemClock.uptimeMillis()
-                phaseHint = "等待手机加入车机热点 ${wifi.ssid}…"
+                phaseHint = "等待加入车机热点…"
                 appendLog("WIFI: 等待用户在系统 WLAN 中加入车机热点（当前 ${current ?: "未连接"}）…")
                 openWlanSettings()
             }
             Thread.sleep(1_000)
         }
         if (!cancelled()) {
-            phaseHint = "手机不在车机热点——请到 WLAN 设置加入 ${wifi.ssid}"
+            phaseHint = "请在 WLAN 中连接车机热点"
             appendLog(">>> 等待车机热点超时——请到 设置>WLAN 加入 \"${wifi.ssid}\" 后重新连接")
             uiHintSink?.invoke("未连上车机热点 \"${wifi.ssid}\"——请到 WLAN 设置中主动连接")
         }

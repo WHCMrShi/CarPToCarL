@@ -104,11 +104,12 @@
                             </LinearLayout>
                             <TextView
                                 android:id="@+id/heroSubline"
-                                android:layout_width="wrap_content"
+                                android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="7dp"
                                 android:gravity="center"
-                                android:maxWidth="300dp"
+                                android:lines="1"
+                                android:ellipsize="end"
                                 android:text="点击下方按钮发起连接"
                                 android:textColor="@color/m3_on_var"
                                 android:textSize="14sp"
@@ -338,16 +339,24 @@
                                             <TextView
                                                 android:layout_width="wrap_content"
                                                 android:layout_height="wrap_content"
-                                                android:text="蓝牙配对"
+                                                android:text="车机蓝牙"
                                                 android:textColor="@color/m3_on_surface"
                                                 android:textSize="16sp" />
                                         </LinearLayout>
                                         <TextView
                                             android:id="@+id/btDesc"
-                                            android:layout_width="wrap_content"
+                                            android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
-                                            android:layout_marginTop="2dp"
-                                            android:text="与车机蓝牙配对后 · 连接自动回连"
+                                            android:layout_marginTop="12dp"
+                                            android:enabled="false"
+                                            android:background="@drawable/bg_input_locked"
+                                            android:paddingStart="10dp"
+                                            android:paddingEnd="10dp"
+                                            android:paddingTop="6dp"
+                                            android:paddingBottom="6dp"
+                                            android:minHeight="48dp"
+                                            android:gravity="center_vertical"
+                                            android:text="未指定车机"
                                             android:textColor="@color/m3_on_var"
                                             android:textSize="14sp" />
                                         <LinearLayout
@@ -406,10 +415,18 @@
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
                                             android:layout_marginTop="12dp"
+                                            android:enabled="false"
+                                            android:background="@drawable/bg_input_locked"
+                                            android:paddingStart="10dp"
+                                            android:paddingEnd="10dp"
+                                            android:paddingTop="6dp"
+                                            android:paddingBottom="6dp"
+                                            android:minHeight="48dp"
+                                            android:gravity="center_vertical"
                                             android:hint="等待车机提供热点名称"
                                             android:textColor="@color/m3_on_var"
                                             android:textColorHint="@color/m3_on_var"
-                                            android:textSize="16sp" />
+                                            android:textSize="14sp" />
 
                                         <LinearLayout
                                             android:layout_width="match_parent"
@@ -550,13 +567,6 @@
                                             android:text="运行日志"
                                             android:textColor="@color/m3_on_surface"
                                             android:textSize="16sp" />
-                                        <TextView
-                                            android:layout_width="wrap_content"
-                                            android:layout_height="wrap_content"
-                                            android:layout_marginTop="2dp"
-                                            android:text="最近日志 · 可导出文件反馈问题"
-                                            android:textColor="@color/m3_on_var"
-                                            android:textSize="14sp" />
                                     </LinearLayout>
                                     <ImageView
                                         android:id="@+id/logChevron"
@@ -633,7 +643,6 @@
                                             android:id="@+id/logText"
                                             android:layout_width="match_parent"
                                             android:layout_height="172dp"
-                                            android:layout_marginTop="10dp"
                                             android:background="@drawable/bg_console"
                                             android:fadeScrollbars="true"
                                             android:fontFamily="monospace"

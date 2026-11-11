@@ -17,9 +17,9 @@
     <color name="m3_on_pri_container">#F2F2F2</color>
     <color name="m3_sec_container">#333333</color>
     <color name="m3_on_sec_container">#E5E5E5</color>
-    <color name="m3_error">#FFB4AB</color>
-    <color name="m3_err_container">#432322</color>
-    <color name="m3_on_err_container">#FFDAD6</color>
+    <color name="m3_error">@color/q4_action_accent</color>
+    <color name="m3_err_container">#1FF50537</color>
+    <color name="m3_on_err_container">@color/q4_action_accent</color>
     <color name="m3_inverse">#E5E5E5</color>
     <color name="m3_on_inverse">#1A1A1A</color>
     <color name="m3_wave_idle">#39484A</color>
@@ -36,5 +36,4 @@
     <color name="m3_ripple">#24FFFFFF</color>
     <color name="m3_hold_overlay">#33000000</color>
     <color name="q4_action_accent">#F50537</color>
-    <color name="q4_accent_text">#FF8597</color>
 </resources>

@@ -272,7 +272,7 @@ class DockActivity : AppCompatActivity() {
                             }
                     }
                 }
-                fill.setBackgroundColor(if (percent <= 20) 0xFFFF6B6B.toInt() else 0xFF34C759.toInt())
+                fill.setBackgroundColor(if (percent <= 20) getColor(R.color.q4_action_accent) else 0xFF34C759.toInt())
             }
         }
     }

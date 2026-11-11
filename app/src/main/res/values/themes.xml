@@ -13,7 +13,7 @@
         <item name="android:colorBackground">@color/m3_surface</item>
         <item name="android:windowBackground">@color/m3_surface</item>
         <item name="android:forceDarkAllowed">false</item>
-        <item name="colorAccent">@color/m3_primary</item>
+        <item name="colorAccent">@color/q4_action_accent</item>
         <item name="colorControlHighlight">@color/m3_ripple</item>
     </style>
 
