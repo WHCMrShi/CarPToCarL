@@ -29,6 +29,10 @@ import java.util.concurrent.TimeUnit
  * 上下文），查询恒为「未连接」，反而掩盖真实状态。故固定在应用进程内做。
  */
 object BtProfiles {
+    private val operationScope = BtProfileOperationScope()
+    internal fun invalidatePendingOperations() = operationScope.invalidate()
+    internal fun captureOperation(current: () -> Boolean = { true }): BtProfileOperation =
+        operationScope.capture(BtSessionGate.links, current)
     /** 守卫一直拿不到对端地址时，空转多久就收工（毫秒）。 */
     private const val NO_PEER_GIVE_UP_MILLIS = 60_000L
 
@@ -72,11 +76,12 @@ object BtProfiles {
     /**
      * 尽力断开该设备的全部配置文件连接。
      *
-     * @return 断开前在线的配置文件（空 = 本来就没连接，无需任何动作）
+     * @return 已尝试提交配置级断开的名称；不表示系统已完成断开。
      */
-    fun disconnect(
+    internal fun disconnect(
         context: Context,
         device: BluetoothDevice,
+        operation: BtProfileOperation,
     ): List<String> {
         val address =
             try {
@@ -84,32 +89,31 @@ object BtProfiles {
             } catch (_: SecurityException) {
                 return emptyList()
             }
-        return disconnectAddress(context, address, device)
+        return disconnectAddress(context, address, operation, device)
     }
 
     /** 同 [disconnect]，只给地址（守卫按地址轮询时用）。 */
-    fun disconnectAddress(
+    private fun disconnectAddress(
         context: Context,
         address: String,
+        operation: BtProfileOperation,
         deviceHint: BluetoothDevice? = null,
     ): List<String> {
-        val before = connectedNames(context, address)
-        if (Thread.currentThread().isInterrupted) return emptyList()
-        if (before.isEmpty()) return emptyList()
         val device = deviceHint ?: remoteDevice(context, address)
-        for (id in profiles) {
-            if (Thread.currentThread().isInterrupted) return before
-            if (profileName(id) !in before) continue
-            val proxy = proxy(context, id)
-            if (!Thread.currentThread().isInterrupted && proxy != null && device != null) disconnectProfile(proxy, device)
-        }
-        if (!awaitDisconnected(context, address, 1_500L) && !Thread.currentThread().isInterrupted && device != null) {
-            // 配置级断开未生效（个别 ROM 限流）：设备级断开兜底（@hide，同样只要求
-            // BLUETOOTH_CONNECT）。车载/耳机当前连接的设备可能被一并断开，属预期。
-            runCatching { BluetoothDevice::class.java.getMethod("disconnect").invoke(device) }
-            awaitDisconnected(context, address, 500L)
-        }
-        return before
+        if (device == null) return emptyList()
+        return disconnectProfilesForOperation(
+            operation,
+            connected = { connectedNames(context, address) },
+            prepareDisconnect = { name ->
+                val id = profiles.first { profileName(it) == name }
+                proxy(context, id)?.let { service -> { disconnectProfile(service, device); Unit } }
+            },
+            awaitDisconnected = { timeout, current -> awaitDisconnected(context, address, timeout, current) },
+            disconnectDevice = {
+                // Never tear down an active RFCOMM owner, even if this profile operation began on that owner.
+                runCatching { BluetoothDevice::class.java.getMethod("disconnect").invoke(device) }
+            },
+        )
     }
 
     /**
@@ -155,14 +159,13 @@ object BtProfiles {
                 }
             } else {
                 idlePolls = 0
-                val before = connectedNames(context, address)
-                if (before.isNotEmpty()) {
-                    val dropped = disconnectAddress(context, address)
+                val operation = captureOperation { !shouldStop() && address.equals(addressProvider(), true) }
+                if (operation.isCurrent()) {
+                    val dropped = disconnectAddress(context, address, operation)
                     if (dropped.isNotEmpty()) {
                         drops++
                         onEvent(
-                            "BT-GUARD: 车机把 ${dropped.joinToString("/")} 拉回来了 → " +
-                                "再次断开（第 $drops 次）",
+                            "BT-GUARD: 已请求断开 ${dropped.joinToString("/")}（第 $drops 次；系统完成状态另核对）",
                         )
                     }
                 }
@@ -186,10 +189,13 @@ object BtProfiles {
         context: Context,
         address: String,
         timeoutMillis: Long,
+        current: () -> Boolean,
     ): Boolean {
         val deadline = SystemClock.uptimeMillis() + timeoutMillis
-        while (!Thread.currentThread().isInterrupted && SystemClock.uptimeMillis() < deadline) {
-            if (connectedNames(context, address).isEmpty()) return true
+        while (current() && SystemClock.uptimeMillis() < deadline) {
+            val disconnected = connectedNames(context, address).isEmpty()
+            if (!current()) return false
+            if (disconnected) return true
             try {
                 Thread.sleep(120)
             } catch (_: InterruptedException) {
@@ -197,7 +203,7 @@ object BtProfiles {
                 return false
             }
         }
-        return !Thread.currentThread().isInterrupted && connectedNames(context, address).isEmpty()
+        return current() && connectedNames(context, address).isEmpty() && current()
     }
 
     @SuppressLint("MissingPermission")

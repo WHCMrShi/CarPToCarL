@@ -417,12 +417,22 @@ class Iap2BluetoothClient(
                 continue
             }
             var connected: BluetoothSocket? = null
+            var connectedOperation: BtProfileOperation? = null
+            var connectedCallbacks: BtSessionCallbacks? = null
             // 本轮有几台设备是「SDP 层就没连上」（不是被拒、不是超时）。累计到
             // [PASSIVE_FALLBACK_ROUNDS] 轮就切被动方向（车机主动连入）。
             var sdpLookupFailures = 0
             for (device in candidates) {
                 if (!running || generation.get() != myGeneration) return
                 if (!dialAllowed(device)) break
+                val callbacks = callbackFactory?.invoke() ?: BtSessionCallbacks(
+                    onEndpoint = { value, _ -> onEndpoint(value) }, onWifi = { value, _ -> onWifiCredentials(value) },
+                    onUpdate = { value, _ -> onEndpointUpdate(value) }, onClosed = onLinkClosed,
+                )
+                // Keep the same fence across SDP, both dials and profile waits; never recapture after waiting.
+                val operation = BtProfiles.captureOperation {
+                    generation.get() == myGeneration && callbacks.current() && dialAllowed(device)
+                }
                 val name =
                     try {
                         device.name
@@ -454,15 +464,16 @@ class Iap2BluetoothClient(
                     // 探通=它就是车机（自动模式不再误杀，这是 2026-10-26 凯迪拉克日志的病根）；
                     // 探不通再看是不是「蓝牙已连接时不开放服务窗口」的机型（奥迪实测），
                     // 此时才断开配置文件重试一次——耳机类设备永远不会被我们断掉音频。
-                    var probe = tryConnect(device)
+                    var probe = tryConnect(device, operation)
                     if (probe == null && !looksLikePersonalAudio(device)) {
-                        if (!dialAllowed(device)) break
-                        val dropped = BtProfiles.disconnect(context, device)
+                        if (!operation.isCurrent()) break
+                        val dropped = BtProfiles.disconnect(context, device, operation)
                         if (dropped.isNotEmpty()) {
                             log("BT-C: $name SDP 未给结论、直连失败——已断开 ${dropped.joinToString("/")} 再试一次")
                         }
-                        probe = tryConnect(device)
+                        probe = tryConnect(device, operation)
                     }
+                    if (!operation.isCurrent()) { probe?.let { currentSocket.compareAndSet(it, null); runCatching { it.close() } }; break }
                     if (probe == null) {
                         iap2ServiceCache[device.address] = false
                         if (lastFailureWasSdpLookup && !looksLikePersonalAudio(device)) {
@@ -475,6 +486,8 @@ class Iap2BluetoothClient(
                     }
                     log("BT-C: 「$name」SDP 未给出结论，但直连 …caff 成功——按车机处理")
                     connected = probe
+                    connectedOperation = operation
+                    connectedCallbacks = callbacks
                     break
                 }
                 // 先「保持现有配置文件」直连一次。
@@ -483,14 +496,14 @@ class Iap2BluetoothClient(
                 // 压根查不到该服务。顺序反过来（先试、失败再断）对两种机型都成立：
                 // 需要「保持连接」的车机第一次就能成，奥迪那类需要「仅配对」的车机
                 // 会在第一次失败后走到下面的断开重试。
-                var socket = tryConnect(device)
+                var socket = tryConnect(device, operation)
                 if (socket == null) {
                     // 「只配对、不连接」：奥迪 MIB3 实测手机与车机处于蓝牙已连接状态
                     // （HFP/A2DP 在线）时，车机不开放无线 CarPlay 的 iAP2 服务窗口——
                     // 表现为每 3s 连接失败。iAP2 是独立的 SDP 直连服务，与这些配置文件
                     // 无关，断开后不影响 CarPlay 本身（声音走 WiFi 的 AirPlay）。
-                    if (!dialAllowed(device)) break
-                    val dropped = BtProfiles.disconnect(context, device)
+                    if (!operation.isCurrent()) break
+                    val dropped = BtProfiles.disconnect(context, device, operation)
                     if (dropped.isNotEmpty()) {
                         val now = android.os.SystemClock.uptimeMillis()
                         if (now - lastProfileLogAt > PROFILE_LOG_THROTTLE_MILLIS) {
@@ -502,11 +515,14 @@ class Iap2BluetoothClient(
                             )
                         }
                     }
-                    socket = tryConnect(device)
+                    socket = tryConnect(device, operation)
                 }
+                if (!operation.isCurrent()) { socket?.let { currentSocket.compareAndSet(it, null); runCatching { it.close() } }; break }
                 if (socket != null) {
                     log("BT-C: ✓ 已连入 $name 的无线 iAP2 服务（RFCOMM 建立）")
                     connected = socket
+                    connectedOperation = operation
+                    connectedCallbacks = callbacks
                     // 连上了就说明「掉线恢复」这件事做完了（真掉线会在 runSession 收尾时重新记）
                     BtSessionGate.clearLinkLost()
                     break
@@ -563,7 +579,7 @@ class Iap2BluetoothClient(
                 return
             }
             val sessionStartedAt = android.os.SystemClock.uptimeMillis()
-            runSession(connected, myGeneration)
+            runSession(connected, myGeneration, connectedOperation!!, connectedCallbacks!!)
             // 「连上就被关」不算成功：2026-10-28 大众实测 52 轮全是「连入 → 0.5 秒被车机
             // 关闭」（车机不在无线窗口/要自己发起）。这类轮次按失败计，否则退避永远回到 3 秒，
             // 每轮白断一次车机、还可能抢掉它主动连入的时机。
@@ -662,8 +678,8 @@ class Iap2BluetoothClient(
     )
 
     @SuppressLint("MissingPermission")
-    private fun tryConnect(device: BluetoothDevice): BluetoothSocket? {
-        if (!dialAllowed(device)) return null
+    private fun tryConnect(device: BluetoothDevice, operation: BtProfileOperation): BluetoothSocket? {
+        if (!operation.isCurrent()) return null
         val socket =
             try {
                 device.createRfcommSocketToServiceRecord(ACCESSORY_IAP2_UUID)
@@ -676,9 +692,18 @@ class Iap2BluetoothClient(
             }
         // 连接前就登记：connect() 是阻塞调用（SDP 查询 + 建链最长可达数十秒），
         // stop() 只有能拿到 socket 引用才能 close() 打断它，否则线程会滞留。
-        currentSocket.set(socket)
+        val admitted = synchronized(this) {
+            if (!operation.isCurrent()) false else { currentSocket.set(socket); true }
+        }
+        if (!admitted) { runCatching { socket.close() }; return null }
         return try {
+            if (!operation.isCurrent()) {
+                currentSocket.compareAndSet(socket, null); runCatching { socket.close() }; return null
+            }
             socket.connect()
+            if (!operation.isCurrent()) {
+                currentSocket.compareAndSet(socket, null); runCatching { socket.close() }; return null
+            }
             lastConnectError = null
             lastFailureWasSdpLookup = false
             socket
@@ -691,13 +716,10 @@ class Iap2BluetoothClient(
         }
     }
 
-    private fun runSession(socket: BluetoothSocket, epoch: Long) {
-        val callbacks = callbackFactory?.invoke() ?: BtSessionCallbacks(
-            onEndpoint = { value, _ -> onEndpoint(value) }, onWifi = { value, _ -> onWifiCredentials(value) },
-            onUpdate = { value, _ -> onEndpointUpdate(value) }, onClosed = onLinkClosed,
-        )
+    private fun runSession(socket: BluetoothSocket, epoch: Long, operation: BtProfileOperation, callbacks: BtSessionCallbacks) {
         val owner = synchronized(this) {
-            if (!running || generation.get() != epoch) null else BtSessionGate.links.claim("outbound")?.also { activeOwner = it }
+            if (!running || generation.get() != epoch || !operation.isCurrent()) null
+            else BtSessionGate.links.claimObserved("outbound", operation.observation)?.also { activeOwner = it }
         }
         if (owner == null) { currentSocket.compareAndSet(socket, null); runCatching { socket.close() }; return }
         var channel: Iap2LinkChannel? = null

@@ -2247,9 +2247,13 @@ class MainActivity : AppCompatActivity() {
                 // 连接，而奥迪实测这种「已连接」状态会让车机拒绝 CarPlay。立即与
                 // 1.5s 后各断一次（车机侧重连通常在这两个时间点之间发生）。
                 val app = applicationContext
+                val profileOperation = BtProfiles.captureOperation {
+                    TargetDevicePrefs.get(app)?.address?.equals(address, true) == true
+                }
                 Bg.run("bt-pair-only") {
                     repeat(2) { attempt ->
-                        val dropped = BtProfiles.disconnect(app, device)
+                        if (!profileOperation.isCurrent()) return@run
+                        val dropped = BtProfiles.disconnect(app, device, profileOperation)
                         if (dropped.isNotEmpty()) {
                             log(
                                 "BT-PAIR: 已断开配对后自动建立的 ${dropped.joinToString("/")} 连接" +

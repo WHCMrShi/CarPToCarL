@@ -34,6 +34,7 @@ object TargetDevicePrefs {
         context: Context,
         target: Target?,
     ) {
+        BtProfiles.invalidatePendingOperations()
         CarApproachPrefs.clearAclObservation()
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (target == null) {

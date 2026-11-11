@@ -1232,6 +1232,7 @@ object SessionController {
      */
     private fun startAudioProfileGuard() {
         if (!audioGuardRunning.compareAndSet(false, true)) return
+        val work = connectionWork.capture()
         Thread({
             val ctx = appContext
             try {
@@ -1246,7 +1247,7 @@ object SessionController {
                             )
                         },
                         shouldStop = {
-                            !sessionWanted ||
+                            !work.isCurrent || !sessionWanted ||
                                 BtSessionGate.iap2Ready ||
                                 BtSessionGate.sessionActive ||
                                 isStreaming()
@@ -1893,6 +1894,7 @@ object SessionController {
         // 用户明确要连：解冻恢复的前提之一（断开后再解冻不该自己爬起来）
         wifiConnector?.startIdentityObservation()
         val firstStart = !sessionWanted && !isStreaming() && !sessionStarting.get()
+        if (firstStart) io.github.shaonialife.carptocar.bt.BtProfiles.invalidatePendingOperations()
         sessionWanted = true
         if (firstStart) { lastCarWifi = null; lastWifiPsk = null; freshWifiThisStart = null; lastGoodEndpoint = null; unreadableWifiTarget = null }
         if (CarLifeHijack.isEnabled(context)) CarLifeHijack.prewarm(context) { line -> appendLog(line) }
@@ -1949,6 +1951,7 @@ object SessionController {
 
     /** 「断开连接」（可在任意 Activity 实例上调用——操作的是真管线对象）。 */
     fun disconnect(context: Context, manual: Boolean = true) {
+        io.github.shaonialife.carptocar.bt.BtProfiles.invalidatePendingOperations()
         connectionWork.end()
         rememberedWifiWork.end()
         rememberedWifi = null
