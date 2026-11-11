@@ -41,7 +41,6 @@ import io.github.shaonialife.carptocar.input.TouchRouter
 import io.github.shaonialife.carptocar.launcher.VirtualLauncher
 import io.github.shaonialife.carptocar.launcher.settings.AppOrientationCompat
 import io.github.shaonialife.carptocar.launcher.settings.AutoConnectPrefs
-import io.github.shaonialife.carptocar.launcher.settings.DisplayPrefs
 import io.github.shaonialife.carptocar.legal.DisclaimerDialog
 import io.github.shaonialife.carptocar.legal.DisclaimerPrefs
 import io.github.shaonialife.carptocar.legal.needsDisclaimerAtLaunch
@@ -95,15 +94,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var heroSubline: TextView
     private lateinit var heroStats: TextView
     /** 「显示」卡片里的分辨率行（车机通告值 + 本次码流尺寸）。 */
-    private lateinit var displayResolutionNote: TextView
     private lateinit var ctaButton: LinearLayout
     private lateinit var ctaIcon: ImageView
     private lateinit var ctaLabel: TextView
     private lateinit var audioTag: TextView
-    private lateinit var readyCount: TextView
     private lateinit var ssidInput: EditText
     private lateinit var macInput: EditText
-    private lateinit var tvMacHint: TextView
     private lateinit var btDesc: TextView
     private lateinit var btBadge: TextView
     private lateinit var btnPickTarget: TextView
@@ -630,7 +626,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 刷新门禁相关的界面：输入框下方提示行 + （IDLE 时）英雄卡副标题与按钮置灰。
+     * 刷新门禁相关的界面：IDLE 时英雄卡副标题与按钮置灰。
      *
      * 「置灰但仍可点」是刻意的：完全 `isEnabled=false` 的话，用户点下去没有任何
      * 反馈，只会以为 App 卡了；保持可点、点击即给出「未填写」提示才是有效引导。
@@ -638,16 +634,6 @@ class MainActivity : AppCompatActivity() {
     private fun refreshMacGate() {
         if (!::macInput.isInitialized || !::ctaButton.isInitialized) return
         val mac = effectiveBluetoothMac()
-        if (::tvMacHint.isInitialized) {
-            tvMacHint.visibility = View.VISIBLE
-            if (mac == null) {
-                tvMacHint.setTextColor(getColor(R.color.m3_error))
-                tvMacHint.text = "未填写 —— 不填写本机蓝牙地址将无法启动连接"
-            } else {
-                tvMacHint.setTextColor(getColor(R.color.m3_mono_dim))
-                tvMacHint.text = if (DeviceIdentity.hasOverride(this)) "已保存（手填）：$mac" else "自动解析：$mac"
-            }
-        }
         if (heroState == HeroState.IDLE) {
             ctaButton.alpha = if (mac == null) CTA_BLOCKED_ALPHA else 1f
             if (pendingResidualDisplays == null) {
@@ -698,15 +684,12 @@ class MainActivity : AppCompatActivity() {
         }
         heroSubline = findViewById(R.id.heroSubline)
         heroStats = findViewById(R.id.heroStats)
-        displayResolutionNote = findViewById(R.id.displayResolutionNote)
         ctaButton = findViewById(R.id.ctaButton)
         ctaIcon = findViewById(R.id.ctaIcon)
         ctaLabel = findViewById(R.id.ctaLabel)
         audioTag = findViewById(R.id.audioTag)
-        readyCount = findViewById(R.id.readyCount)
         ssidInput = findViewById(R.id.ssidInput)
         macInput = findViewById(R.id.macInput)
-        tvMacHint = findViewById(R.id.tvMacHint)
         btDesc = findViewById(R.id.btDesc)
         btBadge = findViewById(R.id.btBadge)
         btnPickTarget = findViewById(R.id.btnPickTarget)
@@ -979,7 +962,7 @@ class MainActivity : AppCompatActivity() {
                     log("MAC: 本机蓝牙地址已设为 $resolved（0x4300/SETUP/ctrl 广播都用它）")
                 }
             }
-            // 保存/清除都直接影响「启动连接」门禁，立刻同步提示行与按钮状态
+            // 保存/清除都直接影响「启动连接」门禁，立刻同步连接提示与按钮状态
             refreshMacGate()
         }
 
@@ -1150,7 +1133,6 @@ class MainActivity : AppCompatActivity() {
         }
         updateConnectedSubline()
         updateHeroStats()
-        updateDisplayResolutionNote()
         updateAudioTag()
         updateReadyRow()
     }
@@ -1217,52 +1199,6 @@ class MainActivity : AppCompatActivity() {
                 else -> "$carW×$carH → ${stream.first}×${stream.second}"
             }
         heroStats.text = "分辨率 $resolution · $fps fps"
-    }
-
-    /**
-     * 「显示」卡片里的分辨率行。
-     *
-     * 连接中显示本会话快照（车机 AirPlay `/info` 通告的原值 + 实际码流尺寸）；
-     * 没连接时回落到上一次会话的落盘快照——车机分辨率只有 SETUP 之后才知道，
-     * 不落盘的话断连状态永远是一片空白，用户没法核对「到底按多大在推」。
-     */
-    private fun updateDisplayResolutionNote() {
-        val target = displayResolutionNote
-        val running = SessionController.videoSender?.isRunning == true
-        val text =
-            if (running && SessionController.activeCarWidth > 0) {
-                val carW = SessionController.activeCarWidth
-                val carH = SessionController.activeCarHeight
-                val stream = effectiveStreamSize()
-                val confirmed = streamSizeConfirmed()
-                when {
-                    !SessionController.activeCarResolutionFromCar ->
-                        "⚑ 车机未通告分辨率 · 按手机横屏 $carW×$carH 兜底"
-                    // 还没解析到 SPS：手上的 stream 只是协商档位，不能当成「同尺寸」
-                    !confirmed && (stream == null || (stream.first == carW && stream.second == carH)) ->
-                        "车机 $carW×$carH · 码流待确认（等首个关键帧）"
-                    stream != null && (stream.first != carW || stream.second != carH) ->
-                        "车机 $carW×$carH · 码流 ${stream.first}×${stream.second}" +
-                            "（引擎按档位编码，非车机画布）"
-                    else -> "车机 $carW×$carH · 码流同尺寸"
-                }
-            } else {
-                val last = DisplayPrefs.lastSession(this)
-                val streamDiffers =
-                    last != null &&
-                        last.streamWidth > 0 &&
-                        (last.streamWidth != last.carWidth || last.streamHeight != last.carHeight)
-                when {
-                    last == null -> "连接后自动读取车机分辨率"
-                    !last.carFromCar ->
-                        "上次：车机未通告 · 按手机横屏 ${last.carWidth}×${last.carHeight} 兜底"
-                    streamDiffers ->
-                        "上次：车机 ${last.carWidth}×${last.carHeight} · " +
-                            "码流 ${last.streamWidth}×${last.streamHeight}（引擎按档位编码）"
-                    else -> "上次：车机 ${last.carWidth}×${last.carHeight}"
-                }
-            }
-        if (target.text != text) target.text = text
     }
 
     private fun applyHeroState(s: HeroState) {
@@ -1394,28 +1330,11 @@ class MainActivity : AppCompatActivity() {
         audioTag.text = if (on) "车机侧声音 · 开启" else "车机侧声音 · 关闭"
     }
 
-    /**
-     * 连接准备计数：热点 SSID / 蓝牙配对 / 投屏权限。
-     *
-     * Shizuku 项已移除（2026-10-24），准备项里不再有任何硬性前置依赖。
-     */
+    /** 更新热点凭据和蓝牙配对状态。 */
     private fun updateReadyRow() {
-        findViewById<TextView>(R.id.wifiMemoryStatus).setText(when (SessionController.wifiMemoryStatus(this)) {
-            1 -> R.string.wifi_memory_fixed
-            -1 -> R.string.wifi_memory_unreadable
-            else -> R.string.wifi_memory_learning
-        })
         findViewById<TextView>(R.id.btnClearWifiMemory).apply {
             isEnabled = SessionController.canClearRememberedWifi()
             alpha = if (isEnabled) 1f else 0.45f
-        }
-        var ready = 0
-        if (ssidInput.text
-                .toString()
-                .trim()
-                .isNotEmpty()
-        ) {
-            ready++
         }
         val btGranted =
             ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) ==
@@ -1431,7 +1350,6 @@ class MainActivity : AppCompatActivity() {
                 bondedCount = -1
             }
         }
-        if (bondedCount > 0) ready++
 
         btBadge.visibility = if (bondedCount >= 0) View.VISIBLE else View.GONE
         btBadge.setTextColor(getColor(R.color.m3_surface))
@@ -1476,7 +1394,6 @@ class MainActivity : AppCompatActivity() {
         } else {
             btnPickTarget.visibility = View.GONE
         }
-        readyCount.text = "$ready/2"
     }
 
     // ---- 目标车机选择弹窗（扫描/配对状态）----

@@ -183,38 +183,7 @@
                                 android:orientation="vertical"
                                 android:paddingStart="16dp"
                                 android:paddingEnd="16dp">
-                                <LinearLayout
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:orientation="horizontal"
-                                    android:paddingTop="14dp">
-                                    <TextView
-                                        android:layout_width="0dp"
-                                        android:layout_height="wrap_content"
-                                        android:layout_weight="1"
-                                        android:text="连接准备"
-                                        android:textColor="@color/m3_on_var"
-                                        android:textSize="14sp"
-                                        android:textStyle="bold" />
-                                    <TextView
-                                        android:id="@+id/readyCount"
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content"
-                                        android:background="@drawable/bg_count"
-                                        android:paddingStart="9dp"
-                                        android:paddingTop="2dp"
-                                        android:paddingEnd="9dp"
-                                        android:paddingBottom="2dp"
-                                        android:text="0/3"
-                                        android:textColor="@color/m3_mono_key"
-                                        android:textSize="14sp"
-                                        android:textStyle="bold" />
-                                </LinearLayout>
-                                <View
-                                    android:layout_width="match_parent"
-                                    android:layout_height="1dp"
-                                    android:layout_marginStart="54dp"
-                                    android:background="@color/m3_outline_var" />
+
                                 <LinearLayout
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
@@ -268,7 +237,7 @@
                                 <View
                                     android:layout_width="match_parent"
                                     android:layout_height="1dp"
-                                    android:layout_marginStart="54dp"
+                                    android:layout_marginStart="0dp"
                                     android:background="@color/m3_outline_var" />
                                 <LinearLayout
                                     android:layout_width="match_parent"
@@ -278,23 +247,11 @@
                                     android:orientation="horizontal"
                                     android:paddingTop="6dp"
                                     android:paddingBottom="6dp">
-                                    <FrameLayout
-                                        android:layout_width="38dp"
-                                        android:layout_height="38dp"
-                                        android:background="@drawable/bg_icon_tile">
-                                        <ImageView
-                                            android:layout_width="20dp"
-                                            android:layout_height="20dp"
-                                            android:layout_gravity="center"
-                                            android:contentDescription="蓝牙"
-                                            android:src="@drawable/ic_bluetooth"
-                                            app:tint="@color/m3_on_var"
-                                            android:importantForAccessibility="no" />
-                                    </FrameLayout>
+
                                     <LinearLayout
                                         android:layout_width="0dp"
                                         android:layout_height="wrap_content"
-                                        android:layout_marginStart="14dp"
+                                        android:layout_marginStart="0dp"
                                         android:layout_weight="1"
                                         android:orientation="vertical">
                                         <LinearLayout
@@ -359,7 +316,7 @@
                                 <View
                                     android:layout_width="match_parent"
                                     android:layout_height="1dp"
-                                    android:layout_marginStart="54dp"
+                                    android:layout_marginStart="0dp"
                                     android:background="@color/m3_outline_var" />
                                 <LinearLayout
                                     android:layout_width="match_parent"
@@ -369,23 +326,11 @@
                                     android:orientation="horizontal"
                                     android:paddingTop="6dp"
                                     android:paddingBottom="6dp">
-                                    <FrameLayout
-                                        android:layout_width="38dp"
-                                        android:layout_height="38dp"
-                                        android:background="@drawable/bg_icon_tile">
-                                        <ImageView
-                                            android:layout_width="20dp"
-                                            android:layout_height="20dp"
-                                            android:layout_gravity="center"
-                                            android:contentDescription="本机蓝牙地址"
-                                            android:src="@drawable/ic_bluetooth"
-                                            app:tint="@color/m3_on_var"
-                                            android:importantForAccessibility="no" />
-                                    </FrameLayout>
+
                                     <LinearLayout
                                         android:layout_width="0dp"
                                         android:layout_height="wrap_content"
-                                        android:layout_marginStart="14dp"
+                                        android:layout_marginStart="0dp"
                                         android:layout_weight="1"
                                         android:orientation="vertical">
                                         <TextView
@@ -399,7 +344,7 @@
                                             android:id="@+id/macInput"
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
-                                            android:layout_marginTop="2dp"
+                                            android:layout_marginTop="12dp"
                                             android:background="@drawable/bg_ssid_sel"
                                             android:hint="AA:BB:CC:DD:EE:FF"
                                             android:importantForAutofill="no"
@@ -415,15 +360,7 @@
                                             android:minHeight="48dp"
                                             android:imeOptions="actionDone"
                                             android:singleLine="true" />
-                                        <TextView
-                                            android:id="@+id/tvMacHint"
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:layout_marginTop="3dp"
-                                            android:text="未填写 —— 不填写本机蓝牙地址将无法启动连接"
-                                            android:textColor="@color/m3_error"
-                                            android:textSize="14sp"
-                                            android:visibility="gone" />
+
                                         <LinearLayout
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
@@ -452,7 +389,7 @@
                                 <View
                                     android:layout_width="match_parent"
                                     android:layout_height="1dp"
-                                    android:layout_marginStart="54dp"
+                                    android:layout_marginStart="0dp"
                                     android:background="@color/m3_outline_var" />
                                 <LinearLayout
                                     android:layout_width="match_parent"
@@ -462,23 +399,11 @@
                                     android:orientation="horizontal"
                                     android:paddingTop="6dp"
                                     android:paddingBottom="6dp">
-                                    <FrameLayout
-                                        android:layout_width="38dp"
-                                        android:layout_height="38dp"
-                                        android:background="@drawable/bg_icon_tile">
-                                        <ImageView
-                                            android:layout_width="20dp"
-                                            android:layout_height="20dp"
-                                            android:layout_gravity="center"
-                                            android:contentDescription="热点"
-                                            android:src="@drawable/ic_wifi"
-                                            app:tint="@color/m3_on_var"
-                                            android:importantForAccessibility="no" />
-                                    </FrameLayout>
+
                                     <LinearLayout
                                         android:layout_width="0dp"
                                         android:layout_height="wrap_content"
-                                        android:layout_marginStart="14dp"
+                                        android:layout_marginStart="0dp"
                                         android:layout_weight="1"
                                         android:orientation="vertical">
                                         <TextView
@@ -492,7 +417,7 @@
                                             android:id="@+id/ssidInput"
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
-                                            android:layout_marginTop="2dp"
+                                            android:layout_marginTop="12dp"
                                             android:background="@drawable/bg_ssid_sel"
                                             android:hint="车机热点名称"
                                             android:importantForAutofill="no"
@@ -507,13 +432,7 @@
                                             android:minHeight="48dp"
                                             android:imeOptions="actionDone"
                                             android:singleLine="true" />
-                                        <TextView
-                                            android:id="@+id/wifiMemoryStatus"
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:text="@string/wifi_memory_learning"
-                                            android:textColor="@color/m3_on_surface"
-                                            android:textSize="14sp" />
+
                                         <LinearLayout
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
@@ -587,7 +506,7 @@
                                     android:layout_width="match_parent"
                                     android:layout_height="1dp"
                                     android:layout_marginTop="12dp"
-                                    android:layout_marginStart="52dp"
+                                    android:layout_marginStart="0dp"
                                     android:background="@color/m3_outline_var" />
                                 <LinearLayout
                                     android:layout_width="match_parent"
@@ -612,20 +531,7 @@
                                         android:textColor="@color/m3_on_surface"
                                         android:textSize="16sp" />
                                 </LinearLayout>
-                                <View
-                                    android:layout_width="match_parent"
-                                    android:layout_height="1dp"
-                                    android:layout_marginTop="12dp"
-                                    android:layout_marginStart="52dp"
-                                    android:background="@color/m3_outline_var" />
-                                <TextView
-                                    android:id="@+id/displayResolutionNote"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="6dp"
-                                    android:text="连接后自动读取车机分辨率"
-                                    android:textColor="@color/m3_primary"
-                                    android:textSize="14sp" />
+
                             </LinearLayout>
                             <LinearLayout
                                 android:id="@+id/logCard"
@@ -651,23 +557,11 @@
                                     android:paddingTop="6dp"
                                     android:paddingEnd="2dp"
                                     android:paddingBottom="6dp">
-                                    <FrameLayout
-                                        android:layout_width="38dp"
-                                        android:layout_height="38dp"
-                                        android:background="@drawable/bg_icon_tile">
-                                        <ImageView
-                                            android:layout_width="20dp"
-                                            android:layout_height="20dp"
-                                            android:layout_gravity="center"
-                                            android:contentDescription="日志"
-                                            android:src="@drawable/ic_doc"
-                                            app:tint="@color/m3_on_var"
-                                            android:importantForAccessibility="no" />
-                                    </FrameLayout>
+
                                     <LinearLayout
                                         android:layout_width="0dp"
                                         android:layout_height="wrap_content"
-                                        android:layout_marginStart="14dp"
+                                        android:layout_marginStart="0dp"
                                         android:layout_weight="1"
                                         android:orientation="vertical">
                                         <TextView
@@ -785,14 +679,7 @@
                                     </FrameLayout>
                                 </LinearLayout>
                             </LinearLayout>
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="8dp"
-                                android:gravity="center"
-                                android:text="连接由前台服务保活 · 退出本界面不影响会话"
-                                android:textColor="@color/m3_on_var"
-                                android:textSize="14sp" />
+
                         </LinearLayout>
                     </LinearLayout>
                 </LinearLayout>
