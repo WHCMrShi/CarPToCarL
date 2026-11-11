@@ -2434,7 +2434,7 @@ class MainActivity : AppCompatActivity() {
             hero.layoutParams = android.widget.FrameLayout.LayoutParams(
                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                 android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-            )
+            ).apply { topMargin = gap }
             heroPane.layoutParams.height = android.view.ViewGroup.LayoutParams.MATCH_PARENT
             scroll.setPaddingRelative(heroWidth + gap, scroll.paddingTop, 0, scroll.paddingBottom)
             (detail.layoutParams as android.widget.LinearLayout.LayoutParams).apply {
