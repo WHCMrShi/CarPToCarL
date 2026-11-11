@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout
+    android:id="@+id/mainRoot"
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -222,25 +223,13 @@
                                     android:orientation="horizontal"
                                     android:paddingTop="6dp"
                                     android:paddingBottom="6dp">
-                                    <FrameLayout
-                                        android:layout_width="38dp"
-                                        android:layout_height="38dp"
-                                        android:background="@drawable/bg_icon_tile">
-                                        <ImageView
-                                            android:layout_width="20dp"
-                                            android:layout_height="20dp"
-                                            android:layout_gravity="center"
-                                            android:contentDescription="自动连接"
-                                            android:src="@drawable/ic_play"
-                                            app:tint="@color/m3_on_var"
-                                            android:importantForAccessibility="no" />
-                                    </FrameLayout>
+
                                     <androidx.appcompat.widget.SwitchCompat
                                         xmlns:app="http://schemas.android.com/apk/res-auto"
                                         android:id="@+id/switchAutoConnect"
                                         android:layout_width="0dp"
                                         android:layout_height="wrap_content"
-                                        android:layout_marginStart="14dp"
+                                        android:layout_marginStart="0dp"
                                         android:thumb="@drawable/sw_thumb"
                                         app:track="@drawable/sw_track"
                                         app:switchPadding="16dp"
@@ -259,25 +248,13 @@
                                     android:orientation="horizontal"
                                     android:paddingTop="6dp"
                                     android:paddingBottom="6dp">
-                                    <FrameLayout
-                                        android:layout_width="38dp"
-                                        android:layout_height="38dp"
-                                        android:background="@drawable/bg_icon_tile">
-                                        <ImageView
-                                            android:layout_width="20dp"
-                                            android:layout_height="20dp"
-                                            android:layout_gravity="center"
-                                            android:contentDescription="靠近车机自动启动"
-                                            android:src="@drawable/ic_car"
-                                            app:tint="@color/m3_on_var"
-                                            android:importantForAccessibility="no" />
-                                    </FrameLayout>
+
                                     <androidx.appcompat.widget.SwitchCompat
                                         xmlns:app="http://schemas.android.com/apk/res-auto"
                                         android:id="@+id/switchCarApproach"
                                         android:layout_width="0dp"
                                         android:layout_height="wrap_content"
-                                        android:layout_marginStart="14dp"
+                                        android:layout_marginStart="0dp"
                                         android:thumb="@drawable/sw_thumb"
                                         app:track="@drawable/sw_track"
                                         app:switchPadding="16dp"
@@ -590,25 +567,13 @@
                                     android:layout_height="wrap_content"
                                     android:orientation="horizontal"
                                     android:gravity="center_vertical">
-                                    <FrameLayout
-                                        android:layout_width="38dp"
-                                        android:layout_height="38dp"
-                                        android:background="@drawable/bg_icon_tile">
-                                        <ImageView
-                                            android:layout_width="20dp"
-                                            android:layout_height="20dp"
-                                            android:layout_gravity="center"
-                                            android:contentDescription="仪表导航"
-                                            android:src="@drawable/ic_instrument_navigation"
-                                            app:tint="@color/m3_on_var"
-                                            android:importantForAccessibility="no" />
-                                    </FrameLayout>
+
                                     <androidx.appcompat.widget.SwitchCompat
                                         xmlns:app="http://schemas.android.com/apk/res-auto"
                                         android:id="@+id/switchInstrumentNavigation"
                                         android:layout_width="0dp"
                                         android:layout_height="wrap_content"
-                                        android:layout_marginStart="14dp"
+                                        android:layout_marginStart="0dp"
                                         android:layout_weight="1"
                                         android:minHeight="48dp"
                                         android:text="@string/instrument_navigation"
@@ -630,25 +595,13 @@
                                     android:layout_marginTop="12dp"
                                     android:gravity="center_vertical"
                                     android:orientation="horizontal">
-                                    <FrameLayout
-                                        android:layout_width="38dp"
-                                        android:layout_height="38dp"
-                                        android:background="@drawable/bg_icon_tile">
-                                        <ImageView
-                                            android:layout_width="20dp"
-                                            android:layout_height="20dp"
-                                            android:layout_gravity="center"
-                                            android:contentDescription="车机定位"
-                                            android:src="@drawable/ic_car_gps"
-                                            app:tint="@color/m3_on_var"
-                                            android:importantForAccessibility="no" />
-                                    </FrameLayout>
+
                                     <androidx.appcompat.widget.SwitchCompat
                                         xmlns:app="http://schemas.android.com/apk/res-auto"
                                         android:id="@+id/switchCarGps"
                                         android:layout_width="0dp"
                                         android:layout_height="wrap_content"
-                                        android:layout_marginStart="14dp"
+                                        android:layout_marginStart="0dp"
                                         android:thumb="@drawable/sw_thumb"
                                         app:track="@drawable/sw_track"
                                         app:switchPadding="16dp"

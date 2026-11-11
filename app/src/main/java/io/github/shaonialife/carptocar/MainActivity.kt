@@ -680,6 +680,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        configureSystemBars()
         // 告诉「靠近车机」那边：界面确实起来了（它据此判断后台启动有没有被系统拦下）
         AppUiPresence.markBroughtUp()
         // 起来就把「系统没让 App 到前台」那条提示撤掉——它已经没有意义了
@@ -1433,6 +1434,7 @@ class MainActivity : AppCompatActivity() {
         if (bondedCount > 0) ready++
 
         btBadge.visibility = if (bondedCount >= 0) View.VISIBLE else View.GONE
+        btBadge.setTextColor(getColor(R.color.m3_surface))
         if (bondedCount >= 0) {
             val target = TargetDevicePrefs.get(this)
             if (bondedCount > 0) {
@@ -2443,6 +2445,32 @@ class MainActivity : AppCompatActivity() {
      * 窄窗口单栏，宽窗口双栏；大字体提高双栏阈值。
      * 两栏分别滚动，短窗口里主操作也能滚到，不被裁掉。
      */
+    private fun configureSystemBars() {
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        window.isNavigationBarContrastEnforced = false
+        val light = resources.configuration.uiMode and
+            android.content.res.Configuration.UI_MODE_NIGHT_MASK !=
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = light
+            isAppearanceLightNavigationBars = light
+        }
+        val root = findViewById<View>(R.id.mainRoot)
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val safe = insets.getInsets(
+                androidx.core.view.WindowInsetsCompat.Type.systemBars() or
+                    androidx.core.view.WindowInsetsCompat.Type.displayCutout() or
+                    androidx.core.view.WindowInsetsCompat.Type.ime(),
+            )
+            view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+            applyContentLayout()
+            insets
+        }
+        androidx.core.view.ViewCompat.requestApplyInsets(root)
+    }
+
     private fun applyContentLayout() {
         val scroll = findViewById<android.widget.ScrollView>(R.id.mainScroll)
         val row = findViewById<android.widget.LinearLayout>(R.id.contentRow)
@@ -2450,7 +2478,9 @@ class MainActivity : AppCompatActivity() {
         val detail = findViewById<android.widget.LinearLayout>(R.id.detailColumn)
         val density = resources.displayMetrics.density
         val gap = (16 * density).toInt()
-        val windowWidth = resources.configuration.screenWidthDp
+        val root = findViewById<View>(R.id.mainRoot)
+        val windowWidth = resources.configuration.screenWidthDp -
+            ((root.paddingLeft + root.paddingRight) / density).toInt()
         val landscape = windowWidth >= if (resources.configuration.fontScale > 1.3f) 840 else 600
         val heroPane = findViewById<android.widget.ScrollView>(R.id.heroPane)
         val page = findViewById<android.widget.LinearLayout>(R.id.pageColumn)
