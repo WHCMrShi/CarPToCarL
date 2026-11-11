@@ -24,7 +24,7 @@ package io.github.shaonialife.carptocar.video
  *  1. 用 CarLife 帧头 `[4..7]` 那个毫秒时间戳算「排队延迟」——这个字段此前一直被丢掉；
  *  2. 用 socket 写入耗时衡量背压（写不动就是链路在顶回来）；
  *  3. 只有「延迟已经结构性堆积」——排到 [HARD_STALE_MS] 且持续 [SUSTAIN_MS]——才动作：
- *     跳到下一个 IDR（复用 [VideoSender.beginAwaitingKeyFrame]，代价 ≤1 个 GOP）。
+ *     硬阈值必须连续超限，回落即重新计时；跳到下一个 IDR（复用 [VideoSender.beginAwaitingKeyFrame]，代价 ≤1 个 GOP）。
  *     抖动级别的延迟只记账，不动画面。
  *
  * ## 「排队延迟」怎么算（时间戳基准未知也能用）
@@ -34,6 +34,7 @@ package io.github.shaonialife.carptocar.video
  * `排队延迟 = offset - minOffset`。绝对基准被消掉了，剩下的就是「比最快的那帧晚了多少」。
  *
  * 时间戳不老实时有兜底，宁可退化成「只测背压」也不误伤画面：
+ *  - 探测完成前只观察；至少 20 帧、500ms，源/本地推进比须在 0.5–2.0 内。
  *  - 前 [PROBE_FRAMES] 帧里不同取值少于 [MIN_DISTINCT_TS] → 判定不是时间戳，停用；
  *  - 非单调次数超限 → 停用；
  *  - 排队延迟超过 [SANITY_MAX_MS]（半分钟，物理上不可能）→ 判定字段不可信，停用。
@@ -41,7 +42,6 @@ package io.github.shaonialife.carptocar.video
  * 线程模型：`submitH264`（CarLife 读线程）、保活线程、`pushNotice` 都会进来，全部加锁。
  */
 internal class VideoDeliveryGate(
-    private val staleMs: Long = STALE_MS,
     private val hardStaleMs: Long = HARD_STALE_MS,
     private val sustainMs: Long = SUSTAIN_MS,
     private val slowWriteMs: Long = SLOW_WRITE_MS,
@@ -69,12 +69,13 @@ internal class VideoDeliveryGate(
         val resyncs: Int,
         val timestampUsable: Boolean,
         val backlogSamples: Int,
+        val timestampState: String,
     ) {
         fun describe(): String {
             val seconds = "%.1f".format(windowMs / 1000.0)
             val queue =
                 when {
-                    !timestampUsable -> "排队未测（帧时间戳不可信）"
+                    !timestampUsable -> "排队未测（时间戳状态=$timestampState）"
                     backlogSamples == 0 -> "排队未测（本窗口没有帧时间戳）"
                     else -> "排队 p50=${backlogP50Ms} p95=${backlogP95Ms} max=${backlogMaxMs}ms"
                 }
@@ -96,7 +97,11 @@ internal class VideoDeliveryGate(
     private var nonMonotonic = 0
 
     /** 时间戳是否可信。一旦判死本流不再复活（同一路码流的字段语义不会中途变）。 */
-    private var timestampUsable = true
+    private var timestampUsable = true // false is sticky until a real source reset
+    private var timestampValidated = false
+    private var probeFirstNow: Long? = null
+    private var probeFirstTs: Long? = null
+    private var invalidReason = "none"
 
     // ---- 状态机 ----
 
@@ -139,7 +144,7 @@ internal class VideoDeliveryGate(
             staleSince = 0L
             return PASS
         }
-        if (backlog < staleMs) {
+        if (backlog < hardStaleMs) {
             staleSince = 0L
             return PASS
         }
@@ -148,13 +153,12 @@ internal class VideoDeliveryGate(
         val cooled = lastResyncAt == Long.MIN_VALUE || nowMs - lastResyncAt >= resyncCooldownMs
         if (backlog >= hardStaleMs && sustained >= sustainMs && !keyFrame && cooled) {
             val reason =
-                "sourceTs=$sourceTsMs now=$nowMs probe=$probeFrames distinct=${probeTimestamps.size} backwards=$nonMonotonic usable=$timestampUsable; 排队延迟 ${backlog}ms（阈值 ${hardStaleMs}ms）已持续 ${sustained}ms" +
+                "sourceTs=$sourceTsMs now=$nowMs probe=$probeFrames distinct=${probeTimestamps.size} backwards=$nonMonotonic usable=$timestampUsable validated=$timestampValidated; 排队延迟 ${backlog}ms（阈值 ${hardStaleMs}ms）已持续 ${sustained}ms" +
                     "——画面比编码器慢这么多，跳到下一个 IDR 重新对齐"
             lastResyncAt = nowMs
             resyncTotal++
             // 跳到 IDR 之后延迟会归零，旧基线作废：留着重同步完的第一帧就会算出巨量延迟。
             baselineOffset = Long.MAX_VALUE
-            lastSourceTs = Long.MIN_VALUE
             staleSince = 0L
             return Verdict(resync = true, reason = reason)
         }
@@ -170,8 +174,21 @@ internal class VideoDeliveryGate(
         probeFrames = 0
         nonMonotonic = 0
         timestampUsable = true
+        timestampValidated = false
+        probeFirstNow = null
+        probeFirstTs = null
+        invalidReason = "none"
+        lastResyncAt = Long.MIN_VALUE
+        resyncTotal = 0
         staleSince = 0L
         resetWindow(0L)
+    }
+
+    /** Same-source recovery: retain trust verdict, probe evidence and resync cooldown. */
+    @Synchronized
+    fun rebase() {
+        baselineOffset = Long.MAX_VALUE
+        staleSince = 0L
     }
 
     /** 到点就返回本窗口画像并开新窗口；没到点返回 null。 */
@@ -192,7 +209,8 @@ internal class VideoDeliveryGate(
                 slowWrites = windowSlow,
                 stalls = windowStall,
                 resyncs = resyncTotal,
-                timestampUsable = timestampUsable,
+                timestampUsable = timestampUsable && timestampValidated,
+                timestampState = if (!timestampUsable) "INVALID:$invalidReason" else if (timestampValidated) "TRUSTED" else "PROBING",
                 backlogSamples = windowBacklog.size,
             )
         resyncTotal = 0
@@ -222,18 +240,36 @@ internal class VideoDeliveryGate(
             if (probeFrames == PROBE_FRAMES && probeTimestamps.size < MIN_DISTINCT_TS) {
                 // 20 帧里只有一两个取值：不是时间戳。
                 timestampUsable = false
+                invalidReason = "insufficient-distinct-values"
                 return null
             }
         }
         if (ts <= 0L) return null
+        if (probeFirstNow == null) { probeFirstNow = nowMs; probeFirstTs = ts }
         if (lastSourceTs != Long.MIN_VALUE && ts < lastSourceTs) {
             nonMonotonic++
             if (nonMonotonic > NON_MONOTONIC_LIMIT) {
+                invalidReason = "backwards"
                 timestampUsable = false
                 return null
             }
         }
         lastSourceTs = ts
+        if (!timestampValidated) {
+            val wallSpan = nowMs - requireNotNull(probeFirstNow)
+            val sourceSpan = ts - requireNotNull(probeFirstTs)
+            // A conservative unit/rate check, not proof of encoder timestamp semantics.
+            // Wait for elapsed time as well as sample count (burst replay cannot certify a clock).
+            if (probeFrames < PROBE_FRAMES || wallSpan < MIN_PROBE_SPAN_MS) return null
+            val ratio = sourceSpan.toDouble() / wallSpan.toDouble()
+            if (ratio < 0.5 || ratio > 2.0) {
+                timestampUsable = false
+                invalidReason = "rate-mismatch"
+                return null
+            }
+            timestampValidated = true
+            baselineOffset = Long.MAX_VALUE
+        }
 
         val offset = nowMs - ts
         if (offset < baselineOffset) {
@@ -245,6 +281,7 @@ internal class VideoDeliveryGate(
         if (backlog > SANITY_MAX_MS) {
             // 半分钟级别的「排队」不是排队，是字段根本不是这个意思。停用，别拿它动画面。
             timestampUsable = false
+            invalidReason = "sanity-limit"
             return null
         }
         return backlog
@@ -287,6 +324,7 @@ internal class VideoDeliveryGate(
         /** 统计窗口。与 CarLifeHuClient 的实测帧率窗口对齐，日志好对照。 */
         const val SUMMARY_INTERVAL_MS = 5_000L
 
+        private const val MIN_PROBE_SPAN_MS = 500L
         private const val PROBE_FRAMES = 20
         private const val MIN_DISTINCT_TS = 3
         private const val NON_MONOTONIC_LIMIT = 5

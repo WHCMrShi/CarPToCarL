@@ -591,6 +591,7 @@ class VideoSender(
         // 收到 P 帧直接拆整轮会话：15 次断流里有 8 次是「首帧 NAL=1 → 0.1~0.2 秒被 reset」，
         // 而 7 次「首帧 NAL=7,8,5」全部活过 7 秒，无一例外。
         // 预置 csd 仍然有用：它让首个 IDR 一到就能立刻发 config，只是不许放行 P 帧。
+        deliveryGate.reset() // new source/session: allow a fresh timestamp probe
         beginAwaitingKeyFrame()
         val queue = VideoIngressQueue(consume = { frame ->
             val dequeuedAt = System.nanoTime()
@@ -705,6 +706,7 @@ class VideoSender(
             if (!running.get() || !q4Handover.isSourceCurrent(retiredGeneration)) return
             configSent = false
             q4Handover.arm("source-restart")
+            deliveryGate.reset() // real source replacement, unlike same-source recovery
             beginAwaitingKeyFrame()
         // 不在这里清 lastIdrNals：源重启到新源出首帧之间可能有几秒空窗，
         // 旧 IDR 还能继续喂保活，避免车机因「视频静默」拆掉整轮会话。
@@ -727,7 +729,7 @@ class VideoSender(
         droppedBeforeRestartKey = 0
         // 等 IDR = 换了一路码流的时间基准，排队延迟的基线必须跟着重来。
         // 顺着这里做而不是各调用点各写一遍，理由同上面那两个时间戳。
-        deliveryGate.reset()
+        deliveryGate.rebase()
     }
 
     /**

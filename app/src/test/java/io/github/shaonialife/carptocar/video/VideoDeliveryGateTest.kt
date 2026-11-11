@@ -99,7 +99,7 @@ class VideoDeliveryGateTest {
         var ts = 5_000L + 20 * 50L
         var resyncs = 0
         // 之后编码器仍每 50ms 出一帧，但送出间隔被拖到 100ms：每帧多积 50ms。
-        repeat(40) {
+        repeat(55) {
             val verdict = gate.onFrame(now, ts, writeMs = 20L, keyFrame = false)
             if (verdict.resync) {
                 resyncs++
@@ -108,7 +108,7 @@ class VideoDeliveryGateTest {
             now += 100L
             ts += 50L
         }
-        assertEquals("40 帧足够堆到 1500ms 并持续 2 秒，应当只触发一次", 1, resyncs)
+        assertEquals("55 帧足够堆到 1500ms 并连续超限 2 秒，应当只触发一次", 1, resyncs)
     }
 
     @Test
@@ -201,5 +201,62 @@ class VideoDeliveryGateTest {
         val fresh = gate.summaryIfDue(now + 5_000L)
         assertNotNull(fresh)
         assertEquals(0L, fresh!!.backlogMaxMs)
+    }
+
+    @Test fun probingNeverDropsSlowOrSparseStartupFrames() {
+        val gate = VideoDeliveryGate()
+        repeat(19) { i ->
+            assertFalse(gate.onFrame(10_000L + i * 1000L, 5000L + i * 50L, 5, false).resync)
+        }
+        assertFalse(gate.summaryIfDue(40_000)!!.timestampUsable)
+    }
+
+    @Test fun wrongUnitsRemainDisabledAcrossSameSourceRecovery() {
+        val gate = VideoDeliveryGate()
+        repeat(20) { i -> gate.onFrame(10_000L + i * 50, 5000L + i * 50_000, 5, false) }
+        gate.rebase()
+        repeat(100) { i -> assertFalse(gate.onFrame(20_000L + i * 100, 6000L + i * 50, 5, false).resync) }
+        assertTrue(gate.summaryIfDue(40_000)!!.timestampState.startsWith("INVALID"))
+        gate.reset()
+        gate.warmUp(50_000, 20_000)
+        assertTrue(gate.summaryIfDue(60_000)!!.timestampUsable)
+    }
+
+    @Test fun softThresholdTimeDoesNotCountTowardHardThreshold() {
+        val gate = VideoDeliveryGate()
+        gate.warmUp()
+        repeat(60) { i -> assertFalse(gate.onFrame(12_000L + i * 50, 6000L + i * 50, 5, false).resync) }
+        assertFalse(gate.onFrame(16_600, 10_000, 5, false).resync)
+        assertFalse(gate.onFrame(18_599, 11_999, 5, false).resync)
+        assertTrue(gate.onFrame(18_600, 12_000, 5, false).resync)
+    }
+
+    @Test fun fallingBelowHardThresholdRestartsContinuousTimer() {
+        val gate = VideoDeliveryGate()
+        gate.warmUp()
+        assertFalse(gate.onFrame(13_000, 6000, 5, false).resync)
+        assertFalse(gate.onFrame(14_999, 7999, 5, false).resync)
+        assertFalse(gate.onFrame(15_000, 9000, 5, false).resync) // backlog 1000
+        assertFalse(gate.onFrame(16_000, 9001, 5, false).resync)
+        assertFalse(gate.onFrame(17_999, 11000, 5, false).resync)
+        assertTrue(gate.onFrame(18_000, 11001, 5, false).resync)
+    }
+
+    @Test fun sameSourceRebasePreservesResyncCooldown() {
+        val gate = VideoDeliveryGate()
+        gate.warmUp()
+        gate.onFrame(13_000, 6000, 5, false)
+        assertTrue(gate.onFrame(15_000, 8000, 5, false).resync)
+        gate.rebase()
+        gate.onFrame(15_100, 8100, 5, true)
+        gate.onFrame(18_100, 9100, 5, false)
+        assertFalse(gate.onFrame(20_100, 11100, 5, false).resync)
+        assertTrue(gate.onFrame(25_100, 16100, 5, false).resync)
+    }
+
+    @Test fun lowFrameRateWithMatchingClockCanBeValidated() {
+        val gate = VideoDeliveryGate()
+        repeat(20) { i -> assertFalse(gate.onFrame(10_000L + i * 5000, 5000L + i * 5000, 5, false).resync) }
+        assertTrue(gate.summaryIfDue(110_000)!!.timestampUsable)
     }
 }
