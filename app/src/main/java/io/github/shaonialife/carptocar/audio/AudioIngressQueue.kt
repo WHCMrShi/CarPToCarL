@@ -17,6 +17,10 @@ internal class AudioIngressQueue(
     private var inFlight = false
     private var bytes = 0
     private var duration = 0L
+    // Pending-only budgets (media=0, speech=1); the in-flight block retains its original exclusion.
+    private val pendingBlocks = IntArray(2)
+    private val pendingBytes = IntArray(2)
+    private val pendingDuration = LongArray(2)
     private var gap = false
     private var dropped = 0L
     private var maxAge = 0L
@@ -29,11 +33,10 @@ internal class AudioIngressQueue(
         val span = size.toLong() * 1_000_000_000L / (rate.toLong() * channels * 2)
         val byteBudget = if (speech) 512 * 1024 else maxBytes
         val timeBudget = if (speech) 10_000_000_000L else maxDurationNs
+        val kind = if (speech) 1 else 0
         // 单次合法大包不等于排队积压。完整接纳一块；只在确有旧待处理块时丢弃旧块。
-        while (true) {
-            val matching = queue.filter { it.speech == speech }
-            if (matching.isEmpty() ||
-                (matching.sumOf { it.data.size } + size <= byteBudget && matching.sumOf { it.duration } + span <= timeBudget)) break
+        while (pendingBlocks[kind] > 0 &&
+            (pendingBytes[kind] + size > byteBudget || pendingDuration[kind] + span > timeBudget)) {
             drop(queue.indexOfFirst { it.speech == speech })
         }
         if (queue.size >= 128) {
@@ -43,14 +46,22 @@ internal class AudioIngressQueue(
         }
         queue += Block(data.copyOf(size), rate, channels, clock(), span, speech)
         bytes += size; duration += span
+        pendingBlocks[kind]++; pendingBytes[kind] += size; pendingDuration[kind] += span
         lock.notifyAll()
         true
     }
 
     private fun drop(index: Int) {
+        remove(index)
+        dropped++; gap = true
+    }
+    /** Called only under lock, for both delivery and eviction. */
+    private fun remove(index: Int): Block {
         val old = queue.removeAt(index)
         bytes -= old.data.size; duration -= old.duration
-        dropped++; gap = true
+        val kind = if (old.speech) 1 else 0
+        pendingBlocks[kind]--; pendingBytes[kind] -= old.data.size; pendingDuration[kind] -= old.duration
+        return old
     }
     private fun take(): Delivery? {
         synchronized(lock) {
@@ -59,8 +70,7 @@ internal class AudioIngressQueue(
                 if (closed) return null
                 val age = clock() - queue.first().at
                 if (age > if (queue.first().speech) 10_000_000_000L else maxDurationNs) { drop(0); continue }
-                val block = queue.removeFirst()
-                bytes -= block.data.size; duration -= block.duration
+                val block = remove(0)
                 maxAge = maxOf(maxAge, age)
                 inFlight = true
                 return Delivery(block, gap).also { gap = false }
@@ -104,6 +114,7 @@ internal class AudioIngressQueue(
     override fun close() {
         synchronized(lock) {
             closed = true; queue.clear(); bytes = 0; duration = 0
+            pendingBlocks.fill(0); pendingBytes.fill(0); pendingDuration.fill(0)
             lock.notifyAll()
         }
         worker.interrupt()
