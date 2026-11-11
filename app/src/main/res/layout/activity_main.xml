@@ -918,7 +918,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
-                            android:text="最近日志 · 可复制反馈问题"
+                            android:text="最近日志 · 可导出文件反馈问题"
                             android:textColor="@color/m3_on_var"
                             android:textSize="12sp" />
                     </LinearLayout>
@@ -976,16 +976,6 @@
                             android:contentDescription="清除日志"
                             android:padding="9dp"
                             android:src="@drawable/ic_trash" />
-
-                        <ImageView
-                            android:id="@+id/btnCopyLog"
-                            android:layout_width="36dp"
-                            android:layout_height="36dp"
-                            android:layout_marginStart="4dp"
-                            android:background="@drawable/bg_ripple_circle"
-                            android:contentDescription="复制日志"
-                            android:padding="9dp"
-                            android:src="@drawable/ic_copy" />
 
                         <ImageView
                             android:id="@+id/btnExportLog"

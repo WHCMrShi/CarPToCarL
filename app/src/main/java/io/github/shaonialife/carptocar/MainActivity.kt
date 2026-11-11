@@ -5,8 +5,6 @@ import android.animation.ObjectAnimator
 import android.app.NotificationManager
 import android.bluetooth.BluetoothDevice
 import android.content.BroadcastReceiver
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -1095,16 +1093,6 @@ class MainActivity : AppCompatActivity() {
                 consoleScheduled = false
             }
             renderConsole(SessionController.logText())
-        }
-        findViewById<ImageView>(R.id.btnCopyLog).setOnClickListener {
-            val text = SessionController.logText()
-            if (text.isEmpty()) {
-                snack("日志为空")
-                return@setOnClickListener
-            }
-            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("CarPToCarL 日志", text))
-            snack("已复制 ${text.length} 字符日志")
         }
         findViewById<ImageView>(R.id.btnExportLog).setOnClickListener { exportLogFile() }
         // 长按导全部历史：默认只导本次启动，历史日志量大时按需手动取
