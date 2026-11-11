@@ -90,7 +90,7 @@
                         android:orientation="vertical">
 
             <!-- ==================== 内容区：竖屏单列 / 横屏双栏 ====================
-                 横屏屏高只有 ~300dp，英雄卡（176dp 波形 + 状态 + 主按钮）单独就占满，
+                 横屏屏高只有 ~300dp，英雄卡（状态 + 主按钮）单独就占满，
                  其余内容全被挤到屏幕外（用户实测「要滑动才能看到」）。
                  onConfigurationChanged 里把本行切成横向：左英雄卡、右详情列。 -->
             <LinearLayout
@@ -112,47 +112,6 @@
                 android:paddingTop="24dp"
                 android:paddingEnd="20dp"
                 android:paddingBottom="20dp">
-
-                <FrameLayout
-                    android:id="@+id/heroWaveFrame"
-                    android:layout_width="210dp"
-                    android:layout_height="176dp">
-
-                    <io.github.shaonialife.carptocar.ui.SignalWavesView
-                        android:id="@+id/signalWaves"
-                        android:layout_width="210dp"
-                        android:layout_height="176dp" />
-
-                    <!-- 圆盘与标签：相对波形框**居中**定位（原固定 marginTop=51/134dp
-                         是按 176dp 高算死的，横屏把波形框压到 70dp 后圆盘被裁成半月） -->
-                    <FrameLayout
-                        android:id="@+id/hubPlate"
-                        android:layout_width="74dp"
-                        android:layout_height="74dp"
-                        android:layout_gravity="center"
-                        android:background="@drawable/bg_plate">
-
-                        <ImageView
-                            android:id="@+id/hubCar"
-                            android:layout_width="38dp"
-                            android:layout_height="38dp"
-                            android:layout_gravity="center"
-                            android:contentDescription="车机"
-                            android:src="@drawable/ic_car" />
-                    </FrameLayout>
-
-                    <TextView
-                        android:id="@+id/hubCaption"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_gravity="center_horizontal|bottom"
-                        android:layout_marginBottom="10dp"
-                        android:letterSpacing="0.22"
-                        android:text="CARPTOCARL"
-                        android:textColor="#5C6B6B"
-                        android:textSize="10sp"
-                        android:textStyle="bold" />
-                </FrameLayout>
 
                 <!-- 状态行：状态字 + 残留屏清理入口（检测到残留且用户暂缓时出现） -->
                 <LinearLayout
@@ -199,23 +158,13 @@
                     android:textColor="@color/m3_on_var"
                     android:textSize="12.5sp" />
 
-                <ProgressBar
-                    android:id="@+id/heroProgress"
-                    style="@android:style/Widget.Material.ProgressBar.Horizontal"
-                    android:layout_width="250dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:indeterminate="true"
-                    android:indeterminateTint="@color/m3_primary"
-                    android:visibility="gone" />
-
                 <!-- 连接统计：运行时分辨率 + 实际帧率（1s 轮询差分，仅连接时显示） -->
                 <TextView
                     android:id="@+id/heroStats"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    android:text="分辨率 100% · 60 fps"
+                    android:text="等待视频信息"
                     android:textColor="#8E8E93"
                     android:textSize="11.5sp"
                     android:visibility="gone" />

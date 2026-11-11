@@ -1914,7 +1914,7 @@ object SessionController {
         // 新一次用户点击 = 新的 5 分钟等待预算（断链重连不再重置，见 pendingWaitBudgetStartedAt）
         pendingWaitBudgetStartedAt = 0L
         pendingWaitGaveUp = false
-        phaseHint = "蓝牙就绪，等待车机回连…"
+        phaseHint = "正在连接车机蓝牙，等待车机响应…"
         CarPlayService
             .start(context)
         // 能力发布先于连接（catplay 的做法：CarPlayCtrlServer 在会话一开始就常驻广播
@@ -2130,7 +2130,7 @@ object SessionController {
             lastWifiPsk = wifi.passphrase
             // 完整凭据留给「网络被动断开后自动重绑」用（见 onCarWifiLost）
             lastCarWifi = wifi
-            phaseHint = "拿到车机热点凭据，绑定 WiFi…"
+            phaseHint = "已获取热点信息，准备连接车机热点…"
             appendLog(">>> 拿到车机热点凭据（0x5703）——立即绑定 WiFi + 广播 _carplay-ctrl")
             // ctrl 广播已在 startConnection 时发布（catplay：连接前保持发布能力在线）。
             // 这里登记 SSID 并让注册对齐一次（手机若已手动连在车机热点上、自动加入不可用
@@ -2276,7 +2276,7 @@ object SessionController {
                     wifiLinkLost = false
                     appendLog("WIFI: 车机热点已重新绑定——网络恢复，本轮会话需重建后才生效")
                 }
-                phaseHint = "已加入车机热点"
+                phaseHint = "已加入车机热点，等待车机连接邀请…"
                 // 关键时机：bindProcessToNetwork 完成后再注册，车机才能看到 ctrl 广播
                 ctrlAdvertiser?.ensureForNetwork(wifi.ssid, force = true, network = connector.currentNetwork)
                 appendLog(">>> WiFi 已就位（车机热点），ctrl 广播已重新注册，等待车机 ctrl 邀请")
@@ -2680,7 +2680,7 @@ object SessionController {
         }
         work.runIfCurrent {
             if (bound && !cancelled()) {
-                phaseHint = "已加入车机热点"
+                phaseHint = "已加入车机热点，等待车机连接邀请…"
                 // 关键时机：bindProcessToNetwork 完成后再注册，车机才能看到 ctrl 广播
                 ctrlAdvertiser?.ensureForNetwork(ssid, force = true, network = wifiConnector?.currentNetwork)
                 appendLog(">>> WiFi 已绑定车机热点，ctrl 广播已重新注册，等待车机 ctrl 邀请（随后才回 0x4301）")
@@ -3016,7 +3016,7 @@ object SessionController {
             }
             if (!cancelled() && !sessionStarting.get() && pendingWatchGeneration.get() == generation) {
                 pendingWaitGaveUp = true
-                phaseHint = "车机未下发热点信息（0x4301），本轮已停止重试"
+                phaseHint = "未收到车机热点信息，本次连接已停止"
                 appendLog(
                     ">>> [$source] 空端点等待 ${PENDING_START_SESSION_WAIT_MS / 60_000} 分钟超时——" +
                         "车机始终未下发 0x4301（0x4300 各种报文体都试过了，见上方「0x4300 报文体形态」与" +
@@ -3715,7 +3715,7 @@ object SessionController {
         val needPort = !AirPlayEndpointPorts.valid(effective.airPlayPort)
         if (!needHost && !needPort) return effective
 
-        phaseHint = "mDNS 解析车机地址…"
+        phaseHint = "正在查找车机 CarPlay 服务…"
         appendLog(">>> [$source] 0x4301 端点不完整（port=${effective.airPlayPort} ips=${effective.ipAddresses}），取 mDNS 车机 _airplay._tcp…")
         // 用常驻发现器的缓存（绑网时已开始后台发现，通常此时已命中）。
         // 此前现起一次发现并硬重试 3×6s：车机 mDNS 稳定时白等，不稳定时又拖满 18s。
@@ -4261,7 +4261,7 @@ object SessionController {
                 ">>> [$source] 端点无 AP 信息（车机未在窗口内下发 0x4301）——蓝牙保持保活等待晚到 0x4301；" +
                     "检测到手机已连 WiFi 时会询问是否按车机热点继续",
             )
-            phaseHint = "等待车机下发连接信息（0x4301）…"
+            phaseHint = "等待车机提供连接信息…"
             finishAttempt()
             watchForPendingStartSession(endpoint, source, setup)
             return
@@ -4274,7 +4274,7 @@ object SessionController {
         // 解冻恢复只能靠这份快照重走交接（见 onProcessResumed）。
         if (!mutate {
             lastGoodEndpoint = endpoint
-            phaseHint = "蓝牙已连上车机，解析热点地址…"
+            phaseHint = "正在确认车机热点地址…"
             ssidSink?.invoke(endpoint.ssid)
         }) return
         // 0x4301 同样带热点密码（BMW iD9 不发 0x5703，AP 信息只走这条路）。
@@ -4525,7 +4525,7 @@ object SessionController {
                     // （典型：连着 DiPlay 测试台时不再噪音式探测 Audi）。会话结束/断开时解除。
                     mutate { BtSessionGate.sessionActive = true }
                     // 第一阶段：保持 BT 在位直接配对 + SETUP（协议上正确的形态）
-                    phaseHint = "AirPlay 配对中…"
+                    phaseHint = "正在验证 CarPlay 连接…"
                     connectBudget.enter(ConnectStage.PAIRING)
                     var client = newClient()
                     if (attemptCancelled()) { client.dispose(); return@run }
@@ -4671,7 +4671,7 @@ object SessionController {
                             pairingTerminal = client.pairingTerminal,
                         ).usePlainSession
                     if (plainSession) {
-                        phaseHint = "建立明文会话…"
+                        phaseHint = "正在建立 CarPlay 会话…"
                         appendLog(
                             "AIRPLAY: 配对不可用（${if (client.pairingUnsupported) "接收端不支持" else "配对失败"}）" +
                                 "——改用 et=NONE 明文会话 + AES-CTR 屏幕流（catplay 接收端分类 1/2）",
@@ -4707,7 +4707,7 @@ object SessionController {
                     }
                     if (pairedKeys != null) PairingMemory.clear(context)
                     if (pairedKeys != null || plainSession) {
-                        phaseHint = if (pairedKeys != null) "配对完成，建立 CarPlay 会话…" else "建立明文会话…"
+                        phaseHint = if (pairedKeys != null) "验证完成，正在建立画面与音频通道…" else "正在建立 CarPlay 会话…"
                         if (pairedKeys != null) {
                             appendLog(
                                 "AIRPLAY: ✓ 配对完成 writeKey=" +
@@ -5373,7 +5373,7 @@ object SessionController {
                                         "、/info " + (if (setup.displayFromCar) "有 displays" else "无 displays") +
                                         "）；若反复如此请在车机上重启 CarPlay",
                                 )
-                                phaseHint = "车机拒绝了屏幕流（SETUP）"
+                                phaseHint = "车机未接受画面连接，请重新连接"
                                 uiHintSink?.invoke("车机拒绝了屏幕流（SETUP）——若反复如此请重启车机侧 CarPlay")
                                 runCatching { client.close() }
                             }
@@ -5382,7 +5382,7 @@ object SessionController {
                             // AirPlayClient.runSetup 的 deviceID 说明）。主动关闭控制通道：
                             // 否则接收端要等约 45s 视频超时才拆 BT 链路，用户只看到
                             // 「连上之后自动断开」，无从判断是会话建立失败。
-                            phaseHint = "接收端拒绝了会话建立（SETUP 未通过）"
+                            phaseHint = "车机未接受 CarPlay 会话，请重新连接"
                             appendLog("AIRPLAY: 会话建立失败——主动关闭控制通道，本轮结束")
                             uiHintSink?.invoke("接收端拒绝了会话建立（SETUP）——请查看日志中的 deviceID 提示")
                             runCatching { client.close() }
