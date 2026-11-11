@@ -586,52 +586,6 @@
                     android:layout_marginStart="54dp"
                     android:background="#5A394444" />
 
-                <!-- 车机只认苹果设备时的兼容探针（默认关）：额外注册两条 CarPlay 占位
-                     SDP 记录，并让 iAP2 监听常开（App 一启动就发布服务）。
-                     不动已跑通的车型——奥迪 MIB3 这类固件根本不看 EIR/SDP 里的 Apple UUID -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:minHeight="56dp"
-                    android:orientation="horizontal"
-                    android:paddingTop="4dp"
-                    android:paddingBottom="4dp">
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="54dp"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="兼容「只认苹果设备」的车机"
-                            android:textColor="@color/m3_on_surface"
-                            android:textSize="13.5sp" />
-
-                        <TextView
-                            android:id="@+id/btCompatNote"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
-                            android:text="默认关闭。开启后多声明两条 CarPlay 服务，并让蓝牙监听常开（界面显示「不支持 Apple CarPlay」的车机可试）"
-                            android:textColor="@color/m3_on_var"
-                            android:textSize="11.5sp" />
-                    </LinearLayout>
-
-                    <androidx.appcompat.widget.SwitchCompat
-                        xmlns:app="http://schemas.android.com/apk/res-auto"
-                        android:id="@+id/switchBtCompat"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:thumb="@drawable/sw_thumb"
-                        app:track="@drawable/sw_track" />
-                </LinearLayout>
-
                 <!-- 本机蓝牙地址：接收端（WinPlay 等）按它做设备过滤，厂商脱敏时必须手填 -->
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -814,7 +768,7 @@
             </LinearLayout>
 
             <!-- 显示设置（原「显示」面板内容迁移至此，2026-10-24）：
-                 本地 CarLife 劫持开关 + 流分辨率缩放 + 触摸注入节流
+                 流分辨率缩放与导航显示
                  （目标帧率设置已移除：固定 60fps，见 DisplayPrefs.FPS） -->
             <LinearLayout
                 android:id="@+id/displayCard"
@@ -866,59 +820,10 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
-                            android:text="分辨率缩放 · 触摸节流 · 劫持开关"
+                            android:text="分辨率缩放 · 导航与显示"
                             android:textColor="@color/m3_on_var"
                             android:textSize="12sp" />
                     </LinearLayout>
-                </LinearLayout>
-
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginTop="12dp"
-                    android:layout_marginStart="52dp"
-                    android:background="#5A394444" />
-
-                <!-- 本地 CarLife 劫持开关 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="本地 CarLife 劫持"
-                            android:textColor="@color/m3_on_surface"
-                            android:textSize="14sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/carLifeHijackNote"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
-                            android:text="接管手机原生 CarLife 的码流直推车机（不改分辨率压缩）。"
-                            android:textColor="@color/m3_on_var"
-                            android:textSize="12sp" />
-                    </LinearLayout>
-
-                    <androidx.appcompat.widget.SwitchCompat
-                        xmlns:app="http://schemas.android.com/apk/res-auto"
-                        android:id="@+id/switchCarLifeHijack"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:thumb="@drawable/sw_thumb"
-                        app:track="@drawable/sw_track" />
                 </LinearLayout>
 
                 <View
@@ -1032,6 +937,8 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
                     android:text="@string/instrument_navigation"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
                     android:textColor="@color/m3_on_surface"
                     android:thumb="@drawable/sw_thumb"
                     app:track="@drawable/sw_track" />
@@ -1089,48 +996,6 @@
                     android:textColor="@color/m3_primary"
                     android:textSize="12.5sp" />
 
-                <!-- 触摸注入节流 -->
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:text="触摸注入节流"
-                    android:textColor="@color/m3_on_surface"
-                    android:textSize="14sp"
-                    android:textStyle="bold" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <SeekBar
-                        android:id="@+id/throttleSeek"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:max="6" />
-
-                    <TextView
-                        android:id="@+id/throttleValue"
-                        android:layout_width="72dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:gravity="end"
-                        android:text="关闭"
-                        android:textColor="@color/m3_on_var"
-                        android:textSize="12sp" />
-                </LinearLayout>
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:text="交互滞后但帧率正常（事件派发堆积）时调高试验；拖动即时生效"
-                    android:textColor="@color/m3_on_var"
-                    android:textSize="12sp" />
             </LinearLayout>
 
             <!-- ==================== 日志（默认折叠） ==================== -->

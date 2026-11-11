@@ -14,7 +14,7 @@ internal object NavigationNowPlaying {
     private val handler = Handler(Looper.getMainLooper())
     private var source: Any? = null
     private var settings: SharedPreferences? = null
-    private var selected = false
+    private var selected = true
     @Volatile var hasSelectedNavigation = false
         private set
     @Volatile var changed: () -> Unit = {}
@@ -35,7 +35,7 @@ internal object NavigationNowPlaying {
     @Synchronized fun ensure(ctx: Context) {
         if (settings != null) return
         settings = ctx.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
-        selected = settings!!.getBoolean("instrument_navigation", false)
+        selected = settings!!.getBoolean("instrument_navigation", true)
         hasSelectedNavigation = selected
     }
     @Synchronized fun isNavigation(): Boolean = selected

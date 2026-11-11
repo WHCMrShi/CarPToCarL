@@ -1068,46 +1068,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // 兼容「只认苹果设备」的车机（默认关，2026-11-07）：宝马 iD6 在蓝牙设备列表里
-        // 直接给本机打「设备不支持 Apple CarPlay」，那句判定发生在 iAP2 之前——改报文没用，
-        // 它看的是发现层（EIR 里的 iPhone CarPlay UUID / SDP 服务），而 Android 应用层
-        // 写不了 EIR。这里能做的是多注册两条占位 SDP 记录，并让监听常开
-        // （先配对、后开 App 的那一瞥也能看到服务）。见 BtCompatPrefs。
-        val switchBtCompat =
-            findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.switchBtCompat)
-        val btCompatNote = findViewById<TextView>(R.id.btCompatNote)
-        fun renderBtCompatNote(checked: Boolean) {
-            btCompatNote.text =
-                if (checked) {
-                    "已开启：多声明两条 CarPlay 服务 + 蓝牙监听常开（对照日志 BT-PROBE 看车机有没有连占位记录）"
-                } else {
-                    "默认关闭。开启后多声明两条 CarPlay 服务，并让蓝牙监听常开（界面显示「不支持 Apple CarPlay」的车机可试）"
-                }
-        }
-        switchBtCompat.isChecked = BtCompatPrefs.enabled(this)
-        renderBtCompatNote(switchBtCompat.isChecked)
-        switchBtCompat.setOnCheckedChangeListener { _, checked ->
-            BtCompatPrefs.setEnabled(this, checked)
-            renderBtCompatNote(checked)
-            SessionController.applyBtCompat(checked, fromUser = true)
-            log(
-                "BT-PROBE: 兼容模式已${if (checked) "开启" else "关闭"}" +
-                    if (checked) {
-                        "——额外注册 CarPlay 占位 SDP 记录并保持监听常开"
-                    } else {
-                        "——占位记录已撤下（不影响已建立的控制链路）"
-                    },
-            )
-            val missingForSwitch = if (checked) requiredConnectionPermissions() else emptyList()
-            if (missingForSwitch.isNotEmpty()) {
-                // 这里只申请权限，**不能**走 ensureBluetoothReady：它授权成功后会直接
-                // 发起整轮连接（pendingStartAfterPermission），而用户只是想开个开关。
-                // 分组申请（一次一个系统框），且不置 pending → 不会自动开始连接。
-                // 授权后由兼容模式看门狗在 30 秒内把占位记录挂上。
-                connectionPermissionLauncher.launch(missingForSwitch.toTypedArray())
-            }
-        }
-
         // 本机蓝牙地址：Honor/MagicOS 等机型把 MAC 全面脱敏（连 adb shell 都读不到），
         // 而 WinPlay 系接收端按它做设备过滤——手填是唯一可行来源，存进 settings 偏好，
         // DeviceIdentity 会优先采用（影响 0x4300/0x4E0E、AirPlay SETUP 与 ctrl 广播 id）。
@@ -1578,31 +1538,6 @@ class MainActivity : AppCompatActivity() {
         }
         val ctx = this
 
-        // 本地 CarLife 劫持开关：接管手机原生 CarLife 码流（默认开；失败自动回退隐形屏）
-        val hijackSwitch = findViewById<SwitchCompat>(R.id.switchCarLifeHijack)
-        val hijackNote = findViewById<TextView>(R.id.carLifeHijackNote)
-        hijackSwitch.isChecked = CarLifeHijack.isEnabled(ctx)
-
-        fun refreshHijackNote() {
-            val running = CarLifeHijack.isActive
-            hijackNote.text =
-                when {
-                    !hijackSwitch.isChecked ->
-                        "开启后每次连接都会优先尝试：需先在荣耀车联里进入「无线 WLAN 连接」并停在" +
-                            "「正在连接」；1.5 秒内接管不到会自动回退隐形屏。"
-                    running -> "已生效：当前画面来自手机原生 CarLife（触控经 CarLife 通道回传）。"
-                    else -> "已开启。请在手机上手动打开 CarLife+ 并点「无线连接」，端口一开即自动接管。"
-                }
-        }
-        refreshHijackNote()
-        hijackSwitch.setOnCheckedChangeListener { _, checked ->
-            CarLifeHijack.setEnabled(ctx, checked)
-            refreshHijackNote()
-            snack(
-                if (checked) "本地 CarLife 劫持已开启（下次连接起效）" else "本地 CarLife 劫持已关闭",
-            )
-        }
-
         // 「画面停摆自动恢复」（Q4 默认关闭）：只控制停摆看门狗要不要动手，
         // 关掉即回到「只记日志」的旧行为。下一轮引擎重连起生效（看门狗在轮次开始读一次）。
         val stallSwitch = findViewById<SwitchCompat>(R.id.switchStallRecovery)
@@ -1712,38 +1647,6 @@ class MainActivity : AppCompatActivity() {
         // 这里先按默认 60 起，等 SETUP 拿到车机值后由 SessionController 覆盖。
         VirtualLauncher.setStreamFps(StreamFps.DEFAULT_FPS)
 
-        // 触摸注入节流（0=关闭，步进 8ms）
-        val throttleSeek = findViewById<SeekBar>(R.id.throttleSeek)
-        val throttleValue = findViewById<TextView>(R.id.throttleValue)
-
-        fun throttleText(ms: Int) = if (ms <= 0) "关闭" else "${ms}ms"
-
-        val savedThrottle = DisplayPrefs.moveThrottleMs(ctx)
-        throttleSeek.progress = savedThrottle / 8
-        throttleValue.text = throttleText(savedThrottle)
-        TouchRouter.moveThrottleMs = savedThrottle.toLong()
-
-        throttleSeek.setOnSeekBarChangeListener(
-            object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(
-                    seekBar: SeekBar?,
-                    progress: Int,
-                    fromUser: Boolean,
-                ) {
-                    if (!fromUser) return
-                    val ms = progress * 8
-                    throttleValue.text = throttleText(ms)
-                    DisplayPrefs.setMoveThrottleMs(ctx, ms)
-                    TouchRouter.moveThrottleMs = ms.toLong()
-                }
-
-                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-
-                override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                    snack("触摸节流 ${throttleText(DisplayPrefs.moveThrottleMs(ctx))}")
-                }
-            },
-        )
     }
 
     private fun updateAudioTag() {

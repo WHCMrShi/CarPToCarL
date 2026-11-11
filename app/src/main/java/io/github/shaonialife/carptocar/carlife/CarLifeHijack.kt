@@ -29,7 +29,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 object CarLifeHijack {
 
     private const val PREFS = "settings"
-    private const val KEY_ENABLED = "carlife_hijack_enabled"
 
     /** 向 CarLife 引擎申请的编码帧率（60 = 跟手，30 = 省电）。 */
     private const val KEY_FPS = "carlife_fps"
@@ -105,7 +104,6 @@ object CarLifeHijack {
      * 2026-10-24 起画面唯一来源就是「本地劫持原生 CarLife」（自绘桌面已移除），
      * 关着劫持 = 永远黑屏，所以默认改回开启。老安装若被 v2 关掉过，这里一次性打开。
      */
-    private const val KEY_MIGRATED_ON_V3 = "carlife_hijack_default_on_v3"
 
     /** 未接入会话时缓存的最大 GOP 字节数 / 帧数（约 2 秒 720p 的量级）。 */
     private const val MAX_GOP_BYTES = 6 * 1024 * 1024
@@ -443,23 +441,9 @@ object CarLifeHijack {
     @Volatile
     var onActualStreamSize: ((Int, Int) -> Unit)? = null
 
-    fun isEnabled(context: Context): Boolean {
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        // v3 迁移：画面唯一来源就是 CarLife 劫持，默认改回开启。老安装若被 v2 关掉过，
-        // 这里一次性打开；之后完全尊重用户在设置里的选择。
-        if (!prefs.getBoolean(KEY_MIGRATED_ON_V3, false)) {
-            prefs.edit()
-                .putBoolean(KEY_ENABLED, true)
-                .putBoolean(KEY_MIGRATED_ON_V3, true)
-                .apply()
-        }
-        return prefs.getBoolean(KEY_ENABLED, true)
-    }
-
-    fun setEnabled(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putBoolean(KEY_ENABLED, enabled).apply()
-    }
+    /** Q4 始终启用本地 CarLife 接管，忽略历史设置。 */
+    @Suppress("UNUSED_PARAMETER")
+    fun isEnabled(context: Context): Boolean = true
 
     /**
      * 开始守候本机 CarLife+（**不拉起任何应用**，也不需要视频会话）。
