@@ -109,7 +109,7 @@
                                 android:layout_marginTop="7dp"
                                 android:gravity="center"
                                 android:maxWidth="300dp"
-                                android:text="与车机蓝牙完成配对后，点击下方按钮发起无线连接"
+                                android:text="点击下方按钮发起连接"
                                 android:textColor="@color/m3_on_var"
                                 android:textSize="14sp"
                                 android:accessibilityLiveRegion="polite" />

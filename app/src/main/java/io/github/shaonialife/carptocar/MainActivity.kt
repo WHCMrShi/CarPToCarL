@@ -83,7 +83,7 @@ class MainActivity : AppCompatActivity() {
         const val TIP_MAC_MISSING = "本机蓝牙地址未填写 —— 请先在「连接准备」里填写并保存"
 
         /** 地址就绪时的英雄卡副标题（与「未填写」提示互斥）。 */
-        const val HINT_IDLE_READY = "与车机蓝牙完成配对后，点击下方按钮发起无线连接"
+        const val HINT_IDLE_READY = "点击下方按钮发起连接"
 
         /** 「启动连接」被门禁拦下时的视觉强度（不透明度）。 */
         const val CTA_BLOCKED_ALPHA = 0.45f
@@ -1008,10 +1008,11 @@ class MainActivity : AppCompatActivity() {
         // 启动残留虚拟屏检测（页面已不再展示 Shell 状态，仅保留自动清理与英雄卡状态联动）
         detectResidualDisplays()
 
-        // ---- 日志开关（默认开；关闭后不采集、不渲染；选择持久化） ----
-        var logEnabled = preferences.getBoolean("logEnabled", true)
+        // ---- 实时日志开关（默认关闭；不影响文件记录和导出；选择持久化） ----
+        var logEnabled = preferences.getBoolean("logEnabled", false)
         SessionController.logEnabled = logEnabled
         switchLog.isChecked = logEnabled
+        renderConsole(SessionController.logText())
         switchLog.setOnCheckedChangeListener { _, checked ->
             logEnabled = checked
             SessionController.logEnabled = checked
@@ -2088,7 +2089,7 @@ class MainActivity : AppCompatActivity() {
         // 改文本前已在底部（或用户上翻阅读中）：决定本次是否自动跟底
         val follow = consoleAtBottom()
         logText.text =
-            if (SessionController.logEnabled) text else "日志采集已关闭（打开「监听日志」开关恢复）"
+            if (SessionController.logEnabled) text else "实时显示已关闭，文件日志仍会记录，可直接导出"
         logText.post {
             if (follow) scrollConsoleToBottom() else updateLogBottomButton()
         }

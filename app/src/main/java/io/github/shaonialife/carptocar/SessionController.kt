@@ -104,9 +104,9 @@ object SessionController {
     var logGeneration: Long = 0
         private set
 
-    /** 「监听日志」开关（由 Activity 从偏好读取后同步；关闭时不采集不渲染）。 */
+    /** 实时日志显示开关；关闭时跳过内存缓冲和 UI 更新，文件日志与 logcat 继续记录。 */
     @Volatile
-    var logEnabled: Boolean = true
+    var logEnabled: Boolean = false
 
     @Volatile
     private var appContext: Context? = null
