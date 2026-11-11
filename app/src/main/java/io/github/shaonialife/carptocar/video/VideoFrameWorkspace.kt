@@ -18,12 +18,6 @@ internal class VideoFrameWorkspace(
     var size: Int = 0
         private set
 
-    // Wall-clock phases; diagnostics only, no changes to cipher inputs or lifetime.
-    var packNs = 0L; private set
-    var initNs = 0L; private set
-    var cryptNs = 0L; private set
-    var grew = false; private set
-
     private fun capacity(required: Int): Int {
         var capacity = 1024
         while (capacity < required) capacity *= 2
@@ -31,14 +25,11 @@ internal class VideoFrameWorkspace(
     }
 
     fun seal(units: List<NalSlice>, header: ByteArray, counter: Long): ByteArray {
-        val started = System.nanoTime()
-        packNs = 0; initNs = 0; cryptNs = 0
         require(header.size == 128)
         val bodySize = AnnexBNals.avccSize(units)
         val tag = if (mode is StreamFrameCipher.ChaCha) 16 else 0
         size = 128 + bodySize + tag
         // 仅限制常驻工作区，不拒绝更大的合法输入；超大帧使用一次性数组。
-        grew = wire.size < size || (mode is StreamFrameCipher.ChaCha && plain.size < bodySize)
         val retainedLimit = 8 * 1024 * 1024
         val target = if (size > retainedLimit) ByteArray(size) else {
             if (wire.size < size) wire = ByteArray(capacity(size))
@@ -54,23 +45,15 @@ internal class VideoFrameWorkspace(
                 AnnexBNals.pack(units, input, 0)
                 for (i in 0..7) nonce[4 + i] = (counter ushr (8 * i)).toByte()
                 // 保留原来的逐帧 cipher 初始化；通道重连计数归零无需增加隐藏状态。
-                val packed = System.nanoTime()
-                packNs = packed - started
                 val cipher = ChaCha20Poly1305()
                 cipher.init(true, AEADParameters(requireNotNull(key), 128, nonce))
                 cipher.processAADBytes(header, 0, header.size)
-                val initialized = System.nanoTime()
-                initNs = initialized - packed
                 val count = cipher.processBytes(input, 0, bodySize, target, 128)
                 cipher.doFinal(target, 128 + count)
-                cryptNs = System.nanoTime() - initialized
             }
             is StreamFrameCipher.AesCtr -> {
                 AnnexBNals.pack(units, target, 128)
-                val packed = System.nanoTime()
-                packNs = packed - started
                 requireNotNull(aes).applyKeystream(target, 128, bodySize)
-                cryptNs = System.nanoTime() - packed
             }
         }
         return target

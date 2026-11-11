@@ -19,22 +19,16 @@ internal class VideoIngressQueue(
     private var closed = false
     private var dropped = 0L
     private var lastReport = 0L
-    private var lastReset = "none"
-    private var ageResets = 0L
-    private var capacityResets = 0L
-    private var lastResetAgeMs = 0L
-    private var lastResetFrames = 0
-    private var lastResetBytes = 0
     private val worker = Thread({ run() }, "video-source-send").apply { isDaemon = true; start() }
 
     fun offer(data: ByteArray, idr: Boolean, timestamp: Long?, sourceGeneration: Long = 0L): Boolean = synchronized(lock) {
         if (closed) return false
         val now = clock()
         if (data.isEmpty() || data.size > maxBytes) {
-            resetLocked("invalid-size"); dropped++; report(now); return false
+            resetLocked(); dropped++; report(now); return false
         }
         if (frames.isNotEmpty() && (bytes + data.size > maxBytes || frames.size >= maxFrames || now - frames.first().at > maxAgeNs)) {
-            resetLocked(if (now - frames.first().at > maxAgeNs) "offer-age" else "capacity")
+            resetLocked()
         }
         if (waitingIdr && !idr) { dropped++; report(now); return false }
         if (idr) waitingIdr = false
@@ -44,13 +38,8 @@ internal class VideoIngressQueue(
         true
     }
 
-    fun reset() = synchronized(lock) { resetLocked("explicit") }
-    private fun resetLocked(reason: String) {
-        lastReset = reason
-        lastResetAgeMs = frames.firstOrNull()?.let { (clock() - it.at) / 1_000_000 } ?: 0
-        lastResetFrames = frames.size; lastResetBytes = bytes
-        if (reason.endsWith("age")) ageResets++
-        if (reason == "capacity" || reason == "invalid-size") capacityResets++
+    fun reset() = synchronized(lock) { resetLocked() }
+    private fun resetLocked() {
         dropped += frames.size
         frames.clear(); bytes = 0; waitingIdr = true; epoch++
     }
@@ -58,7 +47,7 @@ internal class VideoIngressQueue(
     fun isCurrent(frame: Frame): Boolean = synchronized(lock) { !closed && frame.owner === identity && frame.epoch == epoch }
 
     fun describe(now: Long): String = synchronized(lock) {
-        "pending=${frames.size},bytes=$bytes,oldestMs=${frames.firstOrNull()?.let { (now - it.at) / 1_000_000 } ?: 0},dropped=$dropped,waitingIdr=$waitingIdr,epoch=$epoch,reset=$lastReset,ageResets=$ageResets,capacityResets=$capacityResets,resetAgeMs=$lastResetAgeMs,resetFrames=$lastResetFrames,resetBytes=$lastResetBytes"
+        "pending=${frames.size},bytes=$bytes,oldestMs=${frames.firstOrNull()?.let { (now - it.at) / 1_000_000 } ?: 0},dropped=$dropped,waitingIdr=$waitingIdr,epoch=$epoch"
     }
 
     private fun take(): Frame? = synchronized(lock) {
@@ -67,7 +56,7 @@ internal class VideoIngressQueue(
             if (closed) return null
             val now = clock()
             if (now - frames.first().at > maxAgeNs) {
-                resetLocked("take-age"); report(now); continue
+                resetLocked(); report(now); continue
             }
             val frame = frames.removeFirst()
             bytes -= frame.data.size
@@ -79,7 +68,7 @@ internal class VideoIngressQueue(
 
     private fun report(now: Long) {
         if (dropped == 0L || now - lastReport < 5_000_000_000L) return
-        log("VIDEO-QUEUE: dropped=$dropped pending=${frames.size} bytes=$bytes waitingIdr=$waitingIdr epoch=$epoch reset=$lastReset ageResets=$ageResets capacityResets=$capacityResets resetAgeMs=$lastResetAgeMs resetFrames=$lastResetFrames resetBytes=$lastResetBytes")
+        log("VIDEO-QUEUE: dropped=$dropped pending=${frames.size} bytes=$bytes waitingIdr=$waitingIdr epoch=$epoch")
         lastReport = now
     }
 
@@ -97,7 +86,7 @@ internal class VideoIngressQueue(
     }
 
     override fun close() {
-        synchronized(lock) { closed = true; resetLocked("close"); lock.notifyAll() }
+        synchronized(lock) { closed = true; resetLocked(); lock.notifyAll() }
         worker.interrupt()
     }
 }

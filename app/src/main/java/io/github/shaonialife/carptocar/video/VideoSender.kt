@@ -152,10 +152,6 @@ class VideoSender(
     private val stageWindow = io.github.shaonialife.carptocar.util.MediaStageWindow("video scope=frame-config-keepalive", 100_000_000L)
     private var stageSealNs = 0L
     private var stageSendNs = 0L
-    private fun threadCpuNanos(): Long = runCatching { android.os.Debug.threadCpuTimeNanos() }.getOrDefault(-1L)
-
-    private var lastSlowFrameLogNs = 0L // writeLock-owned
-    private var lastIngressLogNs = 0L // submissionLock-owned
 
     private fun writeStream(kind: String, output: java.io.OutputStream, body: () -> Unit) {
         val waiting = System.nanoTime()
@@ -593,14 +589,7 @@ class VideoSender(
         // 预置 csd 仍然有用：它让首个 IDR 一到就能立刻发 config，只是不许放行 P 帧。
         beginAwaitingKeyFrame()
         val queue = VideoIngressQueue(consume = { frame ->
-            val dequeuedAt = System.nanoTime()
             synchronized(submissionLock) {
-                val acquiredAt = System.nanoTime()
-                if (acquiredAt - lastIngressLogNs >= 1_000_000_000L &&
-                    (acquiredAt - frame.at >= 80_000_000L || framesSent < 100)) {
-                    lastIngressLogNs = acquiredAt
-                    log("VIDEO-PATH: ingress epoch=${frame.epoch} source=${frame.sourceGeneration} bytes=${frame.data.size} idr=${frame.idr} sourceTs=${frame.timestamp} queueUs=${(dequeuedAt - frame.at) / 1000} submissionWaitUs=${(acquiredAt - dequeuedAt) / 1000}")
-                }
                 val current = sourceQueue
                 if (running.get() && current?.isCurrent(frame) == true &&
                     q4Handover.isSourceCurrent(frame.sourceGeneration) &&
@@ -1348,24 +1337,15 @@ class VideoSender(
                     OP_FRAME,
                     if (frameCipher is StreamFrameCipher.ChaCha) size + TAG_SIZE else size,
                 )
-            val sealCpuStarted = threadCpuNanos()
             val sealStarted = System.nanoTime()
             val wire = frameWorkspace.seal(nalUnits, header, frameCounter)
             stageSealNs = System.nanoTime() - sealStarted
-            val sealCpuEnded = threadCpuNanos()
-            val sealCpuNs = if (sealCpuStarted >= 0 && sealCpuEnded >= sealCpuStarted) sealCpuEnded - sealCpuStarted else -1000L
             frameCounter++
             val sendStarted = System.nanoTime()
             try {
                 output.write(wire, 0, frameWorkspace.size)
                 output.flush()
             } finally { stageSendNs = System.nanoTime() - sendStarted }
-            val completed = System.nanoTime()
-            if ((stageSealNs >= 80_000_000L || stageSendNs >= 80_000_000L || framesSent < 3) &&
-                completed - lastSlowFrameLogNs >= 1_000_000_000L) {
-                lastSlowFrameLogNs = completed
-                log("VIDEO-WRITE: frame=$framesSent bytes=$size idr=$keyFrame sealWallUs=${stageSealNs / 1000} sealCpuUs=${sealCpuNs / 1000} packUs=${frameWorkspace.packNs / 1000} initUs=${frameWorkspace.initNs / 1000} cryptUs=${frameWorkspace.cryptNs / 1000} grew=${frameWorkspace.grew} sendUs=${stageSendNs / 1000}; wall includes scheduling, CPU delta does not identify GC")
-            }
         }
         framesSent++
         framesSinceKeepAlive++
