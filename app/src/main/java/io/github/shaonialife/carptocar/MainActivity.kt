@@ -58,7 +58,6 @@ import io.github.shaonialife.carptocar.util.Bg
 import io.github.shaonialife.carptocar.util.DeviceIdentity
 import io.github.shaonialife.carptocar.util.LogExporter
 import io.github.shaonialife.carptocar.util.SysShell
-import io.github.shaonialife.carptocar.video.StallRecoveryPrefs
 import io.github.shaonialife.carptocar.video.StreamFps
 import java.util.Locale
 
@@ -1537,21 +1536,6 @@ class MainActivity : AppCompatActivity() {
             io.github.shaonialife.carptocar.media.NavigationNowPlaying.select(enabled)
         }
         val ctx = this
-
-        // 「画面停摆自动恢复」（Q4 默认关闭）：只控制停摆看门狗要不要动手，
-        // 关掉即回到「只记日志」的旧行为。下一轮引擎重连起生效（看门狗在轮次开始读一次）。
-        val stallSwitch = findViewById<SwitchCompat>(R.id.switchStallRecovery)
-        val stallNote = findViewById<TextView>(R.id.stallRecoveryNote)
-        val stallDefault =
-            "Q4 默认关闭。开启后画面停摆 8 秒可请求编码器 IDR，不强制重建 CarLife 会话" +
-                "（通话中不干预）；关闭后只在日志里记录"
-        stallSwitch.isChecked = StallRecoveryPrefs.recoveryEnabled(ctx)
-        stallNote.text = if (stallSwitch.isChecked) stallDefault else "已关闭：停摆只记日志，不重建编码器、也不重建会话。"
-        stallSwitch.setOnCheckedChangeListener { _, checked ->
-            StallRecoveryPrefs.setRecoveryEnabled(ctx, checked)
-            stallNote.text = if (checked) stallDefault else "已关闭：停摆只记日志，不重建编码器、也不重建会话。"
-            snack(if (checked) "画面停摆自动恢复已开启" else "画面停摆自动恢复已关闭（仅记日志）")
-        }
 
         // 「使用车机 GPS」（默认开）：只控制要不要把车机 0xFFFB 定位转成 CarLife 0x18010。
         // 关掉即回到「完全用手机定位」，随时可来回切（下一条定位就按新值走）。

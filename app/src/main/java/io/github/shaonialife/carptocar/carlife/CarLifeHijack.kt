@@ -952,14 +952,10 @@ object CarLifeHijack {
      */
     private fun startStallWatchdog(scope: ConnectionResources) {
         scope.start("carlife-stall-watch") {
-            val recover = appContext?.let { io.github.shaonialife.carptocar.video.StallRecoveryPrefs.recoveryEnabled(it) } ?: false
-            var owner: CarLifeHuClient? = null
-            var lastReinit = Long.MIN_VALUE
             while (running.get() && !scope.isClosed) {
                 try { Thread.sleep(STALL_POLL_MILLIS) } catch (_: InterruptedException) { return@start }
                 if (!running.get() || scope.isClosed) return@start
-                val hu = client ?: continue
-                if (owner !== hu) { owner = hu; lastReinit = Long.MIN_VALUE }
+                if (client == null) continue
                 if (sender == null || !hasVideo) continue
                 val now = android.os.SystemClock.uptimeMillis()
                 val age = io.github.shaonialife.carptocar.video.StallJudge.frameAgeMs(lastSourceFrameAt, now)
@@ -967,15 +963,6 @@ object CarLifeHijack {
                 if (stallSince == 0L) {
                     stallSince = lastSourceFrameAt
                     logSink?.invoke("CARLIFE: 画面源停摆 ${age / 1000}s（最后帧龄，低帧率心跳不判停摆）")
-                }
-                val mode = runCatching { appContext?.getSystemService(android.media.AudioManager::class.java)?.mode }.getOrNull()
-                val inCall = mode == null || mode == android.media.AudioManager.MODE_IN_CALL || mode == android.media.AudioManager.MODE_IN_COMMUNICATION || mode == android.media.AudioManager.MODE_RINGTONE
-                if (io.github.shaonialife.carptocar.video.StallJudge.q4ShouldReinit(age, recover, inCall,
-                        if (lastReinit == Long.MIN_VALUE) Long.MAX_VALUE else now - lastReinit) &&
-                    !scope.isClosed && client === hu && hu.isRunning) {
-                    lastReinit = now
-                    hu.requestVideoReinit("stall-watchdog")
-                    logSink?.invoke("CARLIFE: Q4 停摆轻量恢复：请求编码器 IDR；不强制重建 HU")
                 }
             }
         }
