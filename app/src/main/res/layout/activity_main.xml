@@ -678,33 +678,24 @@
                             android:layout_width="20dp"
                             android:layout_height="20dp"
                             android:layout_gravity="center"
-                            android:contentDescription="显示"
-                            android:src="@drawable/ic_menu_display" />
+                            android:contentDescription="仪表导航"
+                            android:src="@drawable/ic_instrument_navigation" />
                     </FrameLayout>
 
-                    <LinearLayout
+                    <androidx.appcompat.widget.SwitchCompat
+                        xmlns:app="http://schemas.android.com/apk/res-auto"
+                        android:id="@+id/switchInstrumentNavigation"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="14dp"
                         android:layout_weight="1"
-                        android:orientation="vertical">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="显示"
-                            android:textColor="@color/m3_on_surface"
-                            android:textSize="14.5sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
-                            android:text="导航与定位显示"
-                            android:textColor="@color/m3_on_var"
-                            android:textSize="12sp" />
-                    </LinearLayout>
+                        android:minHeight="48dp"
+                        android:text="@string/instrument_navigation"
+                        android:textColor="@color/m3_on_surface"
+                        android:textSize="14.5sp"
+                        android:textStyle="bold"
+                        android:thumb="@drawable/sw_thumb"
+                        app:track="@drawable/sw_track" />
                 </LinearLayout>
 
                 <View
@@ -722,7 +713,20 @@
                     android:gravity="center_vertical"
                     android:orientation="horizontal">
 
+                    <FrameLayout
+                        android:layout_width="38dp"
+                        android:layout_height="38dp"
+                        android:background="@drawable/bg_icon_tile">
+                        <ImageView
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:layout_gravity="center"
+                            android:contentDescription="车机定位"
+                            android:src="@drawable/ic_car_gps" />
+                    </FrameLayout>
+
                     <LinearLayout
+                        android:layout_marginStart="14dp"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
@@ -763,18 +767,6 @@
                     android:layout_marginStart="52dp"
                     android:background="#5A394444" />
 
-                <androidx.appcompat.widget.SwitchCompat
-                    android:id="@+id/switchInstrumentNavigation"
-                    xmlns:app="http://schemas.android.com/apk/res-auto"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/instrument_navigation"
-                    android:textSize="14sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/m3_on_surface"
-                    android:thumb="@drawable/sw_thumb"
-                    app:track="@drawable/sw_track" />
                 <TextView
                     android:id="@+id/displayResolutionNote"
                     android:layout_width="match_parent"
