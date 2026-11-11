@@ -618,9 +618,6 @@ object SessionController {
 
     // ---- 「显示」运行时生效值（会话建立时快照；英雄卡展示运行时值而非偏好值）----
 
-    /** 本会话流分辨率缩放百分比（按车机分辨率的百分比生成；100=原尺寸）。 */
-    @Volatile
-    var activeScalePercent: Int = 100
 
     /**
      * 本会话目标帧率：车机 `/info displays[0].maxFPS` 有值就跟随，没声明按 60
@@ -5040,38 +5037,26 @@ object SessionController {
                                 var pendingVideoH = 0
                                 var pendingVideoDensity = 0
                                 if (host != null) {
-                                    // 「显示」偏好：流画布/虚拟屏按车机分辨率百分比生成。
-                                    // 只在会话建立时生效——编码器与虚拟屏尺寸此时定型；
-                                    // 密度同步缩放，逻辑布局（dp）与 100% 完全一致。
-                                    val scalePct =
-                                        appContext
-                                            ?.let {
-                                                DisplayPrefs
-                                                    .scalePercent(it)
-                                            } ?: 100
-                                    val scale = scalePct / 100f
-                                    // 缩放后向下对齐偶数（H.264 要求）：虚拟屏/合成器/编码器
+                                    // 车机画布向下对齐偶数（H.264 要求）：虚拟屏/合成器/编码器
                                     // 三方必须同一尺寸，故在源头对齐（VideoSender 内另有兜底）
                                     val streamW =
-                                        ((setup.displayWidth * scale).toInt().coerceAtLeast(320) / 2) * 2
+                                        (setup.displayWidth.coerceAtLeast(320) / 2) * 2
                                     val streamH =
-                                        ((setup.displayHeight * scale).toInt().coerceAtLeast(180) / 2) * 2
+                                        (setup.displayHeight.coerceAtLeast(180) / 2) * 2
                                     // 目标帧率：车机 `/info displays[0].maxFPS` 说了算，
                                     // 车机没声明按 60（判定见 video/StreamFps.kt）。
                                     val sessionTargetFps = StreamFps.resolve(setup.maxFps)
-                                    activeScalePercent = scalePct
                                     activeTargetFps = sessionTargetFps
                                     // 合成器出帧节奏跟着走：attach 时按 60 建（那时还没
                                     // SETUP），车机上限要到这一刻才知道。不同步的话
                                     // 多出来的帧会白白送去编码再丢掉。
                                     VirtualLauncher.setStreamFps(sessionTargetFps)
                                     // 记录「车机通告分辨率」原值：英雄卡与「显示」卡片要如实
-                                    // 展示它，而不是只显示缩放百分比（用户根本看不出画布多大）。
+                                    // 展示车机画布与实际码流尺寸。
                                     activeCarWidth = setup.displayWidth
                                     activeCarHeight = setup.displayHeight
                                     activeCarResolutionFromCar = setup.displayFromCar
-                                    // 车机触摸在通告视图坐标系（如 1160×540），流已按比例
-                                    // 缩放（如 1450×674）——注入前需映射，否则点击漂移
+                                    // 触摸坐标从车机通告视图映射到本地画布，保留尺寸对齐后的映射。
                                     TouchRouter
                                         .setCoordinateScale(
                                             setup.displayWidth,
@@ -5131,7 +5116,7 @@ object SessionController {
                                             } else {
                                                 "（车机未通告·手机横屏兜底）"
                                             }) +
-                                            " → 流 ${streamOutW}×${streamOutH}（$scalePct%）" +
+                                            " → 流 ${streamOutW}×${streamOutH}" +
                                             "@${sessionTargetFps}fps（${StreamFps.describe(setup.maxFps)}）",
                                     )
                                     if (streamOutW != streamW || streamOutH != streamH) {

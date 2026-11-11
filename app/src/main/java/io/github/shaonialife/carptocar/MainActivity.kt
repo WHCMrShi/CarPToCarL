@@ -25,7 +25,6 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.SeekBar
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -968,7 +967,7 @@ class MainActivity : AppCompatActivity() {
 
         // ---- 连接准备 ----
         // 启动后自动连接：默认开启。打开 App 即发起连接，不必每次点英雄卡；
-        // 需要在连之前改「下次连接起效」的项（分辨率缩放 / CarLife 劫持开关）时关掉它。
+        // 需要手动控制连接启动时关掉它。
         val autoConnectNote = findViewById<TextView>(R.id.autoConnectNote)
         val switchAutoConnect = findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.switchAutoConnect)
         switchAutoConnect.isChecked = AutoConnectPrefs.enabled(this)
@@ -1556,76 +1555,6 @@ class MainActivity : AppCompatActivity() {
                 }
             snack(if (checked) "已启用：使用车机 GPS" else "已关闭：只用手机定位")
         }
-
-        // 流分辨率缩放（30%–160%，步进 5；下次连接起效）
-        val scaleSeek = findViewById<SeekBar>(R.id.displayScaleSeek)
-        val scaleValue = findViewById<TextView>(R.id.displayScaleValue)
-        val scaleNote = findViewById<TextView>(R.id.displayScaleNote)
-
-        fun progressOf(percent: Int) = (percent - DisplayPrefs.SCALE_MIN) / DisplayPrefs.SCALE_STEP
-
-        fun percentOf(progress: Int) = DisplayPrefs.SCALE_MIN + progress * DisplayPrefs.SCALE_STEP
-
-        val saved = DisplayPrefs.scalePercent(ctx)
-        scaleSeek.progress = progressOf(saved)
-        scaleValue.text = "$saved%"
-
-        fun refreshScaleNote() {
-            val runningNow = SessionController.videoSender?.isRunning == true
-            val percent = DisplayPrefs.scalePercent(ctx)
-            // 百分比单独摆着没有信息量：顺手换算成像素（与 SessionController 同一套
-            // 偶数对齐、最小边限制），用户一眼能看出「120% 到底是多少」。
-            val car =
-                if (runningNow && SessionController.activeCarWidth > 0) {
-                    SessionController.activeCarWidth to SessionController.activeCarHeight
-                } else {
-                    DisplayPrefs.lastSession(ctx)?.let { it.carWidth to it.carHeight }
-                }
-            val mapped =
-                car?.let { (w, h) ->
-                    val sw = ((w * percent / 100f).toInt().coerceAtLeast(320) / 2) * 2
-                    val sh = ((h * percent / 100f).toInt().coerceAtLeast(180) / 2) * 2
-                    "$percent% ≈ ${sw}×$sh"
-                }
-            scaleNote.text =
-                when {
-                    runningNow ->
-                        "保存后下次连接起效；当前连接按 ${SessionController.activeScalePercent}% 运行" +
-                            (mapped?.let { "（$it）" } ?: "") +
-                            // 直通模式下码流尺寸是 CarLife 引擎说了算，缩放只影响本地虚拟屏：
-                            // 不点明的话，这行的像素换算会被当成「实际在推的分辨率」。
-                            if (CarLifeHijack.isAttached || CarLifeHijack.isActive) {
-                                " · 直通码流由引擎定"
-                            } else {
-                                ""
-                            }
-                    mapped != null -> "保存后下次连接起效 · $mapped"
-                    else -> "保存后下次连接起效"
-                }
-        }
-        refreshScaleNote()
-
-        scaleSeek.setOnSeekBarChangeListener(
-            object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(
-                    seekBar: SeekBar?,
-                    progress: Int,
-                    fromUser: Boolean,
-                ) {
-                    if (!fromUser) return
-                    scaleValue.text = "${percentOf(progress)}%"
-                }
-
-                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-
-                override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                    val percent = percentOf(scaleSeek.progress)
-                    DisplayPrefs.setScalePercent(ctx, percent)
-                    snack("分辨率 $percent% 已保存，下次连接起效")
-                    refreshScaleNote()
-                }
-            },
-        )
 
         // 目标帧率没有设置项：车机 /info 报 maxFPS 就跟随，没报按 60（见 video/StreamFps.kt）。
         // 这里先按默认 60 起，等 SETUP 拿到车机值后由 SessionController 覆盖。
