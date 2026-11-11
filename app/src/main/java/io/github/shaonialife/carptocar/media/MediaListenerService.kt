@@ -27,9 +27,8 @@ class MediaListenerService : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         // 已连上即代表系统认可本应用的通知使用权（此时 metadata 才会可读）。
-        // 两个状态都置位：NotificationAccess 供「是否要再试授权」判断，
+        // 两个状态都置位：NotificationAccess 供「是否要请求重绑」判断，
         // MediaSessionsState 供 UI 文案区分「没在播放」与「读不到信息」。
-        NotificationAccess.markGranted()
         NotificationAccess.markConnected()
         MediaSessionsState.accessGranted = true
         try {
@@ -63,6 +62,8 @@ class MediaListenerService : NotificationListenerService() {
     }
 
     override fun onDestroy() {
+        NotificationAccess.markDisconnected()
+        MediaSessionsState.accessGranted = false
         mainHandler.removeCallbacks(periodicRefresh)
         runCatching { manager.removeOnActiveSessionsChangedListener(sessionListener) }
         unregisterAll()

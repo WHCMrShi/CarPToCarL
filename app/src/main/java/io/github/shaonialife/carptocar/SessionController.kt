@@ -305,8 +305,6 @@ object SessionController {
         if (mediaWatchdogStarted) return
         mediaWatchdogStarted = true
         Thread({
-            var attempts = 0
-            var hinted = false
             while (true) {
                 val connected = NotificationAccess.isConnected
                 try {
@@ -316,19 +314,10 @@ object SessionController {
                 }
                 if (NotificationAccess.isConnected) continue
                 val context = appContext ?: continue
-                attempts++
                 NotificationAccess.requestSystemRebind(context, ::appendLog)
-                // requestRebind 在部分 ROM（荣耀 MagicOS 实测）不生效：系统只认
-                // 「通知使用权」设置页里的手动关→开。3 次（≈24s）仍没绑上就明说，
-                // 免得用户对着没有歌名的车机猜。
-                if (!hinted && attempts >= 3) {
-                    hinted = true
-                    appendLog(
-                        "MEDIA: ⚠ 通知使用权已授权但系统始终没绑定监听器——" +
-                            "请到「设置 → 通知使用权」把本应用关掉再打开一次（车机歌名依赖它）",
-                    )
-                    uiHintSink?.invoke("车机歌名不显示：请到「设置 → 通知使用权」把本应用关掉再打开")
-                }
+                // 未收到监听器回调只说明此数据源尚未就绪，不能推断车机歌名异常。
+                // 可能尚未连接车机、没有播放，或正在使用 CarLife/导航信息源。
+                // 重绑过程仅写限频诊断日志，不按启动后的轮询次数弹出故障提示。
             }
         }, "media-watchdog").apply { isDaemon = true }.start()
     }
