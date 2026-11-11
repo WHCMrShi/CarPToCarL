@@ -3,7 +3,7 @@
     <item>
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
     <solid android:color="#00000000" />
-    <corners android:radius="999dp" />
+    <corners android:radius="@dimen/q4_corner_action" />
     <stroke android:width="2dp" android:color="@color/m3_error" />
 </shape>
     </item>

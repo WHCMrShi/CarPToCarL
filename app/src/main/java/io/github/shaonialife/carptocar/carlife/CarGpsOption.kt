@@ -3,7 +3,7 @@ package io.github.shaonialife.carptocar.carlife
 import android.content.Context
 
 /**
- * 「使用车机 GPS」开关（偏好 `carlife_car_gps`，默认开）。
+ * 「使用车机 GPS」开关（偏好 `car_gps_option_v1`，默认关闭）。
  *
  * ## 它控制什么
  *
@@ -20,12 +20,12 @@ import android.content.Context
  * 车机定位不是永远更好：有的车机 GPS 天线在仪表台里、精度不如手机；也有车型给的是
  * 「上次熄火时的位置」。用户能一键回到「只用手机 GPS」，比我们替他决定更稳。
  *
- * 默认值取 true：这是用户明确要的功能；出问题时开关就在显示卡里，一眼能找到。
+ * 默认使用手机定位；用户手动保存过的开关选择保持不变。
  */
 object CarGpsOption {
     private const val PREFS = "car_gps_option_v1"
     private const val KEY_ENABLED = "enabled"
-    private const val DEFAULT_ENABLED = true
+    private const val DEFAULT_ENABLED = false
 
     /**
      * 当前是否启用。用 `@Volatile` 而不是每次都读 SharedPreferences：iAP2 收帧线程

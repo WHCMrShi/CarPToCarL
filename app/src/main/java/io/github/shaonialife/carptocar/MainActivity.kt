@@ -98,10 +98,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var ctaIcon: ImageView
     private lateinit var ctaLabel: TextView
     private lateinit var audioTag: TextView
-    private lateinit var ssidInput: EditText
+    private lateinit var ssidInput: TextView
+    private var macEditing = false
     private lateinit var macInput: EditText
     private lateinit var btDesc: TextView
-    private lateinit var btBadge: TextView
     private lateinit var btnPickTarget: TextView
     private lateinit var logBody: View
     private lateinit var logChevron: ImageView
@@ -591,8 +591,7 @@ class MainActivity : AppCompatActivity() {
      * onCreate 已经用完整解析跑过一轮，正常机型这里能直接拿到真实地址。
      */
     private fun effectiveBluetoothMac(): String? =
-        DeviceIdentity.normalize(macInput.text.toString())
-            ?: DeviceIdentity.overrideBluetoothMac(this)
+        DeviceIdentity.overrideBluetoothMac(this)
             ?: DeviceIdentity.cachedBluetoothMac()?.takeIf { it != DeviceIdentity.PLACEHOLDER_MAC }
 
     /**
@@ -601,13 +600,7 @@ class MainActivity : AppCompatActivity() {
      * @return true = 地址已就绪，可以继续；false = 未填写，已提示并中止本次启动。
      */
     private fun requireBluetoothMac(): Boolean {
-        // 输入框里填了合法地址但忘了点「保存」：这里顺手落盘，
-        // 免得出现「我明明填了，还提示我没填」这种最让人恼火的交互
-        val typed = DeviceIdentity.normalize(macInput.text.toString())
-        if (typed != null && DeviceIdentity.overrideBluetoothMac(this) != typed) {
-            DeviceIdentity.setOverride(this, typed)
-            log("MAC: 已自动保存输入框中的本机蓝牙地址 $typed")
-        }
+        // 连接只使用已保存的地址，编辑中的草稿不能隐式写入设备身份。
         val mac = effectiveBluetoothMac()
         refreshMacGate()
         if (mac != null) return true
@@ -691,7 +684,6 @@ class MainActivity : AppCompatActivity() {
         ssidInput = findViewById(R.id.ssidInput)
         macInput = findViewById(R.id.macInput)
         btDesc = findViewById(R.id.btDesc)
-        btBadge = findViewById(R.id.btBadge)
         btnPickTarget = findViewById(R.id.btnPickTarget)
         logBody = findViewById(R.id.logBody)
         logChevron = findViewById(R.id.logChevron)
@@ -791,7 +783,7 @@ class MainActivity : AppCompatActivity() {
         SessionController.ssidSink = ssidSink
         renderConsole(SessionController.logText())
 
-        setUpUiControls()
+        setUpUiControls(savedInstanceState)
         // 首次启动和窗口尺寸变化都按可用窗口宽度选择栏数。
         applyContentLayout()
         findViewById<android.widget.FrameLayout>(R.id.contentArea).post {
@@ -867,7 +859,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** onCreate 的 UI 初始化尾部：开关/按钮/折叠卡（会话逻辑不变，仅挂新界面）。 */
-    private fun setUpUiControls() {
+    private fun setUpUiControls(savedInstanceState: Bundle?) {
         val preferences = getSharedPreferences("settings", Context.MODE_PRIVATE)
         // 清理旧版本遗留的模式偏好（模式已固定为「隐形屏」启动器）
         if (preferences.contains("mode")) {
@@ -942,8 +934,38 @@ class MainActivity : AppCompatActivity() {
         // 本机蓝牙地址：Honor/MagicOS 等机型把 MAC 全面脱敏（连 adb shell 都读不到），
         // 而 WinPlay 系接收端按它做设备过滤——手填是唯一可行来源，存进 settings 偏好，
         // DeviceIdentity 会优先采用（影响 0x4300/0x4E0E、AirPlay SETUP 与 ctrl 广播 id）。
-        macInput.setText(DeviceIdentity.overrideBluetoothMac(this) ?: "")
-        findViewById<TextView>(R.id.btnSaveMac).setOnClickListener {
+        val savedMac = DeviceIdentity.overrideBluetoothMac(this) ?: effectiveBluetoothMac()
+        macEditing = savedInstanceState?.getBoolean("macEditing") ?: (savedMac == null)
+        macInput.setText(if (macEditing) savedInstanceState?.getString("macDraft") ?: savedMac.orEmpty() else savedMac.orEmpty())
+        val macKeyListener = macInput.keyListener
+        val macButton = findViewById<TextView>(R.id.btnSaveMac)
+        fun setMacEditing(editing: Boolean) {
+            macEditing = editing
+            macInput.isEnabled = editing
+            macInput.setTextColor(getColor(if (editing) R.color.m3_on_surface else R.color.m3_on_var))
+            macInput.keyListener = if (editing) macKeyListener else null
+            macInput.isFocusable = editing
+            macInput.isFocusableInTouchMode = editing
+            macInput.isCursorVisible = editing
+            macInput.isClickable = editing
+            macInput.isLongClickable = editing
+            macButton.text = if (editing) "保存" else "修改"
+            if (!editing) {
+                macInput.clearFocus()
+                getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                    .hideSoftInputFromWindow(macInput.windowToken, 0)
+            }
+        }
+        setMacEditing(macEditing)
+        macButton.setOnClickListener {
+            if (!macEditing) {
+                setMacEditing(true)
+                macInput.requestFocus()
+                macInput.setSelection(macInput.text.length)
+                getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                    .showSoftInput(macInput, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                return@setOnClickListener
+            }
             val result = DeviceIdentity.setOverride(this, macInput.text.toString())
             val resolved = DeviceIdentity.bluetoothMac(this, forceRetry = true)
             when {
@@ -958,6 +980,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 else -> {
                     macInput.setText(resolved)
+                    setMacEditing(false)
                     snack("已保存 $resolved")
                     log("MAC: 本机蓝牙地址已设为 $resolved（0x4300/SETUP/ctrl 广播都用它）")
                 }
@@ -1302,7 +1325,7 @@ class MainActivity : AppCompatActivity() {
         }
         val ctx = this
 
-        // 「使用车机 GPS」（默认开）：只控制要不要把车机 0xFFFB 定位转成 CarLife 0x18010。
+        // 「使用车机 GPS」（默认关闭）：只控制要不要把车机 0xFFFB 定位转成 CarLife 0x18010。
         // 关掉即回到「完全用手机定位」，随时可来回切（下一条定位就按新值走）。
         val gpsSwitch = findViewById<SwitchCompat>(R.id.switchCarGps)
         gpsSwitch.isChecked = CarGpsOption.enabled
@@ -1352,13 +1375,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        btBadge.visibility = if (bondedCount >= 0) View.VISIBLE else View.GONE
-        btBadge.setTextColor(getColor(R.color.m3_surface))
         if (bondedCount >= 0) {
             val target = TargetDevicePrefs.get(this)
             if (bondedCount > 0) {
-                btBadge.background.mutate().setTint(getColor(R.color.m3_ok_dot))
-                btBadge.text = "就绪"
                 btDesc.text =
                     if (target != null) {
                         "目标「${target.name}」· 只向该设备发请求"
@@ -1368,8 +1387,6 @@ class MainActivity : AppCompatActivity() {
                         "已与 $bondedCount 台设备配对 · 连接自动回连"
                     }
             } else {
-                btBadge.background.mutate().setTint(getColor(R.color.m3_amber))
-                btBadge.text = "未配对"
                 btDesc.text = "尚未配对——点「选择设备」扫描并配对车机"
             }
             // 目标设备已不在已配对列表（如系统里删了配对）时提示重选
@@ -1384,8 +1401,6 @@ class MainActivity : AppCompatActivity() {
                         true
                     }
                 if (!stillBonded) {
-                    btBadge.background.mutate().setTint(getColor(R.color.m3_amber))
-                    btBadge.text = "需重选"
                     btDesc.text = "目标「${target.name}」已不在配对列表——请重新选择设备"
                 }
             }
@@ -1495,6 +1510,7 @@ class MainActivity : AppCompatActivity() {
             removeAllViews()
             addView(
                 inflateTargetRow(
+                    parent = this,
                     name = "自动（不指定目标）",
                     address = "逐个尝试 · 接受任一设备连入",
                     action = if (current == null) "当前" else "选择",
@@ -1518,6 +1534,7 @@ class MainActivity : AppCompatActivity() {
             val isCurrent = current != null && TargetDevicePrefs.matches(current, address)
             list.addView(
                 inflateTargetRow(
+                    parent = list,
                     name = name,
                     address = address,
                     action = if (isCurrent) "当前" else "选择",
@@ -1532,6 +1549,7 @@ class MainActivity : AppCompatActivity() {
 
     /** 单个设备行（两组共用；highlighted 时名称用主色）。 */
     private fun inflateTargetRow(
+        parent: android.view.ViewGroup,
         name: String,
         address: String,
         action: String,
@@ -1539,7 +1557,7 @@ class MainActivity : AppCompatActivity() {
         iconTint: Int,
         onClick: () -> Unit,
     ): View {
-        val row = layoutInflater.inflate(R.layout.item_target_device, null)
+        val row = layoutInflater.inflate(R.layout.item_target_device, parent, false)
         row.background =
             ContextCompat.getDrawable(
                 this@MainActivity,
@@ -1547,16 +1565,15 @@ class MainActivity : AppCompatActivity() {
             )
         row.findViewById<TextView>(R.id.devName).apply {
             text = name
-            setTextColor(getColor(if (highlighted) R.color.m3_primary else R.color.m3_on_surface))
+            setTextColor(getColor(if (highlighted) R.color.q4_accent_text else R.color.m3_on_surface))
         }
         row.findViewById<TextView>(R.id.devAddr).text = address
         row.findViewById<TextView>(R.id.devAction).apply {
-            // 「当前」= 实心绿胶囊 + 对勾 + 深色字；「选择/配对」= 描边胶囊 + 青色字。
-            // 只靠色相区分不够（青 #7EDCE6 vs 绿 #7BD8A5 小字号下难辨），改用形态差异。
+            // 当前项使用红色描边与对勾，避免只靠颜色区分选择状态。
             if (highlighted) {
                 text = "✓ $action"
-                setTextColor(getColor(R.color.m3_surface))
-                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_pill_current)
+                setTextColor(getColor(R.color.q4_accent_text))
+                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_tbtn)
             } else {
                 text = action
                 setTextColor(getColor(R.color.m3_primary))
@@ -1674,6 +1691,7 @@ class MainActivity : AppCompatActivity() {
         }
         list.addView(
             inflateTargetRow(
+                parent = list,
                 name = name,
                 address = "$address · ${rssi}dBm",
                 action = "配对",
@@ -2343,6 +2361,8 @@ class MainActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putLong(KEY_DISCLAIMER_DEADLINE, disclaimerDeadlineAt)
+        outState.putBoolean("macEditing", macEditing)
+        if (macEditing && ::macInput.isInitialized) outState.putString("macDraft", macInput.text.toString())
     }
 
     /**

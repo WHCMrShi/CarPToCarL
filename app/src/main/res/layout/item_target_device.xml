@@ -5,7 +5,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginBottom="6dp"
+    android:layout_marginBottom="@dimen/q4_device_gap"
     android:background="@drawable/bg_bt_device_row"
     android:gravity="center_vertical"
     android:orientation="horizontal"
@@ -16,7 +16,7 @@
     <FrameLayout
         android:layout_width="34dp"
         android:layout_height="34dp"
-        android:background="@drawable/bg_icon_tile">
+        >
         <ImageView
             android:id="@+id/devIcon"
             android:layout_width="18dp"

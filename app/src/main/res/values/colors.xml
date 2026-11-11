@@ -36,4 +36,5 @@
     <color name="m3_ripple">#1F000000</color>
     <color name="m3_hold_overlay">#33FFFFFF</color>
     <color name="q4_action_accent">#F50537</color>
+    <color name="q4_accent_text">#B80D2D</color>
 </resources>

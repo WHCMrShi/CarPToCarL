@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="q4_corner_card">24dp</dimen>
+    <dimen name="q4_corner_action">16dp</dimen>
+    <dimen name="q4_corner_field">12dp</dimen>
+    <dimen name="q4_corner_dialog">28dp</dimen>
+    <dimen name="q4_device_gap">8dp</dimen>
+</resources>

@@ -201,6 +201,7 @@
                                         android:layout_marginStart="0dp"
                                         android:thumb="@drawable/sw_thumb"
                                         app:track="@drawable/sw_track"
+                                        app:switchMinWidth="48dp"
                                         app:switchPadding="16dp"
                                         android:minHeight="48dp"
                                         android:minWidth="48dp"
@@ -226,6 +227,7 @@
                                         android:layout_marginStart="0dp"
                                         android:thumb="@drawable/sw_thumb"
                                         app:track="@drawable/sw_track"
+                                        app:switchMinWidth="48dp"
                                         app:switchPadding="16dp"
                                         android:minHeight="48dp"
                                         android:minWidth="48dp"
@@ -278,7 +280,7 @@
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
                                             android:orientation="horizontal"
-                                            android:gravity="center_vertical">
+                                            android:gravity="end|center_vertical">
                                             <TextView
                                                 android:id="@+id/btnPickTarget"
                                                 android:layout_width="wrap_content"
@@ -296,20 +298,6 @@
                                                 android:textStyle="bold"
                                                 android:minHeight="48dp"
                                                 android:focusable="true" />
-                                            <TextView
-                                                android:id="@+id/btBadge"
-                                                android:layout_width="wrap_content"
-                                                android:layout_height="wrap_content"
-                                                android:background="@drawable/bg_badge_ok"
-                                                android:paddingStart="10dp"
-                                                android:paddingTop="4dp"
-                                                android:paddingEnd="10dp"
-                                                android:paddingBottom="4dp"
-                                                android:text="就绪"
-                                                android:textColor="@color/m3_ok"
-                                                android:textSize="14sp"
-                                                android:textStyle="bold"
-                                                android:layout_marginStart="8dp" />
                                         </LinearLayout>
                                     </LinearLayout>
                                 </LinearLayout>
@@ -342,6 +330,7 @@
                                             android:labelFor="@id/macInput" />
                                         <EditText
                                             android:id="@+id/macInput"
+                                            android:saveEnabled="false"
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
                                             android:layout_marginTop="12dp"
@@ -411,27 +400,16 @@
                                             android:layout_height="wrap_content"
                                             android:text="车机热点"
                                             android:textColor="@color/m3_on_surface"
-                                            android:textSize="16sp"
-                                            android:labelFor="@id/ssidInput" />
-                                        <EditText
+                                            android:textSize="16sp" />
+                                        <TextView
                                             android:id="@+id/ssidInput"
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
                                             android:layout_marginTop="12dp"
-                                            android:background="@drawable/bg_ssid_sel"
-                                            android:hint="车机热点名称"
-                                            android:importantForAutofill="no"
-                                            android:inputType="text"
-                                            android:paddingStart="10dp"
-                                            android:paddingTop="6dp"
-                                            android:paddingEnd="10dp"
-                                            android:paddingBottom="6dp"
-                                            android:textColor="@color/m3_on_surface"
+                                            android:hint="等待车机提供热点名称"
+                                            android:textColor="@color/m3_on_var"
                                             android:textColorHint="@color/m3_on_var"
-                                            android:textSize="14sp"
-                                            android:minHeight="48dp"
-                                            android:imeOptions="actionDone"
-                                            android:singleLine="true" />
+                                            android:textSize="16sp" />
 
                                         <LinearLayout
                                             android:layout_width="match_parent"
@@ -500,6 +478,7 @@
                                         android:textSize="16sp"
                                         android:thumb="@drawable/sw_thumb"
                                         app:track="@drawable/sw_track"
+                                        app:switchMinWidth="48dp"
                                         app:switchPadding="16dp" />
                                 </LinearLayout>
                                 <View
@@ -523,6 +502,7 @@
                                         android:layout_marginStart="0dp"
                                         android:thumb="@drawable/sw_thumb"
                                         app:track="@drawable/sw_track"
+                                        app:switchMinWidth="48dp"
                                         app:switchPadding="16dp"
                                         android:minHeight="48dp"
                                         android:minWidth="48dp"
@@ -613,6 +593,7 @@
                                             android:layout_height="wrap_content"
                                             android:thumb="@drawable/sw_thumb"
                                             app:track="@drawable/sw_track"
+                                        app:switchMinWidth="48dp"
                                         app:switchPadding="16dp"
                                             xmlns:app="http://schemas.android.com/apk/res-auto"
                                             android:contentDescription="监听日志"
