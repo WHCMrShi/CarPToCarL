@@ -90,7 +90,6 @@ class MainActivity : AppCompatActivity() {
         const val CTA_BLOCKED_ALPHA = 0.45f
     }
 
-    private lateinit var deviceSubtitle: TextView
     private lateinit var heroStateText: TextView
     private lateinit var btnResidualCleanup: TextView
     private lateinit var heroSubline: TextView
@@ -112,7 +111,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var logChevron: ImageView
     private lateinit var switchLog: androidx.appcompat.widget.SwitchCompat
     private lateinit var logText: TextView
-    private lateinit var carLifeStatus: TextView
     private lateinit var snackbar: TextView
 
     // ---- 英雄卡状态机（1s 轮询 SessionController 对账）----
@@ -692,15 +690,6 @@ class MainActivity : AppCompatActivity() {
         // 旋转/重建：沿用原倒计时截止时刻（onResume 据此续弹）
         disclaimerDeadlineAt = savedInstanceState?.getLong(KEY_DISCLAIMER_DEADLINE, 0L) ?: 0L
 
-        deviceSubtitle = findViewById(R.id.deviceSubtitle)
-        carLifeStatus = findViewById(R.id.carLifeStatus)
-        // 状态行兼作「重启守候」入口：不拉起任何应用，只是重新开始盯 7240 端口
-        carLifeStatus.setOnClickListener {
-            if (!CarLifeHijack.isActive) {
-                log("CARLIFE: 手动重启守候（等待你打开 CarLife+ 的无线连接）")
-                CarLifeHijack.prewarm(applicationContext) { line -> runOnUiThread { log(line) } }
-            }
-        }
         heroStateText = findViewById(R.id.heroStateText)
         btnResidualCleanup = findViewById(R.id.btnResidualCleanup)
         btnResidualCleanup.setOnClickListener {
@@ -726,7 +715,6 @@ class MainActivity : AppCompatActivity() {
         logText = findViewById(R.id.logText)
         snackbar = findViewById(R.id.snackbar)
 
-        deviceSubtitle.text = deviceName()
         logText.movementMethod = ScrollingMovementMethod()
         // 控制台在长页面 ScrollView 内：按下时申请父级不拦截竖向手势，否则无法手动滚动
         logText.setOnTouchListener { v, event ->
@@ -1161,28 +1149,6 @@ class MainActivity : AppCompatActivity() {
 
     // ==================== 英雄卡状态机 ====================
 
-    /**
-     * 刷新「CarLife 劫持」状态行。
-     *
-     * 车机画面只有一个来源：手机原生 CarLife+ 的 H.264 直通。所以这行文案就是
-     * 排障的第一现场——用户不用展开日志就能看出卡在「没拉起 / 没进无线连接 /
-     * 已劫持没连车机 / 正在推流」哪一步。
-     */
-    private fun updateCarLifeStatus() {
-        val text =
-            when {
-                !CarLifeHijack.isEnabled(this) -> "CarLife 劫持已在设置里关闭 —— 不会有车机画面"
-                // 判定一律以「真实视频流」为准（用户明确要求）：帧真正写进车机通道才算在投，
-                // 不认 CarLife 进程/握手状态——否则会出现「显示已劫持、车机却在等视频」的误判。
-                SessionController.videoSender?.isVideoFlowing == true -> "车机画面来自 CarLife+（视频流正常）"
-                CarLifeHijack.isAttached -> "已接管 CarLife+，但暂无视频流送达车机"
-                CarLifeHijack.sourceActive -> "已劫持 CarLife+ 画面 —— 点「启动连接」推到车机"
-                CarLifeHijack.isActive -> "已连上 CarLife+，等待它开始推流"
-                else -> "等待你手动打开 CarLife+ 并点「无线连接」—— 点此重启守候"
-            }
-        if (carLifeStatus.text != text) carLifeStatus.text = text
-    }
-
     private fun tickHero() {
         val s =
             when {
@@ -1210,11 +1176,6 @@ class MainActivity : AppCompatActivity() {
         updateDisplayResolutionNote()
         updateAudioTag()
         updateReadyRow()
-        updateDeviceSubtitle()
-        // 这行曾定义了却从未被调用：会话正常推流时标题位仍停在 XML 里的
-        // 「CarLife+ 未启动」，与「已连接 · 视频推流中」自相矛盾（用户实测
-        // 「荣耀车联提示连接成功、软件显示没连上」的观感来源之一）。
-        updateCarLifeStatus()
     }
 
     /**
@@ -2048,15 +2009,6 @@ class MainActivity : AppCompatActivity() {
                 "未知设备"
             }
         }
-
-    /** 设备营销名（ro.product.marketname），取不到时退回 Build.MODEL。 */
-    private fun deviceName(): String = DeviceIdentity.marketingName() ?: Build.MODEL
-
-    /** 副标题只显示设备名（原来的 Shizuku 状态已随依赖移除）。 */
-    private fun updateDeviceSubtitle() {
-        val text = deviceName()
-        if (deviceSubtitle.text != text) deviceSubtitle.text = text
-    }
 
     // ==================== 通用 UI 工具 ====================
 

@@ -41,28 +41,6 @@
                         android:textSize="21sp"
                         android:textStyle="bold" />
 
-                    <TextView
-                        android:id="@+id/deviceSubtitle"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:drawableStart="@drawable/ic_dot_small"
-                        android:drawablePadding="5dp"
-                        android:gravity="center_vertical"
-                        android:textColor="#7C8B8B"
-                        android:textSize="11.5sp"
-                        android:text="设备检测中" />
-
-                    <!-- 本地 CarLife 劫持的实时状态：车机画面的唯一来源，卡在哪一步
-                         用户一眼就能看到（不必展开日志）。由 MainActivity 定时刷新。 -->
-                    <TextView
-                        android:id="@+id/carLifeStatus"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:textColor="#FFD9A441"
-                        android:textSize="11.5sp"
-                        android:text="CarLife+ 未启动" />
                 </LinearLayout>
 
             </LinearLayout>
