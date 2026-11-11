@@ -148,7 +148,7 @@ internal class VideoDeliveryGate(
         val cooled = lastResyncAt == Long.MIN_VALUE || nowMs - lastResyncAt >= resyncCooldownMs
         if (backlog >= hardStaleMs && sustained >= sustainMs && !keyFrame && cooled) {
             val reason =
-                "排队延迟 ${backlog}ms（阈值 ${hardStaleMs}ms）已持续 ${sustained}ms" +
+                "sourceTs=$sourceTsMs now=$nowMs probe=$probeFrames distinct=${probeTimestamps.size} backwards=$nonMonotonic usable=$timestampUsable; 排队延迟 ${backlog}ms（阈值 ${hardStaleMs}ms）已持续 ${sustained}ms" +
                     "——画面比编码器慢这么多，跳到下一个 IDR 重新对齐"
             lastResyncAt = nowMs
             resyncTotal++
