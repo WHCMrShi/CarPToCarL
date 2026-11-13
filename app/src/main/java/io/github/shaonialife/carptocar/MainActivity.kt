@@ -1815,16 +1815,16 @@ class MainActivity : AppCompatActivity() {
                 log("日志已导出（${scope.label}）: ${result.displayPath}（${result.bytes} 字节）")
                 val scopeNote =
                     if (scope == LogExporter.Scope.CURRENT_SESSION) {
-                        "主日志仅含本次启动；可能附带历史异常记录。长按可导出留存历史。"
+                        "本次启动日志 · 长按导出留存历史"
                     } else {
-                        "包含现存主日志及诊断记录；按容量轮转，无固定天数。"
+                        "全部留存日志 · 无固定天数"
                     }
                 DarkMessageDialog.show(
                     this,
                     title = "日志已导出",
                     message =
                         "${result.displayPath}\n\n" +
-                            "大小：${formatBytes(result.bytes)}\n$scopeNote",
+                            "文件大小：${formatBytes(result.bytes)}\n$scopeNote",
                     actions =
                         listOf(
                             DarkMessageDialog.Action("打开文件") {

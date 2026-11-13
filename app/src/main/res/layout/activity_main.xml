@@ -560,11 +560,11 @@
                                         <TextView
                                             android:layout_width="wrap_content"
                                             android:layout_height="wrap_content"
-                                            android:layout_marginEnd="4dp"
+                                            android:layout_marginEnd="16dp"
                                             android:text="监听日志"
-                                            android:textColor="@color/m3_on_var"
-                                            android:textSize="14sp"
-                                            android:textStyle="bold" />
+                                            android:textColor="@color/m3_on_surface"
+                                            android:textSize="16sp"
+                                            android:textStyle="normal" />
                                         <androidx.appcompat.widget.SwitchCompat
                                             android:id="@+id/switchLog"
                                             android:layout_width="wrap_content"
