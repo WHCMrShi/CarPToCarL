@@ -1026,30 +1026,6 @@ class MainActivity : AppCompatActivity() {
             if (SessionController.clearRememberedWifi(this)) snack("已清除车机 Wi-Fi 记忆，下次通过蓝牙重新获取")
             else snack("请先断开连接，再清除 Wi-Fi 记忆")
         }
-        findViewById<TextView>(R.id.btnWifi).setOnClickListener {
-            log("CONNECT-DIAG: opening WLAN settings from home WiFi button")
-            val ssid = ssidInput.text.toString().trim()
-            // 自动加入不可用时的手动兜底：密码先进剪贴板，系统 WLAN 页粘贴即可
-            val psk = SessionController.lastWifiPsk
-            if (psk != null) {
-                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                cm.setPrimaryClip(android.content.ClipData.newPlainText("carplay-wifi", psk))
-                snack("热点密码已复制（${psk.length} 位）——粘贴到密码框即可")
-                log(
-                    "WiFi: 热点密码已复制到剪贴板，选择 \"$ssid\" 粘贴密码；" +
-                        "若提示\"无法访问互联网\"请选择保持连接",
-                )
-            } else {
-                snack("暂无热点密码——蓝牙连上后自动获取")
-                log("WiFi: 尚未拿到热点密码（需蓝牙会话 0x5703）——打开 WLAN 设置手动选择 \"$ssid\"")
-            }
-            try {
-                startActivity(android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS))
-            } catch (_: Exception) {
-                log("WiFi: 无法打开WLAN设置，请手动前往 设置 > WLAN")
-            }
-        }
-
         // 目标车机选择：配对了多台车机时指定唯一目标（只向它发请求/只接受它连入）
         btnPickTarget.setOnClickListener { showTargetPicker() }
 

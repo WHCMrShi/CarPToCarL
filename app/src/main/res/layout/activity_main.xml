@@ -428,22 +428,6 @@
                                                 android:minHeight="48dp"
                                                 android:gravity="center"
                                                 android:focusable="true" />
-                                            <TextView
-                                                android:id="@+id/btnWifi"
-                                                android:layout_width="wrap_content"
-                                                android:layout_height="wrap_content"
-                                                android:background="@drawable/bg_tbtn"
-                                                android:gravity="center"
-                                                android:paddingStart="12dp"
-                                                android:paddingTop="9dp"
-                                                android:paddingEnd="12dp"
-                                                android:paddingBottom="9dp"
-                                                android:text="去连接"
-                                                android:textColor="@color/m3_primary"
-                                                android:textSize="14sp"
-                                                android:textStyle="bold"
-                                                android:minHeight="48dp"
-                                                android:focusable="true" />
                                         </LinearLayout>
                                     </LinearLayout>
                                 </LinearLayout>
