@@ -1,0 +1,26 @@
+# Preconnect benefit evidence; selected app events from the existing two samples.
+# L = original 1-based line. Payload after rx=0x5703 omitted intentionally.
+# No credentials, identity addresses or full protocol payload. Not replay data.
+
+# Source: CarPToCarL-log-20261113-072817.txt
+# SHA-256: 24cedd4f5fe58b2beb02a2b64bf5e2a04e20a720cdd1eca43cc2b6e477ca3558
+L33 [06:48:15.272] PATH-DIAG: round=1 active=true stage=WIFI_REUSE attempt=1 event=BEGIN elapsedMs=282
+L39 [06:48:15.310] PATH-DIAG: round=1 active=true stage=WIFI_REUSE attempt=1 event=END durationMs=40 elapsedMs=322 outcome=RETURNED
+L90 [06:48:40.545] iap2 rx=0x5703 [payload omitted]
+L94 [06:48:40.552] WIFI: 应用专属网络已在位——跳过重复加入
+L111 [06:48:41.748] CTRL: 已发现 _airplay._tcp（bit37 已声明，车机会主动发起）——直接连接 AirPlay
+L116 [06:48:41.771] PATH-DIAG: round=1 active=true stage=PAIRING attempt=1 event=BEGIN elapsedMs=26783
+L135 [06:48:42.069] PATH-DIAG: round=1 active=true stage=PAIRING attempt=1 event=END durationMs=298 elapsedMs=27081 outcome=RETURNED
+L148 [06:48:42.416] AIRPLAY: ✓ RECORD 完成——会话已激活
+
+# Source: CarPToCarL-log-20261113-124359.txt
+# SHA-256: 9c19cc0fa33a7f055fbbd9fbe9a0348a9007a3eb9e81a781ac61e41a8a8f59ef
+L45 [12:40:36.360] PATH-DIAG: round=1 active=true stage=WIFI_SPECIFIER attempt=1 event=BEGIN elapsedMs=11207
+L99 [12:40:48.958] CONNECT-DIAG: specifier available request=131604641 bound=true
+L101 [12:40:49.005] PATH-DIAG: round=1 active=true stage=WIFI_SPECIFIER attempt=1 event=END durationMs=12646 elapsedMs=23853 outcome=RETURNED
+L149 [12:40:58.778] iap2 rx=0x5703 [payload omitted]
+L154 [12:40:58.799] PATH-DIAG: round=1 active=true stage=WIFI_REUSE attempt=2 event=BEGIN elapsedMs=33629
+L168 [12:41:01.894] WIFI: fallback selected network=836 identity=ssid-visible bound=true; lease pinned
+L171 [12:41:01.902] PATH-DIAG: round=1 active=true stage=WIFI_REUSE attempt=2 event=END durationMs=3120 elapsedMs=36749 outcome=RETURNED
+L193 [12:41:02.151] PATH-DIAG: round=1 active=true stage=PAIRING attempt=1 event=BEGIN elapsedMs=36999
+L227 [12:41:04.947] AIRPLAY: ✓ RECORD 完成——会话已激活
