@@ -57,6 +57,7 @@ class DiagnosticLogArchiveTest {
             "BT-RELEASE: action=1 source=outbound-retry requests={HFP=ACCEPTED} after={HFP=CONNECTED}",
             "BT-LIFECYCLE: accepted direction=inbound owner=2",
             "BT-GUARD: release attempts=1",
+            "BT-DISABLE: response accepted=true; profile/ACL disconnection unconfirmed",
             "IDLE: check source=service lateMs=1200 verdict=UI_VISIBLE",
             "APPROACH: target ACL disconnected",
             "SVC: lock-release wakeHeld=false wifiHeld=false",

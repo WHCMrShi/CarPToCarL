@@ -707,11 +707,13 @@ JSON 体：`{ "type": "<命令名>", "params": { ... } }`。
 | `setLimitedUI`              | 车机→手机 | 行车限制 UI                              |
 | `requestUI`                 | 车机→手机 | 请求某个 UI 上下文                          |
 | `duckAudio` / `unduckAudio` | 车机→手机 | 压低/恢复音量（导航播报时）                       |
-| `disableBluetooth`          | 车机→手机 | 让手机断开蓝牙音频                            |
+| `disableBluetooth`          | 手机→车机 | 指定本机蓝牙 `deviceID`，车机断开 HFP/A2DP/AVRCP 并在会话期间不重连 |
 | `iAPSendMessage`            | 双向    | **WiFi 上的第二条 iAP2 隧道**（见 6.4）        |
 | `changeMapZoomLevel`        | 车机→手机 | 地图缩放                                 |
 
-⚠️ **命令必须发在事件通道 socket 的 `POST /command`**（用 Events 密钥加密、独立 CSeq、  
+`disableBluetooth` 例外说明：它是 Apple device 发往 accessory 的命令，按原始规范 §23.3.7、§23.3.7.3 走 Controller 控制连接的 `POST /command`；`deviceID` 是手机蓝牙地址，不是车机地址。
+
+⚠️ **车机→手机的命令必须发在事件通道 socket 的 `POST /command`**（用 Events 密钥加密、独立 CSeq、
 发后不管）；发在 RTSP 控制连接上会收到 200，但**手机不执行**——这是本项目最坑的一个现象  
 （触摸看起来「能滑一下」，实际全部丢失）。
 

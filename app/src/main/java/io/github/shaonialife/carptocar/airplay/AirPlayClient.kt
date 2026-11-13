@@ -70,6 +70,8 @@ class AirPlayClient(
      * 主控用它做「叫醒」：重发 `0x4e0e + 0x4300` 并重新公告 ctrl mDNS（限次、限频）。
      */
     private val onPortRefused: ((refused: Int) -> Unit)? = null,
+    /** Request-duration observation; injectable for JVM socket tests. */
+    private val requestClock: () -> Long = { SystemClock.uptimeMillis() },
 ) {
 
     /** 音频 SETUP 时用的车机地址（会话中途要重新核对音量时复用）。 */
@@ -110,6 +112,16 @@ class AirPlayClient(
 
     @Volatile var lastSetupFailureStatus: Int? = null
         private set
+
+    internal class BluetoothDisableSession(
+        val deviceId: String,
+        val bluetoothAdvertised: Boolean,
+        val generation: Long,
+        val scope: ConnectionResources,
+    ) {
+        val attempted = java.util.concurrent.atomic.AtomicBoolean()
+    }
+    @Volatile private var bluetoothDisableSession: BluetoothDisableSession? = null
 
     private fun setupOwnerAlive(generation: Long): Boolean = synchronized(connectionLock) {
         lifecycleGeneration == generation && controlConnectionAlive
@@ -1085,6 +1097,7 @@ class AirPlayClient(
      */
     fun runSetup(): SetupInfo? {
         val setupGeneration = lifecycleGeneration
+        val setupScope = resources
         lastSetupFailureStatus = null
         log("CONNECT-DIAG: client=${System.identityHashCode(this)} setup-start encrypted=${cipher != null} cancelled=$cancelled disposed=$disposed")
         // 计时端口：catplay 真车实现始终绑定真实 UDP timing server 通告给车机
@@ -1290,6 +1303,14 @@ class AirPlayClient(
                 keepAliveSendStatsAsBody = (infoRoot?.get("keepAliveSendStatsAsBody") as? Boolean) == true,
             )
         if (!checkSetupOwner(setupGeneration, "publish")) return null
+        bluetoothDisableSession = BluetoothDisableSession(
+            deviceId,
+            (infoMap?.get("bluetoothIDs") as? List<*>)?.any {
+                it is String && DeviceIdentity.normalize(it) != null
+            } == true,
+            setupGeneration,
+            setupScope,
+        )
         log(
             "AIRPLAY: ✓ SETUP 完成 eventPort=${info.eventPort} timingPort=${info.timingPort} " +
                 "keepAlive=${info.keepAlivePort ?: "无"} features=${info.enabledFeatures} " +
@@ -3114,6 +3135,42 @@ class AirPlayClient(
         }
 
     /**
+     * CarPlay §23.3.7.3: phone -> accessory, on the Controller control channel.
+     * One attempt after activation and Wi-Fi iAP2 readiness; no CarLife gate or retry.
+     * The response is protocol acknowledgement, not proof of Bluetooth disconnection.
+     */
+    internal fun disableBluetoothAfterActivation(recordSucceeded: Boolean, iap2Ready: Boolean) {
+        val session = bluetoothDisableSession ?: return
+        val reason = when {
+            !recordSucceeded -> "record-not-accepted"
+            !iap2Ready -> "wifi-iap2-not-ready"
+            !session.bluetoothAdvertised -> "receiver-bluetoothIDs-missing"
+            DeviceIdentity.normalize(session.deviceId) == null -> "local-bluetooth-address-unavailable"
+            !setupOwnerAlive(session.generation) || resources !== session.scope -> "session-retired"
+            else -> null
+        }
+        if (reason != null) { log("BT-DISABLE: skipped reason=$reason"); return }
+        if (!session.attempted.compareAndSet(false, true)) return
+        session.scope.start("airplay-disable-bluetooth") {
+            if (bluetoothDisableSession !== session || !setupOwnerAlive(session.generation)) return@start
+            try {
+                val body = BinaryPlist.encode(linkedMapOf(
+                    "type" to "disableBluetooth", "deviceID" to session.deviceId,
+                ))
+                log("BT-DISABLE: request generation=${session.generation} deviceIDSource=session-SETUP channel=control")
+                val (status, _) = request(
+                    "POST", "/command", body,
+                    contentType = "application/x-apple-binary-plist", expectedScope = session.scope,
+                )
+                val accepted = status.split(' ').getOrNull(1)?.toIntOrNull() == 200
+                log("BT-DISABLE: response generation=${session.generation} accepted=$accepted status=[$status]; profile/ACL disconnection unconfirmed")
+            } catch (error: IOException) {
+                log("BT-DISABLE: request failed generation=${session.generation} reason=${error.message}; no retry")
+            }
+        }
+    }
+
+    /**
      * 连接事件通道（接收端在 SETUP 应答的 eventPort 上等我们）。
      *
      * [sessionKey] 非 null 时用 Events 密钥加密（注意方向标签与直觉相反：接收端用
@@ -3485,7 +3542,7 @@ class AirPlayClient(
     ): Pair<String, ByteArray> {
         if (cancelled || disposed || closingConnection || Thread.currentThread().isInterrupted) throw IOException("连接已退役")
         val client = socket ?: throw IOException("未连接")
-        val startedAt = SystemClock.uptimeMillis()
+        val startedAt = requestClock()
         startReader(client)
         val queue = java.util.concurrent.LinkedBlockingQueue<Pair<String, ByteArray>>(1)
         val cseq: Int
@@ -3538,7 +3595,7 @@ class AirPlayClient(
                 pendingResponses.remove(cseq)
             }
         // 慢应答留痕：>1.5s 说明车机在内部仲裁（同类问题排查的第一手证据）
-        val elapsed = SystemClock.uptimeMillis() - startedAt
+        val elapsed = requestClock() - startedAt
         if (elapsed > 1_500) {
             log("AIRPLAY: 慢应答 ${elapsed}ms（$method $path，CSeq=$cseq）——等待期间心跳未中断")
         }

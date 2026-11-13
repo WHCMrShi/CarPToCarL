@@ -35,7 +35,7 @@ internal class DiagnosticLogArchive(private val main: File, private val limit: L
             if (line.contains("RAW tx:") || line.contains("RAW rx:") || line.contains("原始体=")) return false
             if (listOf("IDLE:", "APPROACH:", "SVC:", "WiFi:", "iap2 并行兜底", "iap2 rx=0x5703").any(line::contains)) return true
             if (listOf("WIFI-ID:", "WIFI-POLICY:", "WIFI-MEMORY:", "BT-PROFILE:").any(line::contains)) return true
-            if (listOf("BT-ACTION:", "BT-RELEASE:", "BT-LIFECYCLE:", "BT-GUARD:").any(line::contains)) return true
+            if (listOf("BT-ACTION:", "BT-RELEASE:", "BT-LIFECYCLE:", "BT-GUARD:", "BT-DISABLE:").any(line::contains)) return true
             if (line.contains("NOWPLAYING-DIAG:") || line.contains("NAV-MEDIA:")) return true
             if (listOf("MEDIA-STAGE:", "VIDEO-WRITE:", "VIDEO-QUEUE:", "VIDEO-PATH:", "CARLIFE-DIAG:", "EVENT-DIAG:").any(line::contains)) return true
             if (line.contains("CARLIFE:") && listOf("控制端口", "版本握手", "版本匹配", "首帧", "通道断开", "通道已重连", "等待本机引擎").any(line::contains)) return true

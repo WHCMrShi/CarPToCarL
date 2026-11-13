@@ -5216,7 +5216,7 @@ object SessionController {
                                 // 返回同一毫秒、且 5 次实测全部复现。故顺序改为：
                                 //   屏幕 SETUP → 连数据端口 → RECORD → 起编码器（出帧）→ 音频 SETUP
                                 // 音频 SETUP 失败只丢声音，视频会话保持。
-                                connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.RECORD) { client.record() }
+                                var activationRecorded = connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.RECORD) { client.record() }
                                 // 4580（AUDI 3810 / DELPHI MIB3）：车机 HMI 要等 iAP2 控制会话
                                 // （链路 NORMAL + MFi 应答）就绪才激活 CarPlay——固件
                                 // `CCarPlayTestController` 在那之前一直是
@@ -5230,7 +5230,7 @@ object SessionController {
                                     if (client.awaitControlSession(MIB3_REACTIVATE_WAIT_MS)) {
                                         appendLog("MIB3: 控制会话已就绪 → 重新声明主屏资源并补发 RECORD")
                                         client.assertModes()
-                                        connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.RECORD) { client.record() }
+                                        activationRecorded = connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.RECORD) { client.record() }
                                         setup.hidDeviceUuids.forEach { uuid ->
                                             client.sendHidSetInputMode(uuid, mode = 0)
                                         }
@@ -5240,6 +5240,10 @@ object SessionController {
                                                 "——保留首次激活，不重复（重复 RECORD 会被车机当噪声）",
                                         )
                                     }
+                                }
+                                // Minimal protocol experiment: user starts CarLife beforehand; no source gate.
+                                if (!attemptCancelled() && currentClient === client) {
+                                    client.disableBluetoothAfterActivation(activationRecorded, client.controlSessionReady)
                                 }
                                 // RECORD 成功 = 会话活着。此刻丢弃报文缓冲：用户要的是
                                 // 「连不上」的现场，正常连接不需要快照（省空间也省导出体积）。
