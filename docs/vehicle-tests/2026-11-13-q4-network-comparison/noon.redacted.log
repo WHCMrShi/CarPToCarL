@@ -1,0 +1,84 @@
+# Selected, redacted diagnostics: CarPToCarL-log-20261113-124359.txt
+# SHA-256 of original: 9c19cc0fa33a7f055fbbd9fbe9a0348a9007a3eb9e81a781ac61e41a8a8f59ef
+# Exact repeated export lines deduplicated; chronological order retained. L = original 1-based line.
+# Allowlisted event types only; no raw protocol payloads, addresses, credentials or old failure snapshots.
+# [IP] is redacted; do not infer address equality from this placeholder. Not replay data.
+
+L16 [12:40:24.536] CONNECT-DIAG: schema=20261108-v9 revision=be8a44ca8ed1 version=1.2.31-q4-debug sdk=36; export includes bounded early/recent diagnostics, idle deadlines and network leases
+L21 [12:40:25.177] WIFI: 状态心跳已启动（起点 wifi=[] car=- default=rmnet_data4/[IP] ssid=- processBound=- defaultInternet=true defaultValidated=true）
+L26 [12:40:25.203] BT-ACTION: id=1 source=outbound phase=BEGIN
+L27 [12:40:25.212] BT-ACTION: id=1 source=outbound phase=DIALING
+L28 [12:40:25.243] WIFI-MEMORY: waiting for current target presence before cached hotspot request
+L29 [12:40:25.310] BT-ACTION: source=guard waiting for local release/dial action
+L31 [12:40:30.406] BT-ACTION: id=1 dial-end durationMs=5194 current=true connected=false
+L32 [12:40:30.407] BT-ACTION: id=1 source=outbound phase=RELEASING_PROFILES
+L33 [12:40:31.613] BT-RELEASE: action=1 source=outbound-retry before={通话(HFP)=DISCONNECTED, 音频(A2DP)=DISCONNECTED, 低功耗音频(LE)=UNKNOWN} requests={} after={通话(HFP)=DISCONNECTED, 音频(A2DP)=DISCONNECTED, 低功耗音频(LE)=UNKNOWN} deviceRequest=NOT_ATTEMPTED superseded=false (ACCEPTED=系统接受请求，DISCONNECTED=查询报告离线)
+L34 [12:40:31.614] BT-ACTION: id=1 source=outbound phase=DIALING
+L35 [12:40:36.192] BT-ACTION: id=1 dial-end durationMs=4577 current=true connected=false
+L37 [12:40:36.198] BT-ACTION: id=1 source=outbound phase=END
+L38 [12:40:36.199] BT-ACTION: id=2 source=guard phase=BEGIN
+L39 [12:40:36.200] BT-ACTION: id=2 source=guard phase=RELEASING_PROFILES
+L41 [12:40:36.351] WIFI-MEMORY: current target present; admitting cached hotspot request
+L42 [12:40:36.352] WIFI-MEMORY: bounded preconnect using verified credentials; BT continues independently
+L46 [12:40:36.362] WIFI-POLICY: ownedSuggestionsRemoved=0 status=0 remaining=0 ready=true
+L47 [12:40:36.364] CONNECT-DIAG: requesting system WiFi selection request=131604641
+L48 [12:40:37.407] BT-RELEASE: action=2 source=guard before={通话(HFP)=DISCONNECTED, 音频(A2DP)=DISCONNECTED, 低功耗音频(LE)=UNKNOWN} requests={} after={通话(HFP)=DISCONNECTED, 音频(A2DP)=DISCONNECTED, 低功耗音频(LE)=UNKNOWN} deviceRequest=NOT_ATTEMPTED superseded=false (ACCEPTED=系统接受请求，DISCONNECTED=查询报告离线)
+L49 [12:40:37.409] BT-ACTION: id=2 source=guard phase=END
+L51 [12:40:38.910] BT-ACTION: id=3 source=guard phase=BEGIN
+L52 [12:40:38.911] BT-ACTION: id=3 source=guard phase=RELEASING_PROFILES
+L69 [12:40:40.247] CARLIFE: 控制端口已连接，直接用于版本握手（无探测连接）
+L70 [12:40:40.497] CARLIFE: 版本匹配成功（协议 3.0）
+L81 [12:40:41.299] CARLIFE-DIAG: video frames=0 lastFrameAgeMs=1019 phase=header-read phaseAgeMs=1003
+L83 [12:40:41.412] BT-RELEASE: action=3 source=guard before={通话(HFP)=CONNECTED, 音频(A2DP)=CONNECTED, 低功耗音频(LE)=UNKNOWN} requests={通话(HFP)=ACCEPTED, 音频(A2DP)=ACCEPTED} after={通话(HFP)=DISCONNECTING, 音频(A2DP)=DISCONNECTING, 低功耗音频(LE)=UNKNOWN} deviceRequest=NOT_ATTEMPTED superseded=true (ACCEPTED=系统接受请求，DISCONNECTED=查询报告离线)
+L84 [12:40:41.414] BT-ACTION: id=3 source=guard phase=END
+L87 [12:40:42.781] CARLIFE: ✓ 收到 CarLife 首帧（3790B，keyFrame=true）
+L88 [12:40:42.915] BT-ACTION: id=4 source=guard phase=BEGIN
+L89 [12:40:42.917] BT-ACTION: id=4 source=guard phase=RELEASING_PROFILES
+L90 [12:40:44.127] BT-RELEASE: action=4 source=guard before={通话(HFP)=DISCONNECTED, 音频(A2DP)=DISCONNECTED, 低功耗音频(LE)=UNKNOWN} requests={} after={通话(HFP)=DISCONNECTED, 音频(A2DP)=DISCONNECTED, 低功耗音频(LE)=UNKNOWN} deviceRequest=NOT_ATTEMPTED superseded=false (ACCEPTED=系统接受请求，DISCONNECTED=查询报告离线)
+L91 [12:40:44.181] BT-ACTION: id=4 source=guard phase=END
+L92 [12:40:45.685] BT-ACTION: id=5 source=guard phase=BEGIN
+L93 [12:40:45.686] BT-ACTION: id=5 source=guard phase=RELEASING_PROFILES
+L94 [12:40:46.305] CARLIFE-DIAG: video frames=76 lastFrameAgeMs=21 phase=header-read phaseAgeMs=21
+L95 [12:40:47.000] BT-RELEASE: action=5 source=guard before={通话(HFP)=DISCONNECTED, 音频(A2DP)=DISCONNECTED, 低功耗音频(LE)=UNKNOWN} requests={} after={通话(HFP)=DISCONNECTED, 音频(A2DP)=DISCONNECTED, 低功耗音频(LE)=UNKNOWN} deviceRequest=NOT_ATTEMPTED superseded=false (ACCEPTED=系统接受请求，DISCONNECTED=查询报告离线)
+L96 [12:40:47.003] BT-ACTION: id=5 source=guard phase=END
+L97 [12:40:48.585] BT-ACTION: id=6 source=guard phase=BEGIN
+L98 [12:40:48.643] BT-ACTION: id=6 source=guard phase=RELEASING_PROFILES
+L99 [12:40:48.958] CONNECT-DIAG: specifier available request=131604641 bound=true
+L108 [12:40:49.297] WIFI: 系统事件 onAvailable → wifi=[-] car=wlan0/[IP] default=rmnet_data4/[IP] ssid=[TARGET_SSID] processBound=wlan0/[IP] defaultInternet=true defaultValidated=true（上次 wifi=[] car=- default=rmnet_data4/[IP] ssid=- processBound=- defaultInternet=true defaultValidated=true）
+L109 [12:40:49.885] BT-RELEASE: action=6 source=guard before={通话(HFP)=DISCONNECTED, 音频(A2DP)=DISCONNECTED, 低功耗音频(LE)=UNKNOWN} requests={} after={通话(HFP)=DISCONNECTED, 音频(A2DP)=DISCONNECTED, 低功耗音频(LE)=UNKNOWN} deviceRequest=NOT_ATTEMPTED superseded=false (ACCEPTED=系统接受请求，DISCONNECTED=查询报告离线)
+L110 [12:40:49.905] BT-ACTION: id=6 source=guard phase=END
+L111 [12:40:50.045] WIFI: 系统事件地址变化 → wifi=[wlan0/[IP]] car=wlan0/[IP] default=rmnet_data4/[IP] ssid=[TARGET_SSID] processBound=wlan0/[IP] defaultInternet=true defaultValidated=true（上次 wifi=[-] car=wlan0/[IP] default=rmnet_data4/[IP] ssid=[TARGET_SSID] processBound=wlan0/[IP] defaultInternet=true defaultValidated=true）
+L114 [12:40:51.465] BT-ACTION: id=7 source=guard phase=BEGIN
+L115 [12:40:51.467] BT-ACTION: id=7 source=guard phase=RELEASING_PROFILES
+L116 [12:40:52.669] BT-ACTION: source=outbound waiting for local release/dial action
+L117 [12:40:52.723] BT-RELEASE: action=7 source=guard before={通话(HFP)=DISCONNECTED, 音频(A2DP)=DISCONNECTED, 低功耗音频(LE)=UNKNOWN} requests={} after={通话(HFP)=DISCONNECTED, 音频(A2DP)=DISCONNECTED, 低功耗音频(LE)=UNKNOWN} deviceRequest=NOT_ATTEMPTED superseded=false (ACCEPTED=系统接受请求，DISCONNECTED=查询报告离线)
+L118 [12:40:52.723] BT-ACTION: id=7 source=guard phase=END
+L119 [12:40:52.725] BT-ACTION: id=8 source=outbound phase=BEGIN
+L120 [12:40:52.753] BT-ACTION: id=8 source=outbound phase=DIALING
+L122 [12:40:54.327] BT-ACTION: source=guard waiting for local release/dial action
+L123 [12:40:54.365] BT-ACTION: id=8 dial-end durationMs=1608 current=true connected=true
+L125 [12:40:54.368] BT-ACTION: id=8 source=outbound phase=END
+L126 [12:40:55.876] BT-ACTION: id=9 source=guard phase=BEGIN
+L127 [12:40:55.897] BT-ACTION: id=9 source=guard phase=RELEASING_PROFILES
+L129 [12:40:56.645] WIFI: 系统事件 onLost → wifi=[] car=- default=rmnet_data4/[IP] ssid=[TARGET_SSID] processBound=- defaultInternet=true defaultValidated=true（上次 wifi=[wlan0/[IP]] car=wlan0/[IP] default=rmnet_data4/[IP] ssid=[TARGET_SSID] processBound=wlan0/[IP] defaultInternet=true defaultValidated=true）
+L144 [12:40:57.818] BT-RELEASE: action=9 source=guard before={通话(HFP)=DISCONNECTED, 音频(A2DP)=DISCONNECTED, 低功耗音频(LE)=UNKNOWN} requests={} after={通话(HFP)=DISCONNECTED, 音频(A2DP)=DISCONNECTED, 低功耗音频(LE)=UNKNOWN} deviceRequest=NOT_ATTEMPTED superseded=false (ACCEPTED=系统接受请求，DISCONNECTED=查询报告离线)
+L145 [12:40:57.819] BT-ACTION: id=9 source=guard phase=END
+L165 [12:41:01.826] WIFI: 系统事件 onAvailable → wifi=[-] car=- default=rmnet_data4/[IP] ssid=[TARGET_SSID] processBound=- defaultInternet=true defaultValidated=true（上次 wifi=[] car=- default=rmnet_data4/[IP] ssid=[TARGET_SSID] processBound=- defaultInternet=true defaultValidated=true）
+L166 [12:41:01.835] WIFI: 系统事件地址变化 → wifi=[wlan0/[IP]] car=- default=rmnet_data4/[IP] ssid=[TARGET_SSID] processBound=- defaultInternet=true defaultValidated=true（上次 wifi=[-] car=- default=rmnet_data4/[IP] ssid=[TARGET_SSID] processBound=- defaultInternet=true defaultValidated=true）
+L167 [12:41:01.881] WIFI: fallback candidate=836 awaiting ordered capabilities and link properties
+L168 [12:41:01.894] WIFI: fallback selected network=836 identity=ssid-visible bound=true; lease pinned
+L170 [12:41:01.901] WIFI-ID: reuse associated=true hasWifi=true success=true
+L223 [12:41:04.744] WIFI: 系统事件网卡能力变化 → wifi=[wlan0/[IP]] car=wlan0/[IP] default=rmnet_data4/[IP] ssid=[TARGET_SSID] processBound=wlan0/[IP] defaultInternet=true defaultValidated=true（上次 wifi=[wlan0/[IP]] car=- default=rmnet_data4/[IP] ssid=[TARGET_SSID] processBound=- defaultInternet=true defaultValidated=true）
+L227 [12:41:04.947] AIRPLAY: ✓ RECORD 完成——会话已激活
+L259 [12:41:06.999] AIRPLAY: ✓ RECORD 完成——会话已激活
+L262 [12:41:07.031] BT-DISABLE: request generation=1 deviceIDSource=session-SETUP channel=control
+L265 [12:41:07.044] BT-DISABLE: response generation=1 accepted=false status=[RTSP/1.0 422 Unprocessable Entity]; profile/ACL disconnection unconfirmed
+L288 [12:41:07.336] AIRPLAY: ✓ RECORD 完成——会话已激活
+L315 [12:41:25.345] WIFI: 系统事件网卡能力变化 → wifi=[wlan0/[IP]] car=wlan0/[IP] default=wlan0/[IP] ssid=[TARGET_SSID] processBound=wlan0/[IP] defaultInternet=true defaultValidated=false（上次 wifi=[wlan0/[IP]] car=wlan0/[IP] default=rmnet_data4/[IP] ssid=[TARGET_SSID] processBound=wlan0/[IP] defaultInternet=true defaultValidated=true）
+L375 [12:42:16.861] CARLIFE-DIAG: video frames=2859 lastFrameAgeMs=10 phase=header-read phaseAgeMs=8
+L378 [12:42:21.867] CARLIFE-DIAG: video frames=2933 lastFrameAgeMs=18 phase=header-read phaseAgeMs=18
+L1959 [12:42:23.017] CARLIFE: 音频直通 235 包 / 940KB / 1531kbps · 电平 57%（非零 99%）
+L1972 [12:42:26.056] CARLIFE: 实测帧率 20.6fps（5s 内 105 帧，声明 60）
+L381 [12:42:26.677] CONNECT-DIAG: final-disconnect requested phase=等待 CarLife 画面…; will stop CarLife and retire network resources
+L387 [12:42:26.682] CARLIFE-DIAG: stopped reason=local-stop-or-cancel
+L405 [12:43:20.190] CONNECT-DIAG: final-disconnect requested phase=null; will stop CarLife and retire network resources

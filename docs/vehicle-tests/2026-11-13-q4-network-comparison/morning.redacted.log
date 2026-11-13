@@ -1,0 +1,29 @@
+# Selected, redacted diagnostics: CarPToCarL-log-20261113-072817.txt
+# SHA-256 of original: 24cedd4f5fe58b2beb02a2b64bf5e2a04e20a720cdd1eca43cc2b6e477ca3558
+# Exact repeated export lines deduplicated; chronological order retained. L = original 1-based line.
+# Allowlisted event types only; no raw protocol payloads, addresses, credentials or old failure snapshots.
+# [IP] is redacted; do not infer address equality from this placeholder. Not replay data.
+
+L16 [06:48:14.531] CONNECT-DIAG: schema=20261108-v9 revision=aa2579b69a52-dirty version=1.2.31-q4-debug sdk=36; export includes bounded early/recent diagnostics, idle deadlines and network leases
+L21 [06:48:15.023] WIFI: 状态心跳已启动（起点 wifi=[] car=- default=rmnet_data4/[IP] ssid=- processBound=- defaultInternet=true defaultValidated=true）
+L25 [06:48:15.052] CARLIFE: 控制端口已连接，直接用于版本握手（无探测连接）
+L26 [06:48:15.066] WIFI: 系统事件 onAvailable → wifi=[-] car=- default=rmnet_data4/[IP] ssid=- processBound=- defaultInternet=true defaultValidated=true（上次 wifi=[] car=- default=rmnet_data4/[IP] ssid=- processBound=- defaultInternet=true defaultValidated=true）
+L27 [06:48:15.128] WIFI: 系统事件地址变化 → wifi=[wlan0/[IP]] car=- default=rmnet_data4/[IP] ssid=- processBound=- defaultInternet=true defaultValidated=true（上次 wifi=[-] car=- default=rmnet_data4/[IP] ssid=- processBound=- defaultInternet=true defaultValidated=true）
+L28 [06:48:15.152] WIFI-MEMORY: waiting for current target presence before cached hotspot request
+L29 [06:48:15.223] CARLIFE: 版本匹配成功（协议 3.0）
+L31 [06:48:15.227] WIFI-MEMORY: current target present; admitting cached hotspot request
+L32 [06:48:15.244] WIFI-MEMORY: bounded preconnect using verified credentials; BT continues independently
+L34 [06:48:15.286] WIFI-POLICY: ownedSuggestionsRemoved=0 status=0 remaining=0 ready=true
+L35 [06:48:15.300] WIFI: fallback candidate=819 awaiting ordered capabilities and link properties
+L36 [06:48:15.305] WIFI: fallback selected network=819 identity=ssid-visible bound=true; lease pinned
+L38 [06:48:15.309] WIFI-ID: reuse associated=true hasWifi=true success=true
+L49 [06:48:16.122] CARLIFE-DIAG: video frames=0 lastFrameAgeMs=1008 phase=header-read phaseAgeMs=1001
+L57 [06:48:18.259] CARLIFE: ✓ 收到 CarLife 首帧（4238B，keyFrame=true）
+L61 [06:48:20.045] WIFI: 心跳 → wifi=[wlan0/[IP]] car=wlan0/[IP] default=rmnet_data4/[IP] ssid=[TARGET_SSID] processBound=wlan0/[IP] defaultInternet=true defaultValidated=true（上次 wifi=[wlan0/[IP]] car=- default=rmnet_data4/[IP] ssid=- processBound=- defaultInternet=true defaultValidated=true）
+L64 [06:48:21.127] CARLIFE-DIAG: video frames=24 lastFrameAgeMs=1381 phase=header-read phaseAgeMs=170
+L148 [06:48:42.416] AIRPLAY: ✓ RECORD 完成——会话已激活
+L180 [06:48:44.569] AIRPLAY: ✓ RECORD 完成——会话已激活
+L203 [06:48:44.827] AIRPLAY: ✓ RECORD 完成——会话已激活
+L6316 [07:27:50.348] CARLIFE-DIAG: video frames=47258 lastFrameAgeMs=22 phase=header-read phaseAgeMs=22
+L6328 [07:27:55.362] CARLIFE-DIAG: video frames=47352 lastFrameAgeMs=60 phase=header-read phaseAgeMs=60
+L6347 [07:27:58.664] CARLIFE-DIAG: stopped reason=local-stop-or-cancel
