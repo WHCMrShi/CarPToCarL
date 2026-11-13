@@ -22,7 +22,7 @@
         android:textSize="17sp"
         android:textStyle="bold" />
     <!-- 正文：超长时滚动（最大 46% 屏高，由代码设上限），底部按钮始终可见 -->
-    <ScrollView
+    <io.github.shaonialife.carptocar.ui.MessageScrollView
         android:id="@+id/msgScroll"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -35,7 +35,7 @@
             android:lineSpacingExtra="4dp"
             android:textColor="@color/m3_on_var"
             android:textSize="14sp" />
-    </ScrollView>
+    </io.github.shaonialife.carptocar.ui.MessageScrollView>
     <LinearLayout
         android:id="@+id/msgActions"
         android:layout_width="match_parent"

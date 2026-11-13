@@ -56,6 +56,8 @@ class AirPlayClient(
      * （catplay 每 1s force_announce）。
      */
     private val retryTick: ((attempt: Int) -> Unit)? = null,
+    /** 仅报告实际阶段和本轮尝试次数，不改变重试节奏。 */
+    private val onPairingProgress: ((attempt: Int, stage: String) -> Unit)? = null,
     /**
      * 接收端端口**连续拒绝**时的高频钩子（每 3 次拒绝调用一次，必须非阻塞）。
      *
@@ -386,6 +388,7 @@ class AirPlayClient(
         var backoffRetried = false
         while (System.currentTimeMillis() < deadline && !pairingStopped()) {
             attempt++
+            runCatching { onPairingProgress?.invoke(attempt, "连接 CarPlay 服务") }
             // 每轮重试前吸收一次 mDNS 新结果：网关兜底地址连不通时，车机的
             // _airplay._tcp 可能已经在后台发现到，及时换过去比空转 120s 强。
             val refreshBase = endpoint
@@ -420,6 +423,7 @@ class AirPlayClient(
             try {
                 val setupStatus =
                     try {
+                        runCatching { onPairingProgress?.invoke(attempt, "配对 CarPlay") }
                         PairSetupClient(identity, transport, log).run()
                         null
                     } catch (rejected: PairingRejectedException) {
@@ -483,6 +487,7 @@ class AirPlayClient(
                     if (!ensureConnected(2_000)) continue
                     val fastPathTransport = TlvTransport { path, body -> postPairing(path, body) }
                     val receiverStaticKey = endpoint.publicKey?.let(::hexToBytes)
+                    runCatching { onPairingProgress?.invoke(attempt, "验证配对身份") }
                     val keys = PairVerifyClient(identity, fastPathTransport, log).run(receiverStaticKey)
                     cipher = ControlCipher(keys.phoneReadKey, keys.phoneWriteKey)
                     log("AIRPLAY: 控制通道加密已启用（已配对快路径）")
@@ -505,6 +510,7 @@ class AirPlayClient(
                     continue
                 }
                 val receiverStaticKey = endpoint.publicKey?.let(::hexToBytes)
+                runCatching { onPairingProgress?.invoke(attempt, "验证配对身份") }
                 val keys = PairVerifyClient(identity, transport, log).run(receiverStaticKey)
                 // pair-verify 之后双方立即启用加密（接收端在 M4 应答后开启）
                 cipher = ControlCipher(keys.phoneReadKey, keys.phoneWriteKey)

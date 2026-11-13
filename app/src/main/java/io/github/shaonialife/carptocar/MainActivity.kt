@@ -27,7 +27,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
-import androidx.core.graphics.drawable.DrawableCompat
 import io.github.shaonialife.carptocar.bt.AppUiPresence
 import io.github.shaonialife.carptocar.bt.BtCompatPrefs
 import io.github.shaonialife.carptocar.bt.BtProfiles
@@ -97,7 +96,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var ctaButton: LinearLayout
     private lateinit var ctaIcon: ImageView
     private lateinit var ctaLabel: TextView
-    private lateinit var audioTag: TextView
     private lateinit var ssidInput: TextView
     private var macEditing = false
     private lateinit var macInput: EditText
@@ -539,29 +537,10 @@ class MainActivity : AppCompatActivity() {
      * 「一直提示要与 CarPToCarL 配合的设备」。
      */
 
-    /**
-     * 「断开连接」确认弹窗（防误触）：断开会立即中断车机画面，
-     * 且投屏授权随保活服务停止而失效（下次要车机侧声音需重新授权）。
-     */
-    private fun promptDisconnect() {
-        DarkMessageDialog.show(
-            activity = this,
-            title = "断开连接？",
-            message =
-                "将停止车机推流并关闭保活服务，车机画面会立即中断。\n\n" +
-                    "注意：投屏授权会随服务停止失效，下次如需车机侧声音请重新授权。",
-            actions =
-                listOf(
-                    DarkMessageDialog.Action("取消") {},
-                    DarkMessageDialog.Action("断开", DarkMessageDialog.Emphasis.DANGER) {
-                        // 手动断开 = 这一轮停车期间不要被「靠近车机」自动再拉起来
-                        // （车机发现链路断了会立刻回连，不抑制就会变成「断开 → 自动重连」死循环）。
-                        // 车机蓝牙链路真断（人离开/熄火）时由 CarApproachReceiver 自动解除。
-                        CarApproachPrefs.setSuppressed(this, true)
-                        SessionController.disconnect(this)
-                    },
-                ),
-        )
+    /** 长按确认后沿用原断开行为，抑制停车期间自动重连。 */
+    private fun disconnectFromButton() {
+        CarApproachPrefs.setSuppressed(this, true)
+        SessionController.disconnect(this)
     }
 
     /**
@@ -680,7 +659,6 @@ class MainActivity : AppCompatActivity() {
         ctaButton = findViewById(R.id.ctaButton)
         ctaIcon = findViewById(R.id.ctaIcon)
         ctaLabel = findViewById(R.id.ctaLabel)
-        audioTag = findViewById(R.id.audioTag)
         ssidInput = findViewById(R.id.ssidInput)
         macInput = findViewById(R.id.macInput)
         btDesc = findViewById(R.id.btDesc)
@@ -869,7 +847,7 @@ class MainActivity : AppCompatActivity() {
         // ---- 英雄卡主操作 ----
         ctaButton.setOnClickListener {
             when (heroState) {
-                HeroState.CONNECTED -> promptDisconnect()
+                HeroState.CONNECTED -> Unit
                 // 前置检查：蓝牙权限/开关 → 音频选择（Shizuku 已移除，不再有硬门禁）
                 HeroState.IDLE -> proceedToConnect { ensureBluetoothReady { startConnectionNow() } }
                 // 连接中仅由长按确认，短按不取消。
@@ -880,8 +858,13 @@ class MainActivity : AppCompatActivity() {
 
         cancelHold = io.github.shaonialife.carptocar.ui.HoldToCancel(
             ctaButton,
-            allowed = { heroState == HeroState.CONNECTING && SessionController.videoSender?.isRunning != true },
-            confirm = { cancelConnectingFromButton() },
+            allowed = {
+                heroState == HeroState.CONNECTED ||
+                    (heroState == HeroState.CONNECTING && SessionController.videoSender?.isRunning != true)
+            },
+            confirm = {
+                if (heroState == HeroState.CONNECTED) disconnectFromButton() else cancelConnectingFromButton()
+            },
         )
 
         // ---- 连接准备 ----
@@ -1042,17 +1025,6 @@ class MainActivity : AppCompatActivity() {
             preferences.edit().putBoolean("logEnabled", checked).apply()
             renderConsole(SessionController.logText())
         }
-        findViewById<ImageView>(R.id.btnClearLog).setOnClickListener {
-            // 清除缓冲后必须显式重渲染：日志回调是增量追加语义，clearLog 的通知
-            // 无法清 UI（见 SessionController.clearLog 注释，「点了没反应」根因）
-            synchronized(consoleLock) {
-                mainHandler.removeCallbacks(flushConsole)
-                SessionController.clearLog()
-                pendingConsole.clear(SessionController.logGeneration)
-                consoleScheduled = false
-            }
-            renderConsole(SessionController.logText())
-        }
         findViewById<ImageView>(R.id.btnExportLog).setOnClickListener { exportLogFile() }
         // 长按导全部历史：默认只导本次启动，历史日志量大时按需手动取
         findViewById<ImageView>(R.id.btnExportLog).setOnLongClickListener {
@@ -1157,7 +1129,6 @@ class MainActivity : AppCompatActivity() {
         }
         updateConnectedSubline()
         updateHeroStats()
-        updateAudioTag()
         updateReadyRow()
     }
 
@@ -1252,16 +1223,13 @@ class MainActivity : AppCompatActivity() {
                     "启动连接",
                     blocked = macMissing,
                 )
-                audioTag.visibility = View.GONE
             }
             HeroState.CONNECTING -> {
                 heroSubline.text = SessionController.phaseHint ?: DEFAULT_CONNECTING_HINT
                 styleCta(R.drawable.bg_cta_fill, R.color.m3_on_primary, R.drawable.ic_close, "长按取消连接")
-                audioTag.visibility = View.GONE
             }
             HeroState.CONNECTED -> {
-                styleCta(R.drawable.bg_cta_outline_err, R.color.m3_error, R.drawable.ic_power, "断开连接")
-                audioTag.visibility = View.VISIBLE
+                styleCta(R.drawable.bg_cta_outline_err, R.color.m3_error, R.drawable.ic_power, "长按断开连接")
             }
         }
 
@@ -1308,12 +1276,7 @@ class MainActivity : AppCompatActivity() {
         val elapsed = SystemClock.elapsedRealtime() - connectedAt
         val mm = elapsed / 60_000
         val ss = elapsed % 60_000 / 1_000
-        val ssid =
-            ssidInput.text
-                .toString()
-                .trim()
-                .ifEmpty { "车机热点" }
-        heroSubline.text = String.format(Locale.US, "已连接 · %02d:%02d · %s", mm, ss, ssid)
+        heroSubline.text = String.format(Locale.US, "%02d:%02d", mm, ss)
     }
 
     private fun bindDisplayCard() {
@@ -1338,20 +1301,6 @@ class MainActivity : AppCompatActivity() {
         // 这里先按默认 60 起，等 SETUP 拿到车机值后由 SessionController 覆盖。
         VirtualLauncher.setStreamFps(StreamFps.DEFAULT_FPS)
 
-    }
-
-    private fun updateAudioTag() {
-        if (heroState != HeroState.CONNECTED) return
-        // 2026-10-24 起默认带声音（无开关），只看音频通道是否真的在推流
-        val on = SessionController.audioSender?.isRunning == true
-        val icon =
-            ContextCompat.getDrawable(
-                this,
-                if (on) R.drawable.ic_music_small else R.drawable.ic_volume_off_small,
-            )!!
-        DrawableCompat.setTint(icon.mutate(), getColor(if (on) R.color.m3_ok else R.color.m3_outline))
-        audioTag.setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null)
-        audioTag.text = if (on) "车机侧声音 · 开启" else "车机侧声音 · 关闭"
     }
 
     /** 更新热点凭据和蓝牙配对状态。 */

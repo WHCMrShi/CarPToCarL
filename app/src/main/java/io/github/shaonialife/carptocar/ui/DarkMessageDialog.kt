@@ -6,7 +6,6 @@ import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import io.github.shaonialife.carptocar.R
@@ -60,7 +59,6 @@ object DarkMessageDialog {
         val view = LayoutInflater.from(activity).inflate(R.layout.dialog_message, null)
         val titleView = view.findViewById<TextView>(R.id.msgTitle)
         val bodyView = view.findViewById<TextView>(R.id.msgBody)
-        val scroll = view.findViewById<ScrollView>(R.id.msgScroll)
         val actionRow = view.findViewById<LinearLayout>(R.id.msgActions)
         titleView.text = title
         bodyView.text = message
@@ -91,26 +89,7 @@ object DarkMessageDialog {
             dialog.setOnCancelListener { onCancel?.invoke() }
         }
         dialog.setOnShowListener {
-            // 正文超长时夹到屏高 46% 并内部滚动；短文案贴合内容（固定高度会留大片空白）。
-            // clampBody 同时作为旋转回调：横屏屏高变小后要重新夹紧，否则会撑出屏幕。
-            val clampBody: (Activity) -> Unit = { ctx ->
-                val maxBodyHeight = (ctx.resources.displayMetrics.heightPixels * 0.46f).toInt()
-                bodyView.post {
-                    val target =
-                        if (bodyView.height > maxBodyHeight) {
-                            maxBodyHeight
-                        } else {
-                            ViewGroup.LayoutParams.WRAP_CONTENT
-                        }
-                    if (scroll.layoutParams.height != target) {
-                        scroll.layoutParams =
-                            scroll.layoutParams.apply { height = target }
-                    }
-                }
-            }
-            // 宽度 92%、高度按内容自适应；旋转时 PanelWindow 会回调 clampBody 重算
-            PanelWindow.apply(dialog, activity, onResize = clampBody)
-            clampBody(activity)
+            PanelWindow.apply(dialog, activity)
         }
         dialog.show()
         return dialog

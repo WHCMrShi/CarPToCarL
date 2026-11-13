@@ -153,23 +153,6 @@
                                     android:textStyle="bold"
                                     android:importantForAccessibility="no" />
                             </LinearLayout>
-                            <TextView
-                                android:id="@+id/audioTag"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="12dp"
-                                android:background="@drawable/bg_icon_tile"
-                                android:drawableStart="@drawable/ic_music_small"
-                                android:drawablePadding="6dp"
-                                android:gravity="center_vertical"
-                                android:paddingStart="13dp"
-                                android:paddingEnd="13dp"
-                                android:text="车机侧声音 · 开启"
-                                android:textColor="@color/m3_on_var"
-                                android:textSize="14sp"
-                                android:textStyle="bold"
-                                android:visibility="gone"
-                                android:minHeight="32dp" />
                         </LinearLayout>
                         <LinearLayout
                             android:id="@+id/detailColumn"
@@ -613,16 +596,6 @@
                                             android:layout_width="0dp"
                                             android:layout_height="1dp"
                                             android:layout_weight="1" />
-                                        <ImageView
-                                            android:id="@+id/btnClearLog"
-                                            android:layout_width="48dp"
-                                            android:layout_height="48dp"
-                                            android:background="@drawable/bg_ripple_circle"
-                                            android:contentDescription="清除日志"
-                                            android:padding="12dp"
-                                            android:src="@drawable/ic_trash"
-                                            app:tint="@color/m3_on_var"
-                                            android:focusable="true" />
                                         <ImageView
                                             android:id="@+id/btnExportLog"
                                             android:layout_width="48dp"

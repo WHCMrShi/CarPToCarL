@@ -529,19 +529,6 @@ object SessionController {
         )
     }
 
-    /**
-     * 清空进程级日志缓冲（UI 刷新是调用方的事：显式 `renderConsole(logText())`）。
-     * 历史上这里靠 `logListener?.invoke("")` 通知 UI——那是「每行全量 setText」时代的
-     * 语义；改为增量 appendConsole 后空串等于追加空行，UI 原地不动（「清除按钮点了
-     * 没反应」根因，2026-10-16）。不要恢复该调用：空串与真实日志行无法区分。
-     */
-    fun clearLog() {
-        synchronized(logLock) {
-            logBuilder.setLength(0)
-            logGeneration++
-        }
-    }
-
     // ---- 会话对象（进程级所有权；Activity 重建不影响）----
 
     private var wifiConnector: WifiCarPlayConnector? = null
@@ -1295,6 +1282,7 @@ object SessionController {
                     "RETRY: $reason——${delay / 1_000}s 后自动重试" +
                         "（第 ${attempt + 1}/${CONNECT_RETRY_BACKOFF_MS.size} 次）",
                 )
+                phaseHint = "重试 ${attempt + 1} · 等待重连"
                 sleepQuietly(delay)
                 val stale =
                     synchronized(connectRetryLock) {
@@ -2246,12 +2234,13 @@ object SessionController {
         wifi: Iap2SenderSession.WifiConfiguration,
         shellReady: Boolean,
         force: Boolean = false,
+        retryNumber: Int = 0,
         work: WorkEpoch.Ticket = connectionWork.capture(),
     ): WifiCarPlayConnector.JoinResult {
         val cancelled = { connectCancelled || !work.isCurrent }
         if (cancelled()) return WifiCarPlayConnector.JoinResult.Unavailable
         val connector = wifiConnector ?: return WifiCarPlayConnector.JoinResult.Unavailable
-        phaseHint = "正在加入车机热点…"
+        phaseHint = if (retryNumber > 0) "重试 $retryNumber · 加入车机热点" else "正在加入车机热点…"
         val result = joinCarWifiOnce(connector, wifi, force, work)
         if (cancelled() || compatSuppressed) {
             appendLog("CONNECT-DIAG: retired WiFi join completion after cancellation")
@@ -2396,7 +2385,7 @@ object SessionController {
         sleepQuietly(1_000)
         if (connectCancelled || !work.isCurrent) return WifiCarPlayConnector.JoinResult.Unavailable
         appendLog("WIFI: 入网未完成，有限自动重试一次；不绕过系统授权")
-        val retry = joinCarWifiSpecifier(wifi, shellReady, force = true, work = work)
+        val retry = joinCarWifiSpecifier(wifi, shellReady, force = true, retryNumber = 1, work = work)
         work.runIfCurrent {
             if (!connectCancelled && !isStreaming() && !carWifiReady(wifi.ssid) && retry == WifiCarPlayConnector.JoinResult.Unavailable)
                 phaseHint = "热点连接失败，请在 WLAN 中连接"
@@ -2968,6 +2957,7 @@ object SessionController {
                     val now = android.os.SystemClock.uptimeMillis()
                     if (probeCount < PROBE_MAX_TIMES && now - lastProbeAt >= PROBE_INTERVAL_MS) {
                         probeCount++
+                        phaseHint = if (probeCount > 1) "重试 ${probeCount - 1} · 查找 CarPlay" else "正在查找 CarPlay…"
                         lastProbeAt = now
                         if (probeAirplayOnCurrentWifi(ssid, probeCount, work)) {
                             if (!cancelled() && !sessionStarting.get()) {
@@ -3918,6 +3908,7 @@ object SessionController {
         var attempt = 1
         while (android.os.SystemClock.uptimeMillis() < deadline && !connectCancelled) {
             attempt++
+            phaseHint = "重试 ${attempt - 1} · 建立控制会话"
             appendLog("AIRPLAY: 明文 SETUP 第 ${attempt - 1} 次未通过——2s 后重连重试（车机 AirPlay 端口可能尚未开放）")
             try {
                 Thread.sleep(2_000)
@@ -4435,6 +4426,11 @@ object SessionController {
                             context = context.applicationContext,
                             endpointRefresher = { current -> enrichEndpointFromBrowser(current, source) },
                             onPortRefused = wakeCarPlayWindow,
+                            onPairingProgress = { attempt, stage ->
+                                mutate {
+                                    phaseHint = if (attempt > 1) "重试 ${attempt - 1} · $stage" else "$stage…"
+                                }
+                            },
                             retryTick = { attempt ->
                                 mutate {
                                     // 配对重试期间车机仍可能没探测到 ctrl（Bonjour 漏掉首次公告）：
@@ -4514,7 +4510,7 @@ object SessionController {
                     // （典型：连着 DiPlay 测试台时不再噪音式探测 Audi）。会话结束/断开时解除。
                     mutate { BtSessionGate.sessionActive = true }
                     // 第一阶段：保持 BT 在位直接配对 + SETUP（协议上正确的形态）
-                    phaseHint = "正在验证 CarPlay…"
+                    phaseHint = "正在连接 CarPlay 服务…"
                     connectBudget.enter(ConnectStage.PAIRING)
                     var client = newClient()
                     if (attemptCancelled()) { client.dispose(); return@run }
@@ -4660,7 +4656,7 @@ object SessionController {
                             pairingTerminal = client.pairingTerminal,
                         ).usePlainSession
                     if (plainSession) {
-                        phaseHint = "正在建立 CarPlay…"
+                        phaseHint = "正在建立控制会话…"
                         appendLog(
                             "AIRPLAY: 配对不可用（${if (client.pairingUnsupported) "接收端不支持" else "配对失败"}）" +
                                 "——改用 et=NONE 明文会话 + AES-CTR 屏幕流（catplay 接收端分类 1/2）",
@@ -4696,7 +4692,7 @@ object SessionController {
                     }
                     if (pairedKeys != null) PairingMemory.clear(context)
                     if (pairedKeys != null || plainSession) {
-                        phaseHint = if (pairedKeys != null) "正在建立影音通道…" else "正在建立 CarPlay…"
+                        phaseHint = "正在建立控制会话…"
                         if (pairedKeys != null) {
                             appendLog(
                                 "AIRPLAY: ✓ 配对完成 writeKey=" +
@@ -4742,6 +4738,7 @@ object SessionController {
                                 appendLog("CONNECT-DIAG: refusing retired SETUP result; no screen negotiation")
                                 return@run
                             }
+                            phaseHint = "正在协商画面参数…"
                             connectBudget.enter(ConnectStage.FIRST_FRAME)
                             // 记录会话凭据：投影授权晚于连接时用于动态补启音频。
                             // 用 client.currentEndpoint 而非 effectiveEndpoint：配对期间
@@ -5228,6 +5225,7 @@ object SessionController {
                                 //
                                 // 正常车机走到这里链路早已 NORMAL → 整段跳过，行为零变化。
                                 if (!client.controlSessionReady) {
+                                    phaseHint = "等待车机控制认证…"
                                     appendLog("MIB3: RECORD 时 iAP2 控制会话尚未就绪——等它就绪后补一次激活")
                                     if (client.awaitControlSession(MIB3_REACTIVATE_WAIT_MS)) {
                                         appendLog("MIB3: 控制会话已就绪 → 重新声明主屏资源并补发 RECORD")
@@ -5245,6 +5243,7 @@ object SessionController {
                                 }
                                 // RECORD 成功 = 会话活着。此刻丢弃报文缓冲：用户要的是
                                 // 「连不上」的现场，正常连接不需要快照（省空间也省导出体积）。
+                                phaseHint = "等待 CarLife 画面…"
                                 SessionTrace.markLinked()
                                 if (host != null) {
                                     // CarLife 本地劫持是**唯一**画面来源（2026-10-24 用户要求
