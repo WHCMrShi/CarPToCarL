@@ -25,9 +25,14 @@ internal object NavigationIconLayout {
 internal object NavigationIcon {
     fun render(bytes: ByteArray?, log: (String) -> Unit = {}): ByteArray {
         var source: Bitmap? = null
+        var inputPngSize: String? = null
         if (bytes != null && bytes.size <= 65_535) {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true; inScaled = false }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            // Reuse the existing bounds-only read of CarLife's bytes, before rendering the cover.
+            if (bounds.outMimeType == "image/png" && bounds.outWidth > 0 && bounds.outHeight > 0) {
+                inputPngSize = "${bounds.outWidth}x${bounds.outHeight}"
+            }
             if (bounds.outMimeType == "image/png" && bounds.outWidth in 1..2048 && bounds.outHeight in 1..2048 && bounds.outWidth.toLong() * bounds.outHeight <= 4_194_304) {
                 source = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inScaled = false })
             }
@@ -46,7 +51,7 @@ internal object NavigationIcon {
                 }
                 ByteArrayOutputStream().use { out ->
                     check(canvasImage.compress(Bitmap.CompressFormat.PNG, 100, out))
-                    log("ARTWORK: NAV-ART inputBytes=${bytes?.size ?: 0} source=${source?.width ?: 0}x${source?.height ?: 0} sourceHasAlpha=${source?.hasAlpha()} canvas=${size}x${size} transparentBackground=true draw=$placement outputBytes=${out.size()} placeholder=${image == null}")
+                    log("ARTWORK: NAV-ART inputBytes=${bytes?.size ?: 0} inputPngSize=${inputPngSize ?: "unavailable"} source=${source?.width ?: 0}x${source?.height ?: 0} sourceHasAlpha=${source?.hasAlpha()} canvas=${size}x${size} transparentBackground=true draw=$placement outputBytes=${out.size()} placeholder=${image == null}")
                     out.toByteArray()
                 }
             } finally { canvasImage.recycle() }
