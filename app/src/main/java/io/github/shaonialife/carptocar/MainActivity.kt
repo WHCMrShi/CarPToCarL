@@ -179,7 +179,6 @@ class MainActivity : AppCompatActivity() {
     private var wifiDisplayKey: Pair<String?, String?>? = null
     private var rememberedDisplaySsid: String? = null
     private var liveDisplaySsid: String? = null
-    private var wifiDisplayStatus = "正在读取热点记忆…"
 
     private val ssidSink: (String) -> Unit = { ssid ->
         runOnUiThread {
@@ -191,9 +190,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderWifiMemoryDisplay() {
         ssidInput.text = rememberedDisplaySsid ?: liveDisplaySsid.orEmpty()
-        findViewById<TextView>(R.id.wifiMemoryStatus).text =
-            if (wifiDisplayStatus == "未记忆" && !liveDisplaySsid.isNullOrBlank()) "已获取 · 尚未记忆"
-            else wifiDisplayStatus
+        findViewById<TextView>(R.id.btnClearWifiMemory).apply {
+            isEnabled = wifiDisplayKey?.second != null && SessionController.canClearRememberedWifi()
+            setTextColor(getColor(if (isEnabled) R.color.m3_primary else R.color.m3_outline))
+            alpha = if (isEnabled) 1f else 0.45f
+        }
     }
 
     private fun refreshWifiMemoryDisplay() {
@@ -204,11 +205,6 @@ class MainActivity : AppCompatActivity() {
         if (wifiDisplayKey?.first != target) liveDisplaySsid = null
         wifiDisplayKey = key
         rememberedDisplaySsid = null
-        wifiDisplayStatus = when {
-            target == null -> "未指定车机"
-            key.second == null -> "未记忆"
-            else -> "正在读取热点记忆…"
-        }
         renderWifiMemoryDisplay()
         if (target == null || key.second == null) return
         val context = applicationContext
@@ -222,7 +218,6 @@ class MainActivity : AppCompatActivity() {
                     TargetDevicePrefs.get(this)?.address?.uppercase() != target ||
                     prefs.getString(target, null) != key.second) return@runOnUiThread
                 rememberedDisplaySsid = savedName
-                wifiDisplayStatus = if (savedName != null) "已记忆" else "记忆无法读取 · 连接成功后重新记忆"
                 renderWifiMemoryDisplay()
             }
         }
@@ -1356,10 +1351,7 @@ class MainActivity : AppCompatActivity() {
     /** 更新热点凭据和蓝牙配对状态。 */
     private fun updateReadyRow() {
         refreshWifiMemoryDisplay()
-        findViewById<TextView>(R.id.btnClearWifiMemory).apply {
-            isEnabled = SessionController.canClearRememberedWifi()
-            alpha = if (isEnabled) 1f else 0.45f
-        }
+        renderWifiMemoryDisplay()
         val btGranted =
             ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) ==
                 PackageManager.PERMISSION_GRANTED
