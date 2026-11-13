@@ -1,0 +1,20 @@
+# Read-only system history retained in dumpsys wifi, collected after the test on 2026-11-13.
+# Original SHA-256: 0d18d46c59bd6986c9f98827e0ead67f2c7fd1fe6c85b30e24c88cfb75eb84c3
+# L = source line; sorted chronologically. Only target-network events retained.
+# Addresses, target SSID and unrelated byte counters redacted; no full dump or protocol payload.
+# Wi-Fi config IDs and Connectivity Network IDs are distinct namespaces.
+
+L6298 2026-11-13T12:40:48.914817 - addOrUpdateNetworkInternal: added/updated config. netId=193 configKey="[TARGET_SSID]"WPA_PSK uid=1000 name=android.uid.system:1000
+L6299 2026-11-13T12:40:56.386462 - addOrUpdateNetworkInternal: added/updated config. netId=234 configKey="[TARGET_SSID]"WPA_PSK-0 uid=10468 name=io.github.shaonialife.carptocar
+L4760 11-13 12:40:56.395 FRAMEWORK_DISCONNECT reason=DISCONNECT_GENERIC lastRssi=-47 lastFreq=5745 lastLinkSpeed=200 screenOn=true cellularData=true adaptiveConnectivity=true [byte-counter-omitted] [byte-counter-omitted] [byte-counter-omitted] [byte-counter-omitted] interfaceName=wlan0 interfaceRole=ROLE_CLIENT_PRIMARY
+L4762 11-13 12:40:56.550 NETWORK_DISCONNECTION_EVENT local_gen=true reason=3:DEAUTH_LEAVING screenOn=true cellularData=true adaptiveConnectivity=true [byte-counter-omitted] [byte-counter-omitted] [byte-counter-omitted] [byte-counter-omitted] interfaceName=wlan0 interfaceRole=ROLE_CLIENT_PRIMARY
+L6300 2026-11-13T12:40:58.851307 - removeNetworkInternal: removed config. netId=234 configKey="[TARGET_SSID]"WPA_PSK-0 uid=10468 name=io.github.shaonialife.carptocar
+L4768 11-13 12:40:58.908 FRAMEWORK_DISCONNECT reason=DISCONNECT_NETWORK_REMOVED lastRssi=-50 lastFreq=5745 lastLinkSpeed=108 screenOn=true cellularData=true adaptiveConnectivity=true, supplicantStateChangeEvents: { COMPLETED } [byte-counter-omitted] [byte-counter-omitted] [byte-counter-omitted] [byte-counter-omitted] interfaceName=wlan0 interfaceRole=ROLE_CLIENT_PRIMARY
+L41855 2026-11-13T12:41:00.255413 - Candidate { config = 193, bssid = [MAC], freq = 5745, channelWidth = 1, rssi = -48, Mbps = 396, nominator = 0, pInternet = 50, numRebootsSinceLastUse = 0, saved, trusted, metered, secure }
+L41856 2026-11-13T12:41:00.269416 - OplusCandidatesScorer chooses 193 score 2189.952+/-10.0 expid 42647833
+L41862 2026-11-13T12:41:00.269959 - connectToNetwork(ConcreteClientModeManager{id=752222395 iface=wlan0 role=ROLE_CLIENT_PRIMARY}): Connect to "[TARGET_SSID]" : [MAC] from Disconnected
+L4771 11-13 12:41:00.322 MAC_CHANGE screenOn=true cellularData=true adaptiveConnectivity=true, supplicantStateChangeEvents: { DISCONNECTED INTERFACE_DISABLED }, ConfigInfo: allowed_key_management=2 allowed_protocols=3 allowed_auth_algorithms=0 allowed_pairwise_ciphers=6 allowed_group_ciphers=15 hidden_ssid=true is_passpoint=false is_ephemeral=false has_ever_connected=true scan_rssi=-48 scan_freq=5745 [byte-counter-omitted] [byte-counter-omitted] [byte-counter-omitted] [byte-counter-omitted] interfaceName=wlan0 interfaceRole=ROLE_CLIENT_PRIMARY
+L6301 2026-11-13T12:41:12.133803 - addOrUpdateNetworkInternal: added/updated config. netId=193 configKey="[TARGET_SSID]"WPA_PSK uid=1000 name=android.uid.system:1000
+L42459 2026-11-13T12:41:12.157653 - setNetworkSelectionStatus: configKey="[TARGET_SSID]"WPA_PSK networkStatus=NETWORK_SELECTION_TEMPORARY_DISABLED disableReason=NETWORK_SELECTION_DISABLED_NO_INTERNET_TEMPORARY
+L42460 2026-11-13T12:41:12.166 - WifiBlocklistMonitor addToBlocklist: bssid=[MAC], ssid="[TARGET_SSID]", durationMs=300000, reason=REASON_NETWORK_VALIDATION_FAILURE, rssi=-44
+L42461 2026-11-13T12:41:21.943966 - setNetworkSelectionStatus: configKey="[TARGET_SSID]"WPA_PSK networkStatus=NETWORK_SELECTION_PERMANENTLY_DISABLED disableReason=NETWORK_SELECTION_DISABLED_NO_INTERNET_PERMANENT

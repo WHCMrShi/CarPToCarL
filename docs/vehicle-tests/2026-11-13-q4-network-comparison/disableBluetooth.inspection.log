@@ -1,0 +1,12 @@
+# Sanitized protocol inspection, not a packet replay fixture.
+# Source: application RTSP dump (plaintext before TX encryption / after RX decryption).
+# Original SHA-256: 074b706498ffca389d6cfcabccaba35d68caa4c7f22a4d235126eb811911ed58
+# No raw plist payload or identity addresses retained.
+
+[2026-11-13 12:41:06.971] TX /command type=modesChanged CSeq=22 protocol=RTSP/1.0
+[2026-11-13 12:41:06.981] RX CSeq=22 status=200
+[2026-11-13 12:41:07.032] TX POST /command RTSP/1.0 CSeq=24 Content-Type=application/x-apple-binary-plist Content-Length=103 User-Agent=AirPlay/566.25.21
+[2026-11-13 12:41:07.032] INSPECT actualBodyBytes=103 magic=bplist00 independentDecoder=python-plistlib decoded=true rootByteOffset=8 rootObjectIndex=4 keys=[type:string,deviceID:string] type=disableBluetooth deviceID=[PHONE_BT_MAC] matchesSessionSETUP=true matchesSystemBluetoothAddressAtReview=true
+[2026-11-13 12:41:07.043] RX RTSP/1.0 422 Unprocessable Entity CSeq=24 Content-Length=0 Server=AirTunes/320.17.7 errorBody=absent
+[2026-11-13 12:41:07.133] TX /command type=iAPSendMessage CSeq=25 protocol=RTSP/1.0
+[2026-11-13 12:41:07.149] RX CSeq=25 status=200

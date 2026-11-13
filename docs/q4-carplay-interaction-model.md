@@ -4,6 +4,10 @@
 
 ## 2026-11-13：实车回报——命令422与默认网络切换
 
+后续[原始报文及系统历史核对](vehicle-tests/2026-11-13-q4-network-comparison/protocol-and-system-review.md)：手机现存RTSP记录中，disableBluetooth为103字节有效binary plist、两个顶层string键，CSeq=24；deviceID同时匹配本次SETUP和只读查询的系统蓝牙地址；发送在Wi-Fi iAP2就绪及第二次RECORD成功之后。422响应体为空，尚无证据指定拒绝原因。用户强调网络问题与此命令分开调查，优先检查命令之前的commits。
+
+用户明确CarLife连接后提示继续使用手机流量，CarPlay连接后是整机断网。新增系统带日期历史证明：12:40:56.386本包临时Wi-Fi配置创建，58.851移除；12:41:00.269系统自动重连保存配置，随后应用复用新Network。整个过程在disableBluetooth发送之前，值得优先检查请求生命周期；原蜂窝优先策略具体如何失效、25.345为何选未验证Wi-Fi为默认仍未证实。此轮只读核查及文档更新，未跑业务单测或构建。
+
 新增[午间断网与早间正常联网对照](vehicle-tests/2026-11-13-q4-network-comparison/analysis.md)，含两份按时间排序的脱敏诊断摘录。早间源码标识 `aa2579b69a52-dirty`，午间 `be8a44ca8ed1`；早间未提交改动无法仅凭版本号还原。两轮均为CarLife控制连接/首帧先于CarPlay RECORD，未增加CarPlay先起路径的验证。
 
 用户反馈午间发送命令后CarLife没有终止，但手机断网；并确认没有操作系统WLAN。日志事实：12:41:07.031发送 `disableBluetooth`，07.044收到 **422 Unprocessable Entity、accepted=false**。因此支持“发送并被拒绝后CarLife继续”，仍不能确认“车机成功执行断蓝牙后CarLife继续”。HFP/A2DP在命令发送前已被本地guard查询为离线，不归因于该命令。
