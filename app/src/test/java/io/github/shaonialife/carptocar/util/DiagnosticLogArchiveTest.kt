@@ -8,6 +8,23 @@ import org.junit.rules.TemporaryFolder
 class DiagnosticLogArchiveTest {
     @get:Rule val temp = TemporaryFolder()
 
+    @Test fun batchRotationKeepsTheSameUnicodeLinesAsSingleLineWrites() {
+        val batched = temp.newFile()
+        val individual = temp.newFile()
+        val lines = (0..24).map { "STAGE: 第${it}条导航记录\n" }
+        val limit = lines.first().toByteArray(Charsets.UTF_8).size.toLong() * 3
+        val batchedArchive = DiagnosticLogArchive(batched, limit)
+        val individualArchive = DiagnosticLogArchive(individual, limit)
+        batchedArchive.write(lines, 0)
+        lines.forEach { individualArchive.write(listOf(it), 0) }
+        assertEquals(DiagnosticLogArchive.read(individual), DiagnosticLogArchive.read(batched))
+        batchedArchive.write(listOf("ordinary line\n"), 0)
+        assertEquals(DiagnosticLogArchive.read(individual), DiagnosticLogArchive.read(batched))
+        for (suffix in listOf("diagnostic-start", "diagnostic-previous", "diagnostic-recent")) {
+            assertTrue(java.io.File(batched.path + ".$suffix").length() <= limit)
+        }
+    }
+
     @Test fun earlyHandshakeSurvivesRepeatedMainAndDiagnosticRotation() {
         val main = temp.newFile()
         val writer = SessionLogFile(main, "marker", maxBytes = 30)

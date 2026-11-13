@@ -554,7 +554,7 @@ class VirtualIap2Link(
         if (!AccessoryDeclaration.noteSend(messageId, "tunnel", log)) return
         val frame = Iap2Csm.encode(messageId, body)
         val ok = engine.sendControl(frame, System.nanoTime() / 1_000_000L)
-        log(
+        if (!ok || messageId != Iap2MessageIds.NOW_PLAYING_UPDATE) log(
             "IAPLINK: 隧道 tx 0x${messageId.toString(16)} " +
                 "(${Iap2MessageIds.nameOf(messageId)}) ${frame.size}B ok=$ok",
         )
@@ -575,7 +575,7 @@ class VirtualIap2Link(
         // 车机没声明可收时要整帧丢掉，不能只丢日志。
         if (messageId >= 0 && !AccessoryDeclaration.noteSend(messageId, "tunnel", log)) return false
         val ok = engine.sendControl(frame, System.nanoTime() / 1_000_000L)
-        log(
+        if (!ok || messageId != Iap2MessageIds.NOW_PLAYING_UPDATE) log(
             "IAPLINK: 隧道 tx 0x${messageId.toString(16)} " +
                 "(${Iap2MessageIds.nameOf(messageId)}) ${frame.size}B raw ok=$ok",
         )

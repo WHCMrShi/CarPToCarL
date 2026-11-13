@@ -2067,11 +2067,9 @@ class AirPlayClient(
                             expectedScope = scope,
                         )
                     controlIapCount++
-                    val head =
-                        "IAPLINK: tx(控制通道) #$controlIapCount ${frame.size}B [$statusLine]" +
-                            (if (reply.isEmpty()) "" else " resp=${reply.size}B hex=" + hexPrefix(reply))
-                    if (controlIapCount <= 10 || controlIapCount % 50 == 0 || reply.isNotEmpty()) {
-                        log(head)
+                    // Q4 returns a nonempty plist even for ordinary ACKs; it must not bypass sampling.
+                    if (controlIapCount <= 10 || controlIapCount % 50 == 0 || statusLine.split(' ').getOrNull(1) != "200") {
+                        log("IAPLINK: control tx #$controlIapCount bytes=${frame.size} status=[$statusLine] replyBytes=${reply.size}")
                     }
                     // 车机可能把链路字节直接塞在应答体里（而不是另发事件通道）：认出来就喂给
                     // 链路引擎，别让它白躺在响应里。

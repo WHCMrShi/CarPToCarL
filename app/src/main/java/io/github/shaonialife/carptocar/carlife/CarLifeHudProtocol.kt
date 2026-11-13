@@ -1,9 +1,8 @@
 package io.github.shaonialife.carptocar.carlife
 
 import java.io.ByteArrayOutputStream
-import java.security.MessageDigest
 
-/** HUD 观测用 wire 解码：严格检查边界，畸形消息只影响本条，不中断控制连接。 */
+/** HUD 订阅及导航 wire 解码：严格检查边界，畸形消息只影响本条。 */
 internal object CarLifeHudProtocol {
     const val NEXT_TURN = 0x10030
     const val ASSISTANT_GUIDE = 0x10047
@@ -48,30 +47,4 @@ internal object CarLifeHudProtocol {
             fields.int(4)?.takeIf { it >= 0 } ?: return null, fields.bytes(6),
         )
     }
-    fun describe(id: Int, payload: ByteArray): String {
-        val f = parse(payload)
-        val body = if (id == NEXT_TURN) {
-            val road = f.bytes(3)?.toString(Charsets.UTF_8)?.take(512)?.let(::quoted)
-            val icon = f.bytes(6)
-            val iconInfo = icon?.let {
-                "${it.size}B sha256=${MessageDigest.getInstance("SHA-256").digest(it).hex()} head=${it.take(12).toByteArray().hex()}"
-            } ?: "absent"
-            "NEXT_TURN action=${f.int(1)} nextTurn=${f.int(2)} roadName=$road " +
-                "totalDistanceM=${f.int(4)} remainDistanceM=${f.int(5)} legacyTime=${f.int(6)} icon=$iconInfo"
-        } else {
-            "ASSISTANT_GUIDE action=${f.int(1)} assistantType=${f.int(2)} trafficSignType=${f.int(3)} " +
-                "totalDistanceM=${f.int(4)} remainDistanceM=${f.int(5)} cameraSpeedRaw=${f.int(6)}"
-        }
-        return "$body id=0x${id.toString(16)} bytes=${payload.size} fields=[${f.shape()}] parseError=${f.error ?: "none"}"
-    }
-
-    private fun ByteArray.hex(): String = joinToString("") { "%02x".format(it.toInt() and 255) }
-    private fun quoted(s: String): String = "\"" + s.flatMap {
-        when {
-            it == '\\' -> "\\\\".toList()
-            it == '"' -> "\\\"".toList()
-            it.isISOControl() || it == '\u2028' || it == '\u2029' -> "\\u%04x".format(it.code).toList()
-            else -> listOf(it)
-        }
-    }.joinToString("") + "\""
 }

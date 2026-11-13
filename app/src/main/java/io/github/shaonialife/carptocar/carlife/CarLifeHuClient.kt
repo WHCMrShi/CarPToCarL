@@ -652,7 +652,6 @@ class CarLifeHuClient(
     }
 
     private fun handleMessage(serviceType: Int, payload: ByteArray) {
-        hudObserver.controlMessage(serviceType)
         when (serviceType) {
             CarLifeProtocol.MD_VERSION_MATCH -> {
                 versionMatched = true
@@ -1566,7 +1565,7 @@ class CarLifeHuClient(
                         }
 
                         CarLifeProtocol.MUSIC_PKG_STOP -> {
-                            log("CARLIFE: $label 引擎音频停止（0x30003）——来电或音频路由被切走")
+                            log("CARLIFE: $label 收到引擎音频停止 0x30003（原因未提供）")
                             engineAudioActive = false
                             playbackEvidence.engine(android.os.SystemClock.uptimeMillis(), false)
                             onAudioGate(false)
@@ -1676,7 +1675,7 @@ class CarLifeHuClient(
                 "${SILENT_BACKOFF_MS * channel.silentReopens / 1000} 秒后才会再试）",
         )
         if (!reopenAudio(channel)) {
-            log("CARLIFE: ${channel.label} 音频通道重连失败（引擎该端口未监听）——按退避再试")
+            log("CARLIFE: ${channel.label} 音频通道重连失败，按原退避重试")
         }
     }
 

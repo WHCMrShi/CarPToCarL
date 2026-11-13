@@ -1,6 +1,6 @@
 package io.github.shaonialife.carptocar.carlife
 
-/** 每个 HU 会话独立探测；不更改导航/媒体状态，所有错误仅诊断。时钟单位毫秒。 */
+/** 每个 HU 会话独立订阅并转交导航数据；诊断只保留状态变化和累计收包数。 */
 internal class CarLifeHudObserver(
     private val send: (Int, ByteArray) -> Boolean,
     private val log: (String) -> Unit,
@@ -10,21 +10,15 @@ internal class CarLifeHudObserver(
     private var requestedAt: Long? = null
     private var reply: CarLifeHudProtocol.SubscriptionReply? = null
     private var startAttempted = false
-    private var startSent = false
     private var lastSummary = 0L
     private var turns = 0L
     private var assistants = 0L
-    private val controlCounts = linkedMapOf<Int, Long>()
-    private var otherControl = 0L
+    private var invalidTurns = 0L
+    private var lastAction: Int? = null
+    private var lastTurn: Int? = null
     private val navigation = mutableMapOf<Int, Int>()
     private var navigationChangedAt: Long? = null
     private var lastHudAt: Long? = null
-
-    /** 只统计消息编号，不保留控制报文正文；最多 32 个编号，额外编号合并计数。 */
-    @Synchronized fun controlMessage(id: Int) {
-        if (id in controlCounts || controlCounts.size < 32) controlCounts[id] = (controlCounts[id] ?: 0) + 1
-        else otherControl++
-    }
 
     @Synchronized fun versionMatched() { enabled = true }
 
@@ -34,10 +28,10 @@ internal class CarLifeHudObserver(
             requestedAt = now
             lastSummary = now
             val ok = send(CarLifeHudProtocol.SUBSCRIBE, CarLifeHudProtocol.subscription(CarLifeHudProtocol.modules))
-            log("HUD-DIAG: SUBSCRIBE id=0x18043 modules=[0,1] sent=$ok (TBT=0, assistant=1)")
+            log("HUD-DIAG: SUBSCRIBE id=0x18043 modules=[0,1] localWrite=$ok")
             if (!ok) {
                 startAttempted = true
-                log("HUD-DIAG: abandoned subscription after send failure; wait for a fresh HU control session")
+                log("HUD-DIAG: abandoned subscription; local write failed")
             }
             return
         }
@@ -53,37 +47,45 @@ internal class CarLifeHudObserver(
                 log("HUD-DIAG: START skipped: no confirmed supported modules / malformed reply")
             } else {
                 val ok = send(CarLifeHudProtocol.START, CarLifeHudProtocol.subscription(ids))
-                startSent = ok
-                if (!ok) log("HUD-DIAG: abandoned START after send failure; unsafe to replay a possibly partial control frame")
-                log("HUD-DIAG: START id=0x18045 modules=$ids sent=$ok supportConfirmed=${response != null}; sent is local write success, not a START acknowledgement; no-reply fallback is attempted once only")
+                log("HUD-DIAG: START id=0x18045 modules=$ids localWrite=$ok supportConfirmed=${response != null}; activation unverified")
             }
         }
         if (now - lastSummary >= 30_000) {
             lastSummary = now
-            log("HUD-DIAG: summary elapsedMs=${now - requestedAt!!} reply=${reply != null} startAttempted=$startAttempted startSent=$startSent nextTurnRx=$turns assistantRx=$assistants " +
-                "navigation=$navigation navigationStateAgeMs=${navigationChangedAt?.let { now - it }} lastHudAgeMs=${lastHudAt?.let { now - it }}; startSent means local write success, activation unverified; zero packets does not prove lack of navigation support")
-            log("HUD-DIAG: controlRx=[${controlCounts.entries.joinToString(",") { "0x${it.key.toString(16)}:${it.value}" }}] otherControlRx=$otherControl (bounded ID histogram, not payload capture)")
+            log("HUD-DIAG: summary nextTurnRx=$turns invalidTurns=$invalidTurns assistantRx=$assistants " +
+                "navigation=$navigation navigationStateAgeMs=${navigationChangedAt?.let { now - it }} lastHudAgeMs=${lastHudAt?.let { now - it }}")
         }
     }
 
     @Synchronized fun receive(id: Int, payload: ByteArray, now: Long? = null) {
         if (id == CarLifeHudProtocol.SUBSCRIBE_DONE) {
             reply = CarLifeHudProtocol.reply(payload)
-            log("HUD-DIAG: SUBSCRIBE_DONE id=0x10044 bytes=${payload.size} modules=${reply!!.entries} parseError=${reply!!.error ?: "none"} latencyMs=${now?.let { at -> requestedAt?.let { at - it } }}; capability reply only, not a START acknowledgement")
+            log("HUD-DIAG: SUBSCRIBE_DONE modules=${reply!!.entries} parseError=${reply!!.error ?: "none"} latencyMs=${now?.let { at -> requestedAt?.let { at - it } }}; capability reply only")
         } else {
             lastHudAt = now
-            if (id == CarLifeHudProtocol.NEXT_TURN) turns++ else assistants++
-            log("HUD-DIAG: ${CarLifeHudProtocol.describe(id, payload)}")
-            if (id == CarLifeHudProtocol.NEXT_TURN) CarLifeHudProtocol.turn(payload)?.let(onTurn)
+            if (id == CarLifeHudProtocol.NEXT_TURN) {
+                turns++
+                val turn = CarLifeHudProtocol.turn(payload)
+                if (turn == null) {
+                    invalidTurns++
+                    if (invalidTurns == 1L) log("HUD-DIAG: NEXT_TURN invalid bytes=${payload.size}")
+                } else {
+                    if (lastAction != turn.action || lastTurn != turn.turn) {
+                        lastAction = turn.action; lastTurn = turn.turn
+                        log("HUD-DIAG: NEXT_TURN action=${turn.action} nextTurn=${turn.turn} distanceM=${turn.distance} iconBytes=${turn.icon?.size ?: 0}")
+                    }
+                    onTurn(turn)
+                }
+            } else assistants++
         }
     }
 
     @Synchronized fun moduleStatus(modules: List<Pair<Int, Int>>, now: Long? = null) {
         val updates = modules.filter { it.first == 2 || it.first == 8 }
-        if (updates.isNotEmpty()) {
-            if (updates.any { navigation[it.first] != it.second }) navigationChangedAt = now
+        if (updates.any { navigation[it.first] != it.second }) {
+            navigationChangedAt = now
             updates.forEach { navigation[it.first] = it.second }
-            log("HUD-DIAG: moduleStatus=$updates (status namespace NAVI=2/EDOG=8) startSent=$startSent nextTurnRx=$turns")
+            log("HUD-DIAG: moduleStatus=$updates (NAVI=2/EDOG=8)")
         }
     }
 }

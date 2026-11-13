@@ -26,17 +26,15 @@ class CarLifeHudObserverTest {
         assertEquals(listOf(CarLifeHudProtocol.SUBSCRIBE), ids)
         assertTrue(lines.any { it.contains("abandoned subscription") })
     }
-    @Test fun boundedControlHistogramAndNavigationStateExplainMissingTbt() {
+    @Test fun navigationStatusLogsOnlyChangesAndSummaryRetainsItsAge() {
         val f = Fixture()
         f.observer.versionMatched()
         f.observer.tick(100)
-        repeat(40) { f.observer.controlMessage(0x10100 + it) }
         f.observer.moduleStatus(listOf(2 to 1), 1000)
+        repeat(40) { f.observer.moduleStatus(listOf(2 to 1), 2000L + it) }
         f.observer.tick(30100)
         assertTrue(f.lines.any { it.contains("navigation={2=1}") && it.contains("navigationStateAgeMs=29100") })
-        assertTrue(f.lines.any { it.contains("otherControlRx=8") })
-        assertTrue(f.lines.any { it.contains("0x10100:1") })
-        assertFalse(f.lines.any { it.contains("0x10127:1") })
+        assertEquals(1, f.lines.count { it.contains("moduleStatus=") })
     }
 
     @Test fun failedStartIsDistinctFromSuccessfulDecisionAndAckLatencyIsRecorded() {
@@ -48,7 +46,7 @@ class CarLifeHudObserverTest {
         observer.tick(1000)
         observer.tick(30100)
         assertTrue(lines.any { it.contains("latencyMs=27") })
-        assertTrue(lines.any { it.contains("startAttempted=true startSent=false") })
+        assertTrue(lines.any { it.contains("START id=") && it.contains("localWrite=false") })
     }
 
     private class Fixture {
@@ -70,7 +68,7 @@ class CarLifeHudObserverTest {
         f.observer.versionMatched()
         f.observer.tick(30002)
         assertEquals(2, f.sent.size)
-        assertTrue(f.lines.any { it.contains("START id=") && it.contains("supportConfirmed=true") && it.contains("not a START acknowledgement") })
+        assertTrue(f.lines.any { it.contains("START id=") && it.contains("supportConfirmed=true") && it.contains("localWrite=true") })
         assertTrue(f.lines.any { it.contains("SUBSCRIBE_DONE") && it.contains("capability reply only") })
         assertFalse(f.lines.any { it.contains(" confirmed=") })
         assertTrue(f.lines.any { it.contains("activation unverified") })
@@ -102,14 +100,33 @@ class CarLifeHudObserverTest {
         }
     }
 
-    @Test fun passivelyLogsDataBeforeHandshakeAndUsesCorrectModuleNamespaces() {
+    @Test fun countsInvalidAndAssistantPacketsBeforeHandshakeWithoutPayloadDumps() {
         val f = Fixture()
         f.observer.receive(CarLifeHudProtocol.NEXT_TURN, byteArrayOf(8, 3))
         f.observer.receive(CarLifeHudProtocol.ASSISTANT_GUIDE, byteArrayOf(8, 2))
         f.observer.moduleStatus(listOf(2 to 1, 8 to 0))
-        assertTrue(f.lines.any { it.contains("NEXT_TURN action=3") })
-        assertTrue(f.lines.any { it.contains("ASSISTANT_GUIDE action=2") })
+        assertTrue(f.lines.any { it.contains("NEXT_TURN invalid") })
+        assertFalse(f.lines.any { it.contains("ASSISTANT_GUIDE") })
         assertTrue(f.lines.any { it.contains("NAVI=2/EDOG=8") })
         assertTrue(f.sent.isEmpty())
+        f.observer.versionMatched(); f.observer.tick(0); f.observer.tick(30_000)
+        assertTrue(f.lines.any { it.contains("nextTurnRx=1 invalidTurns=1 assistantRx=1") })
+    }
+
+    @Test fun reducingTurnLogsDoesNotDropDistanceOrIconUpdates() {
+        val received = mutableListOf<io.github.shaonialife.carptocar.media.HudTurn>()
+        val lines = mutableListOf<String>()
+        val observer = CarLifeHudObserver({ _, _ -> true }, lines::add, received::add)
+        repeat(100) { distance ->
+            observer.receive(CarLifeHudProtocol.NEXT_TURN,
+                byteArrayOf(8, 2, 16, 25, 26, 1, 120, 32, distance.toByte(), 50, 1, distance.toByte()))
+        }
+        assertEquals(100, received.size)
+        assertEquals((0..99).toList(), received.map { it.distance })
+        assertArrayEquals(byteArrayOf(99), received.last().icon)
+        assertEquals(1, lines.count { it.contains("NEXT_TURN action=") })
+        observer.receive(CarLifeHudProtocol.NEXT_TURN, byteArrayOf(8, 1, 16, 7, 26, 1, 120, 32, 10))
+        assertEquals(101, received.size)
+        assertEquals(2, lines.count { it.contains("NEXT_TURN action=") })
     }
 }

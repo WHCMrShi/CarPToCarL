@@ -10,6 +10,35 @@ import org.junit.Test
  */
 class SessionTraceTest {
     @Test
+    fun successfulSessionStopsCsmCaptureAndNextSessionResumesIt() {
+        fun field(name: String) = SessionTrace::class.java.getDeclaredField(name).apply { isAccessible = true }
+        synchronized(field("lock").get(null)) {
+            val saved = listOf("appDir", "linked", "chars", "sessionSeq", "sessionNote", "sessionStartedAt")
+                .associate { field(it).let { f -> f to f.get(null) } }
+            @Suppress("UNCHECKED_CAST")
+            val lines = field("lines").get(null) as ArrayDeque<String>
+            val savedLines = lines.toList()
+            try {
+                // Enable in-memory recording without Android or disk writes.
+                field("appDir").set(null, java.io.File("unused-session-trace-test"))
+                SessionTrace.sessionStart("first")
+                SessionTrace.csm(SessionTrace.Dir.TX, "tunnel", 0x1d00, byteArrayOf(1))
+                assertTrue(lines.last().contains("csm id=0x1d00"))
+                SessionTrace.markLinked()
+                repeat(100) { SessionTrace.csm(SessionTrace.Dir.TX, "tunnel", 0x5001, byteArrayOf(2)) }
+                assertTrue(lines.isEmpty())
+                assertEquals(0, field("chars").get(null))
+                SessionTrace.sessionStart("next")
+                SessionTrace.csm(SessionTrace.Dir.RX, "bt", 0x1d01, byteArrayOf(3))
+                assertTrue(lines.last().contains("csm id=0x1d01"))
+            } finally {
+                saved.forEach { (field, value) -> field.set(null, value) }
+                lines.clear(); lines.addAll(savedLines)
+            }
+        }
+    }
+
+    @Test
     fun csmWithoutBodyHasNoBodyField() {
         val line = SessionTrace.formatCsm("10:00:00.000", SessionTrace.Dir.TX, "bt", 0x1D00, ByteArray(0))
         assertEquals("[10:00:00.000] TX bt csm id=0x1d00 len=0", line)

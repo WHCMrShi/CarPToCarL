@@ -1,6 +1,8 @@
 package io.github.shaonialife.carptocar.util
 
 import java.io.File
+import java.io.FileOutputStream
+import java.io.OutputStream
 
 /** 仅由日志工作线程访问；保留本进程最早诊断和最近两段，不受高频主日志覆盖。 */
 internal class DiagnosticLogArchive(private val main: File, private val limit: Long = 512_000) {
@@ -15,17 +17,37 @@ internal class DiagnosticLogArchive(private val main: File, private val limit: L
             start.writeText(""); recent.writeText(""); previous.delete()
             initialized = true
         }
-        val selected = lines.filter(::isDiagnostic).map(::redact)
-        val text = (if (dropped > 0) listOf("LOG: 诊断归档前队列已丢弃 $dropped 条记录\n") else emptyList()) + selected
-        for (line in text) {
-            val bytes = line.toByteArray(Charsets.UTF_8)
-            if (!startFull && start.length() + bytes.size <= limit) start.appendBytes(bytes)
-            else startFull = true
-            if (recent.length() + bytes.size > limit) {
-                recent.copyTo(previous, overwrite = true)
-                recent.writeText("")
+        val text = buildList {
+            if (dropped > 0) add("LOG: 诊断归档前队列已丢弃 $dropped 条记录\n")
+            lines.forEach { if (isDiagnostic(it)) add(redact(it)) }
+        }
+        if (text.isEmpty()) return
+        var startBytes = start.length()
+        var recentBytes = recent.length()
+        var recentOutput: OutputStream? = null
+        // The writer already supplies batches; open each sidecar per batch, not per line.
+        (if (startFull) null else FileOutputStream(start, true).buffered()).use { startOutput ->
+            try {
+                for (line in text) {
+                    val bytes = line.toByteArray(Charsets.UTF_8)
+                    if (!startFull && startBytes + bytes.size <= limit) {
+                        startOutput!!.write(bytes)
+                        startBytes += bytes.size
+                    } else startFull = true
+                    if (recentBytes + bytes.size > limit) {
+                        recentOutput?.close()
+                        recentOutput = null
+                        recent.copyTo(previous, overwrite = true)
+                        recent.writeText("")
+                        recentBytes = 0
+                    }
+                    val output = recentOutput ?: FileOutputStream(recent, true).buffered().also { recentOutput = it }
+                    output.write(bytes)
+                    recentBytes += bytes.size
+                }
+            } finally {
+                recentOutput?.close()
             }
-            recent.appendBytes(bytes)
         }
     }
 
@@ -43,9 +65,8 @@ internal class DiagnosticLogArchive(private val main: File, private val limit: L
                 line.contains("iap2 0x1d01") ||
                 (line.contains("IAPLINK:") && listOf("清单", "链路", "MFi", "订阅").any(line::contains))
         }
-        internal fun redact(line: String): String = line.replace(
-            Regex("(?i)(writeKey|readKey|sharedSecret|psk)=\\S+"), "$1=[REDACTED]",
-        )
+        private val secret = Regex("(?i)(writeKey|readKey|sharedSecret|psk)=\\S+")
+        internal fun redact(line: String): String = line.replace(secret, "$1=[REDACTED]")
 
         fun read(main: File): String = buildString {
             for ((suffix, title) in listOf(

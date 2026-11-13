@@ -9,32 +9,24 @@ class CarLifeHudProtocolTest {
         assertArrayEquals(byteArrayOf(8, 1, 18, 4, 8, 0, 16, 1), CarLifeHudProtocol.subscription(listOf(0)))
     }
 
-    @Test fun modernTurnKeepsUnicodeRoadAndSummarizesIcon() {
+    @Test fun modernTurnKeepsUnicodeRoadAndOriginalIcon() {
         val road = "测试路\n右转".toByteArray(Charsets.UTF_8)
         val payload = byteArrayOf(8, 1, 16, 3, 26, road.size.toByte()) + road +
             byteArrayOf(32, 100, 40, 50, 50, 4, 0x89.toByte(), 0x50, 0x4e, 0x47)
-        val text = CarLifeHudProtocol.describe(CarLifeHudProtocol.NEXT_TURN, payload)
-        assertTrue(text.contains("roadName=\"测试路\\u000a右转\""))
-        assertTrue(text.contains("nextTurn=3"))
-        assertTrue(text.contains("remainDistanceM=50"))
-        assertTrue(text.contains("icon=4B sha256="))
-        assertTrue(text.contains("head=89504e47"))
-        assertTrue(text.contains("parseError=none"))
+        val turn = CarLifeHudProtocol.turn(payload)!!
+        assertEquals("测试路\n右转", turn.road)
+        assertEquals(3, turn.turn)
+        assertEquals(100, turn.distance)
+        assertArrayEquals(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47), turn.icon)
     }
 
     @Test fun legacyVarintTimeAndFutureUnknownFieldsDoNotBreakFollowingFields() {
         val payload = byteArrayOf(8, 2, 48, 60, 0x79, 0, 0, 0, 0, 0, 0, 0, 0, 0x85.toByte(), 1, 0, 0, 0, 0, 40, 20)
-        val text = CarLifeHudProtocol.describe(CarLifeHudProtocol.NEXT_TURN, payload)
-        assertTrue(text.contains("legacyTime=60"))
-        assertTrue(text.contains("remainDistanceM=20"))
-        assertTrue(text.contains("icon=absent"))
-        assertTrue(text.contains("parseError=none"))
-    }
-
-    @Test fun assistantSpeedIsLoggedWithoutAssumingDisplayUnits() {
-        val text = CarLifeHudProtocol.describe(CarLifeHudProtocol.ASSISTANT_GUIDE, byteArrayOf(8, 1, 16, 2, 24, 0, 32, 100, 40, 50, 48, 30))
-        assertTrue(text.contains("cameraSpeedRaw=30"))
-        assertTrue(text.contains("assistantType=2"))
+        val fields = CarLifeHudProtocol.parse(payload)
+        assertEquals(60, fields.int(6))
+        assertEquals(20, fields.int(5))
+        assertNull(fields.bytes(6))
+        assertNull(fields.error)
     }
 
     @Test fun malformedWireDataIsContainedAndKeepsEarlierFields() {

@@ -160,9 +160,11 @@ object SessionTrace {
         body: ByteArray,
         note: String = "",
     ) {
-        if (!isActive()) return
-        val line = formatCsm(stamp.format(Date()), dir, channel, messageId, body, note)
-        synchronized(lock) { appendLocked(line) }
+        if (!isActive() || linked) return
+        synchronized(lock) {
+            if (linked) return
+            appendLocked(formatCsm(stamp.format(Date()), dir, channel, messageId, body, note))
+        }
     }
 
     /** RTSP 原文（请求/应答）。多行文本原样保留，行首加缩进便于人读。 */
