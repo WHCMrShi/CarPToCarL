@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Flow C: white C and theme-red transfer arrow, inset for adaptive icon masks. -->
+<!-- Flow C: white C and theme-red transfer arrow, inset within the adaptive safe zone with balanced visual whitespace. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="128"
     android:viewportHeight="128">
     <group android:pivotX="64" android:pivotY="64"
-        android:scaleX="0.85" android:scaleY="0.85">
+        android:scaleX="0.70" android:scaleY="0.70">
         <path
             android:pathData="M91,39 C63,15 28,33 28,64 C28,95 62,112 88,91"
             android:fillColor="@android:color/transparent"
