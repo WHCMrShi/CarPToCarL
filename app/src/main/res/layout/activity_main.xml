@@ -114,15 +114,6 @@
                                 android:textColor="@color/m3_on_var"
                                 android:textSize="14sp"
                                 android:accessibilityLiveRegion="polite" />
-                            <TextView
-                                android:id="@+id/heroStats"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="10dp"
-                                android:text="等待视频信息"
-                                android:textColor="@color/m3_on_var"
-                                android:textSize="14sp"
-                                android:visibility="gone" />
                             <LinearLayout
                                 android:id="@+id/ctaButton"
                                 android:layout_width="match_parent"

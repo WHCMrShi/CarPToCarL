@@ -18,6 +18,7 @@ internal class HoldToCancel(
     private val view: View,
     private val allowed: () -> Boolean,
     private val confirm: () -> Unit,
+    private val progressColor: () -> Int = { view.context.getColor(io.github.shaonialife.carptocar.R.color.m3_hold_overlay) },
 ) {
     private var consuming = false
     private var startedAt: Long? = null
@@ -48,7 +49,7 @@ internal class HoldToCancel(
                     cancel()
                     original = view.background
                     val fill = GradientDrawable().apply {
-                        setColor(view.context.getColor(io.github.shaonialife.carptocar.R.color.m3_hold_overlay))
+                        setColor(progressColor())
                         cornerRadius = view.resources.getDimension(io.github.shaonialife.carptocar.R.dimen.q4_corner_action)
                     }
                     progress = ClipDrawable(fill, Gravity.LEFT, ClipDrawable.HORIZONTAL)

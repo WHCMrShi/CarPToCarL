@@ -318,7 +318,7 @@ class CarPlayService : Service() {
                 Intent(this, NotificationActionReceiver::class.java).setAction(ACTION_DISCONNECT),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-        return NotificationCompat
+        val notification = NotificationCompat
             .Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
             .setContentTitle("CarPToCarL · 车机连接")
@@ -334,5 +334,14 @@ class CarPlayService : Service() {
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
+
+        val streaming = SessionController.isStreaming()
+        val connecting = SessionController.connectionRequested || SessionController.sessionStarting.get()
+        // 空闲监听仍用普通通知；只为正在进行的连接会话申请 Live Updates。
+        return if (streaming || connecting) {
+            LiveUpdateNotification.requestPromotion(this, notification, if (streaming) "已连接" else "连接中")
+        } else {
+            notification
+        }
     }
 }

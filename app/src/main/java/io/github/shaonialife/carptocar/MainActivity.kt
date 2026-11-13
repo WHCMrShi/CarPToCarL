@@ -87,7 +87,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var heroStateText: TextView
     private lateinit var btnResidualCleanup: TextView
     private lateinit var heroSubline: TextView
-    private lateinit var heroStats: TextView
     /** 「显示」卡片里的分辨率行（车机通告值 + 本次码流尺寸）。 */
     private lateinit var ctaButton: LinearLayout
     private lateinit var ctaIcon: ImageView
@@ -112,8 +111,6 @@ class MainActivity : AppCompatActivity() {
     private var startupCheckRunning = false
     private var pendingResidualDisplays: List<Pair<Int, String>>? = null
 
-    // 英雄卡实时帧率：1s 轮询对 VideoSender 已发帧计数取差值
-    private var lastSentFrames = 0L
 
     /**
      * 冷启动自动连接请求挂起中：等前置条件齐备（启动残留扫描已结束、
@@ -686,7 +683,6 @@ class MainActivity : AppCompatActivity() {
             pendingResidualDisplays?.let { promptResidualDisplays(it) }
         }
         heroSubline = findViewById(R.id.heroSubline)
-        heroStats = findViewById(R.id.heroStats)
         ctaButton = findViewById(R.id.ctaButton)
         ctaIcon = findViewById(R.id.ctaIcon)
         ctaLabel = findViewById(R.id.ctaLabel)
@@ -853,6 +849,9 @@ class MainActivity : AppCompatActivity() {
 
         cancelHold = io.github.shaonialife.carptocar.ui.HoldToCancel(
             ctaButton,
+            progressColor = {
+                if (heroState == HeroState.CONNECTED) 0x40FFFFFF else getColor(R.color.m3_hold_overlay)
+            },
             allowed = {
                 heroState == HeroState.CONNECTED ||
                     (heroState == HeroState.CONNECTING && SessionController.videoSender?.isRunning != true)
@@ -1099,72 +1098,7 @@ class MainActivity : AppCompatActivity() {
             heroSubline.text = "正在检查残留屏…"
         }
         updateConnectedSubline()
-        updateHeroStats()
         updateReadyRow()
-    }
-
-    /**
-     * 当前真正在用的码流尺寸。
-     *
-     * 直通模式下由 CarLife 引擎决定，而且**会变**：会话建立时引擎往往还停在默认
-     * 1280×720，收到车机分辨率（98311）之后才重建编码器。所以这里每次现取，
-     * 不能只记建链那一刻的快照——否则界面会一直显示临时值。
-     *
-     * 取值顺序是硬性的：**先 SPS 真值**。98311 申请值与 65544 回包值都只是「谈定的
-     * 档位」，引擎会按白名单降档（申请 1412×654 实编 1280×720，2026-10-29 日志实证）。
-     * 拿协商值当码流尺寸，界面就会写着「码流同尺寸」而车机上根本不是那个尺寸。
-     */
-    private fun effectiveStreamSize(): Pair<Int, Int>? {
-        if (CarLifeHijack.isAttached || CarLifeHijack.isActive) {
-            CarLifeHijack.actualStreamSize?.let { return it }
-            val (w, h) = CarLifeHijack.videoSize
-            if (w > 0 && h > 0) return w to h
-        }
-        val w = SessionController.activeStreamWidth
-        val h = SessionController.activeStreamHeight
-        return if (w > 0 && h > 0) w to h else null
-    }
-
-    /**
-     * 码流尺寸是否已经由 SPS 确认（false = 手上只有协商档位，还在等第一帧关键帧）。
-     *
-     * 非直通模式（自己出画面）没有「协商 vs 实编」这回事，恒为 true。
-     */
-    private fun streamSizeConfirmed(): Boolean =
-        if (CarLifeHijack.isAttached || CarLifeHijack.isActive) {
-            CarLifeHijack.actualStreamSize != null
-        } else {
-            true
-        }
-
-    /**
-     * 英雄卡统计行（仅连接时显示）：运行时分辨率 + 实测帧率。
-     * 实际帧率 = 1s 轮询对已发帧计数取差值；新会话计数归零时先对齐基线。
-     * 目标帧率不再展示（车机报 maxFPS 就跟随、没报按 60，见 [StreamFps]），只报实测值。
-     *
-     * 分辨率报**像素**，不再是「100%」这种只有自己看得懂的比例：车机原值在前，
-     * 码流与它不一致时用 `→` 接实际值（直通模式由 CarLife 引擎定尺寸）。
-     */
-    private fun updateHeroStats() {
-        if (heroState != HeroState.CONNECTED) return
-        val sent = SessionController.videoSender?.framesSentTotal ?: 0
-        if (sent < lastSentFrames) lastSentFrames = sent
-        val fps = sent - lastSentFrames
-        lastSentFrames = sent
-        val carW = SessionController.activeCarWidth
-        val carH = SessionController.activeCarHeight
-        val stream = effectiveStreamSize()
-        val resolution =
-            when {
-                carW <= 0 -> "—"
-                !SessionController.activeCarResolutionFromCar -> {
-                    // 车机没回 /info：这个值其实是手机横屏兜底，必须标明
-                    "${carW}×$carH（手机兜底）"
-                }
-                stream == null || (stream.first == carW && stream.second == carH) -> "$carW×$carH"
-                else -> "$carW×$carH → ${stream.first}×${stream.second}"
-            }
-        heroStats.text = "分辨率 $resolution · $fps fps"
     }
 
     private fun applyHeroState(s: HeroState) {
@@ -1174,7 +1108,6 @@ class MainActivity : AppCompatActivity() {
                 HeroState.CONNECTING -> "正在连接"
                 HeroState.CONNECTED -> "已连接"
             }
-        heroStats.visibility = if (s == HeroState.CONNECTED) View.VISIBLE else View.GONE
 
         when (s) {
             HeroState.IDLE -> {
@@ -1200,7 +1133,7 @@ class MainActivity : AppCompatActivity() {
                 styleCta(R.drawable.bg_cta_fill, R.color.m3_on_primary, R.drawable.ic_close, "长按取消连接")
             }
             HeroState.CONNECTED -> {
-                styleCta(R.drawable.bg_cta_outline_err, R.color.m3_error, R.drawable.ic_power, "长按断开连接")
+                styleCta(R.drawable.bg_cta_disconnect, android.R.color.white, R.drawable.ic_power, "长按断开连接")
             }
         }
 
