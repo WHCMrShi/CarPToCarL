@@ -1,6 +1,37 @@
 # 奥迪 Q4 e-tron CarPlay 交互链反推与实验记录
 
-更新日期：2026-11-11。本文件服务于 `codex/audi-q4-etron` 的专用适配，作为后续连接实验的持续交接记录。描述的是本车已观察到的行为与应用策略，不将其他车型的时序要求直接推广到 Q4，也不把推断写成车机固件规范。
+更新日期：2026-11-13。本文件服务于 `codex/audi-q4-etron` 的专用适配，作为后续连接实验的持续交接记录。描述的是本车已观察到的行为与应用策略，不将其他车型的时序要求直接推广到 Q4，也不把推断写成车机固件规范。
+
+## 2026-11-13：统一配置文件释放与拨号（第一步）
+
+用户明确授权只实施这一项。开发基线 `150bf977d5a6`，代码提交 `5a9ccfc3e92b`；文档单独提交。本节没有新增实车样本，不将该协调器描述为 iPhone 内部实现，也不推断 Q4 的拒绝原因。
+
+### 判断依据与改动边界
+
+| 判断或行为 | 依据 | 本次实施 |
+| --- | --- | --- |
+| 查询不到状态不能等同离线 | [Android BluetoothProfile 文档](https://developer.android.com/reference/android/bluetooth/BluetoothProfile)明确连接设备列表在错误时也可为空；原 `connectedNames` 又将缺失代理/异常合并成空列表 | 改用每个 profile 的状态查询。应用可观察到的代理缺失、异常或非预期值记 `UNKNOWN`；保留系统四个连接状态，不把 `CONNECTING`/`DISCONNECTING` 合并为断开 |
+| 请求被接受与断开完成是不同事件 | [AOSP BluetoothA2dp.disconnect](https://android.googlesource.com/platform/packages/modules/Bluetooth/+/refs/heads/main/framework/java/android/bluetooth/BluetoothA2dp.java)说明返回值与后续状态变化的关系；旧代码丢弃了反射返回的 Boolean | 分别记录请求 `ACCEPTED`/`REJECTED`/`UNKNOWN` 和前后观测状态；返回 null、反射失败不再按成功处理；查询报告离线才记 `DISCONNECTED` |
+| 本地释放和拨号需要共同串行入口 | 基线 `Iap2BluetoothClient.connectLoop`、`BtProfiles.guardAudioProfiles`、`MainActivity.onBondStateChanged` 可并发执行；RFCOMM owner 要在 connect 返回后才登记，原 owner 复核不能覆盖正在拨号的窗口 | 三个入口使用同一动作租约；出站从 SDP/首次拨号、失败后的释放及重试，一直保留至 owner claim。系统调用和等待不持有协调器的监视器锁 |
+| 等待后旧操作不能影响新会话 | 继承 [01336e140f42 的工作/owner 归属修复](vehicle-tests/2026-11-11-q4-171732/implementation.md)；已存在的代次和 owner 语义 | 排队后复核原票据，不重新捕获；停止/换目标/新入站作废旧操作。入站 claim 不排队，关闭回调仅捕获旧出站自己的 socket，旧动作退出前不释放租约 |
+| 必须保留双向接续 | [11月11日日志](vehicle-tests/2026-11-11-q4-171732/analysis.md)：16:33:35.391 出站失败后，40.615 已有入站 SYN；[11月10日日志](vehicle-tests/2026-11-10-q4-cold-start/analysis.md)：06:56:36 入站协商超时，38.334 出站建立并随后取得凭据 | 入站监听、出站恢复、被动等待及16/20/30秒退避继续保留，没有缩短协商超时或新增方向切换条件 |
+| 设备级兜底不因未知状态而扩大 | 基线已有 profile 等待1500ms、设备级 disconnect 与后续500ms等待；原 owner 规则禁止活跃RFCOMM期间设备级断开 | 只在复查明确仍为 `CONNECTED` 且原 owner/工作票据允许时沿用旧兜底；未知/过渡态本身不授权它。该旧策略的必要性并未被本次实车重新证明，没有新增兜底或延长等待 |
+
+`BtActionCoordinator` 的租约用于本地动作互斥，`BtProfileOperation` 继续负责工作和会话归属；没有另加车机状态猜测、失败次数阈值或自动修复分支。保留先直连、失败才释放并再拨的策略；有界等待后，即使仍在线或未知，也沿原策略继续有效的第二次拨号，不用“已断开”作为重试成功的前提描述。`disableBluetooth`、默认配置、版本号和音视频策略均未修改。
+
+### 日志语义与仍然存在的边界
+
+`BT-ACTION` 以动作 ID、来源、阶段和拨号耗时关联操作；`BT-RELEASE` 分开记录 `before`、`requests`、`after`、`deviceRequest` 和 `superseded`。守卫计数为释放尝试轮数（包含请求结果未知），不是实际断开次数。成功提交和查询状态不互相覆盖，排队期间已失效的操作不再发请求。新增动作/释放日志及关联的 owner/守卫日志加入既有诊断归档白名单，轮转测试覆盖它们不会随主日志轮转丢失；原始协议负载仍排除。
+
+`DISCONNECTED` 表示 Android 状态查询报告离线，不是 HCI/空口抓包确认。上述 AOSP A2DP 实现内部还可能在服务不可用/RemoteException 时返回默认离线，应用无法仅凭这一返回值识别所有系统内部错误；本次没有为猜测的系统内部故障增加额外兜底。系统已接受的异步请求不能撤回，复核到系统调用之间仍有极短竞争窗口。因此本次只保证本地释放流程和出站拨号不由三个入口并行启动，不保证所有物理蓝牙事件完全不重叠，也不保证省掉16秒或改善首次开窗。
+
+### 本机验证与后续对照
+
+完整 `build-local.ps1 -NoDaemon` 通过（3分8秒）：173个套件、997项JVM单测，0 failures/errors/skipped；lint 0 errors、105 warnings、2 information；Debug APK构建通过。新增19项状态语义和并发回归，更新原操作归属测试及诊断轮转测试。构建发生在代码提交前，业务源码树对应本节记录的代码提交，APK内源码标记为 `150bf977d5a6-dirty`。没有执行Android设备测试或安装。
+
+静态复核：CarLife先起仍沿原源缓存/首次播放路径；CarPlay先连仍沿原提示与真实源接管路径。本次不修改两者的启动先后、媒体交接或退避。两条路径都尚未安装和Q4路测，不能把JVM并发测试或APK生成当作车机验证。
+
+后续同一新包分别记录冷/热车、CarLife先起和CarPlay先连：对照动作ID中的拨号与释放阶段、请求返回和后续状态、入站owner接管及失败后出站接续。日志事实仍不足时先补证据，不增加推测性判断或恢复分支。
 
 ## 2026-11-11 17:17 正常样本：首次退避与PCM审查
 
