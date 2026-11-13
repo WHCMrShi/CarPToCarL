@@ -2,6 +2,14 @@
 
 更新日期：2026-11-13。本文件服务于 `codex/audi-q4-etron` 的专用适配，作为后续连接实验的持续交接记录。描述的是本车已观察到的行为与应用策略，不将其他车型的时序要求直接推广到 Q4，也不把推断写成车机固件规范。
 
+## 2026-11-13：disableBluetooth 缺少params封装的修正
+
+基线`8566180e1808`，业务提交`2e1540b`。参照[接收端及实际报文核查](vehicle-tests/2026-11-13-q4-network-comparison/disableBluetooth-envelope-review.md)，DiPlay从params读取deviceID，TROOPERS24第32页手机报文也采用相同层级。本车午间发的是顶层deviceID；据此将命令改为`{type: disableBluetooth, params: {deviceID: 手机地址}}`。撤回此前“未发现层级问题”的判断：2015规范确有扁平示例，但不能据此排除当前接收端差异；有效plist不等于有效命令参数。
+
+仅修正封装，保留地址、发送阶段、一次发送、旧会话隔离及Wi-Fi生命周期修复；没有新增延迟、重试或状态猜测。构建前完成自审，测试先在旧实现上识别出两处参数读取失败。修复后1024项单测、lint（0错误/105项既有警告）及Debug APK构建通过，验证详情见上述专项文档。尚未安装、未做Q4重测，不能宣称422已消失；DiPlay会宽松返回200，也不能代替Q4接受验证。
+
+两种启动顺序保持：CarLife先起是用户当前计划；CarPlay先起仍不等待CarLife，该顺序能否随后启动CarLife尚未证实。此前只观察到422后CarLife继续，成功执行命令后的持续运行仍待验证。网络与此命令分别记录，不合并归因。
+
 ## 2026-11-13：保留预连接，分离Wi-Fi请求、观察和绑定
 
 业务提交 `d350673`，见[实现、自审及验证记录](vehicle-tests/2026-11-13-q4-network-comparison/wifi-lifecycle-fix.md)。按用户明确要求保留预连接，主动请求与连接范围的被动观察分别持有；复用等待完成/超时只结束探测，不注销仍需保留的主动请求。进程绑定独立记录实际成功结果及所属工作，保留旧任务隔离、身份校验、两种CarLife先后路径和原有预算；未改HFP/A2DP、入站/出站、退避、disableBluetooth或系统网络设置。Network丢失与请求不可用分开处理，停止/切换目标/明确替代主动请求仍清理所属资源。
@@ -22,7 +30,7 @@
 
 ## 2026-11-13：实车回报——命令422与默认网络切换
 
-后续[原始报文及系统历史核对](vehicle-tests/2026-11-13-q4-network-comparison/protocol-and-system-review.md)：手机现存RTSP记录中，disableBluetooth为103字节有效binary plist、两个顶层string键，CSeq=24；deviceID同时匹配本次SETUP和只读查询的系统蓝牙地址；发送在Wi-Fi iAP2就绪及第二次RECORD成功之后。422响应体为空，尚无证据指定拒绝原因。用户强调网络问题与此命令分开调查，优先检查命令之前的commits。
+后续[原始报文及系统历史核对](vehicle-tests/2026-11-13-q4-network-comparison/protocol-and-system-review.md)：手机现存RTSP记录中，disableBluetooth为103字节有效binary plist、两个顶层string键，CSeq=24；deviceID同时匹配本次SETUP和只读查询的系统蓝牙地址；发送在Wi-Fi iAP2就绪及第二次RECORD成功之后。422响应体为空，当时未定位原因；后续已发现缺少params封装，见本文件最新记录。用户强调网络问题与此命令分开调查，优先检查命令之前的commits。
 
 用户明确CarLife连接后提示继续使用手机流量，CarPlay连接后是整机断网。新增系统带日期历史证明：12:40:56.386本包临时Wi-Fi配置创建，58.851移除；12:41:00.269系统自动重连保存配置，随后应用复用新Network。整个过程在disableBluetooth发送之前，值得优先检查请求生命周期；原蜂窝优先策略具体如何失效、25.345为何选未验证Wi-Fi为默认仍未证实。此轮只读核查及文档更新，未跑业务单测或构建。
 
@@ -38,7 +46,7 @@
 
 开发基线 `76994afa0d82`。本节与实现处于同一独立提交，提交主题为 `feat(carplay): send disableBluetooth after session activation`。用户明确安排先让 CarLife 连接，再到车上测试；本次是补齐标准协议命令的最小实验，不作为已有连接故障的修复。
 
-依据用户提供的 CarPlay 规范（2015-12-18版）§23.3.7、§23.3.7.3（印刷页477–479）：手机经 Controller 控制连接发送 `POST /command`，二进制plist顶层为 `type=disableBluetooth`、`deviceID=手机蓝牙MAC`；车机应在收到后立即断开该手机的HFP/A2DP/AVRCP，并在CarPlay会话期间不重连这些profiles。§23.2.5.5及图23-3把蓝牙断开安排在CarPlay/iAP2 over CarPlay启动后；没有在这些条款中给出手机发送的毫秒时限。现有Q4归档在2026-11-05及2026-11-09的 `/info` 中已有 `bluetoothIDs` 声明，但没有本次命令执行后的实车证据。
+最初依据用户提供的 CarPlay 规范（2015-12-18版）§23.3.7、§23.3.7.3（印刷页477–479）实施：手机经 Controller 控制连接发送 `POST /command`，当时将二进制plist组织为顶层 `type=disableBluetooth`、`deviceID=手机蓝牙MAC`。这一封装已被后续接收端及实际报文证据更正为`params.deviceID`，见最新记录。规范要求车机收到命令后立即断开该手机的HFP/A2DP/AVRCP，并在CarPlay会话期间不重连这些profiles。§23.2.5.5及图23-3把蓝牙断开安排在CarPlay/iAP2 over CarPlay启动后；没有在这些条款中给出手机发送的毫秒时限。现有Q4归档在2026-11-05及2026-11-09的 `/info` 中已有 `bluetoothIDs` 声明，但没有本次命令执行后的实车证据。
 
 实施限定：在原有初次激活及Wi-Fi iAP2等待流程结束后，最近一次激活RECORD成功、Wi-Fi iAP2就绪、当前会话有效时，异步发送一次。地址固定使用本次初始SETUP的本机地址；车机未声明有效 `bluetoothIDs`、本机地址无效/占位或节点未就绪时记录跳过。未就绪后不新增定时等待或补发；失败不重试。请求使用既有控制通道加密、CSeq响应派发、10秒请求超时和连接资源作用域；旧会话排队请求不能转到新控制连接。并发执行不延迟原有首帧/音频启动等待流程。
 
