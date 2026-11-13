@@ -55,7 +55,10 @@ class WifiCarPlayConnector(
     private val wifiManager: WifiManager? =
         context.applicationContext.getSystemService(WifiManager::class.java)
 
-    private val callback = io.github.shaonialife.carptocar.util.OwnedSlot<ConnectivityManager.NetworkCallback>()
+    private val networks = WifiNetworkLifecycle<ConnectivityManager.NetworkCallback, Network>(
+        unregister = { owner -> runCatching { connectivityManager.unregisterNetworkCallback(owner) }; Unit },
+        bindProcess = { connectivityManager.bindProcessToNetwork(it) },
+    )
 
     private val identities = LiveWifiIdentity<Network>()
     private var identityCallback: ConnectivityManager.NetworkCallback? = null
@@ -87,38 +90,30 @@ class WifiCarPlayConnector(
         if (old != null) runCatching { connectivityManager.unregisterNetworkCallback(old) }
     }
 
-    val currentNetwork: Network? get() = boundNetwork.get()
-    private val boundNetwork = AtomicReference<Network?>(null)
-    @Volatile private var bindingCurrent: (() -> Boolean)? = null
+    val currentNetwork: Network? get() = networks.network()
 
-    /** Read only. A cached Network alone is not proof that sockets can still use it. */
-    fun usableNetwork(): Network? {
-        val owner = callback.get() ?: return null
-        var usable: Network? = null
-        callback.runIfCurrent(owner) {
-            if (bindingCurrent?.invoke() != true) return@runIfCurrent
-            val network = boundNetwork.get() ?: return@runIfCurrent
-            if (runCatching {
-                    connectivityManager.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
-                        connectivityManager.boundNetworkForProcess == network
-                }.getOrDefault(false)) usable = network
-        }
-        return usable
-    }
+    /** Read only. Request registration, network availability and process binding are distinct. */
+    fun usableNetwork(): Network? = networks.usable(::isUsable)
+
+    private fun isUsable(network: Network): Boolean =
+        runCatching {
+            connectivityManager.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
+                connectivityManager.boundNetworkForProcess == network
+        }.getOrDefault(false)
+
     /** Physical binding snapshot, deliberately independent of cancellation policy. */
     fun diagnosticBinding(): String {
-        val network = boundNetwork.get()
+        val network = networks.network()
         val live = network != null && runCatching { connectivityManager.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true }.getOrDefault(false)
         val bound = network != null && runCatching { connectivityManager.boundNetworkForProcess == network }.getOrDefault(false)
-        return "cached=${network != null},callback=${callback.get() != null},wifi=$live,processBound=$bound"
+        return "cached=${network != null},request=${networks.requestOwner() != null},observer=${networks.observerOwner() != null},wifi=$live,processBound=$bound"
     }
     private val identityProof = WifiIdentityProof({ SystemClock.elapsedRealtime() })
-    @Volatile private var retryIdentity: (() -> Unit)? = null
 
     fun recordReceiverInvite(target: String, receiver: String?, local: String?) {
         if (identityProof.record(target, receiver, local)) {
             log("WIFI: target receiver invitation recorded with exact local interface; ttlMs=30000")
-            retryIdentity?.invoke()
+            (networks.observerOwner() as? WifiObserver)?.retry()
         }
     }
 
@@ -146,7 +141,7 @@ class WifiCarPlayConnector(
      * IPv4 优先的理由同 [EndpointHosts]：安卓上最稳，也是真车唯一验证过的路径。
      */
     fun gatewayAddresses(): List<String> {
-        val network = boundNetwork.get() ?: return emptyList()
+        val network = networks.network() ?: return emptyList()
         val gateways =
             try {
                 connectivityManager
@@ -171,7 +166,7 @@ class WifiCarPlayConnector(
      * mDNS 会跨网发现电脑的 AirPlay 接收器——非本网段地址一律不是车机。
      */
     fun localIpv4Address(): String? {
-        val network = boundNetwork.get() ?: return null
+        val network = networks.network() ?: return null
         return try {
             connectivityManager
                 .getLinkProperties(network)
@@ -191,7 +186,7 @@ class WifiCarPlayConnector(
      * 旧过滤只按 IPv4 前缀判定，会把车机本身也当成「非本网段」丢掉（2026-10-19）。
      */
     fun localIpv6Addresses(): List<String> {
-        val network = boundNetwork.get() ?: return emptyList()
+        val network = networks.network() ?: return emptyList()
         return try {
             connectivityManager
                 .getLinkProperties(network)
@@ -236,85 +231,74 @@ class WifiCarPlayConnector(
         val latch = CountDownLatch(1)
         val result = WifiRequestState<Network>()
         val unavailable = AtomicBoolean(false)
+        if (!ensureWifiObserver(isCancelled)) return JoinResult.Unavailable
         val newCallback =
             object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
-                    callback.runIfCurrent(this) {
-                        if (isCancelled()) return@runIfCurrent
-                        val bound = result.available(network) { connectivityManager.bindProcessToNetwork(network) }
-                        if (bound) boundNetwork.set(network)
+                    networks.withRequest(this) {
+                        if (isCancelled()) return@withRequest
+                        val bound = result.available(network) { networks.bindRequest(this, network) { !isCancelled() } }
                         log("CONNECT-DIAG: specifier available request=${System.identityHashCode(this)} bound=$bound")
-                        log("WiFi: 已加入应用专属网络 \"$ssid\"（$network bindProcessToNetwork=$bound）——不影响其它应用联网")
+                        log("WiFi: 系统请求网络已可用（$network bindProcessToNetwork=$bound）；其他应用路由由系统决定")
                         latch.countDown()
                     }
                 }
 
                 override fun onUnavailable() {
-                    var lost = false
-                    callback.runIfCurrent(this) {
+                    var lost: (() -> Boolean)? = null
+                    networks.withRequest(this) {
                         unavailable.set(true)
-                        val previous = result.unavailable()
-                        if (previous != null && boundNetwork.compareAndSet(previous, null)) {
-                            connectivityManager.bindProcessToNetwork(null)
-                            lost = true
-                        }
-                        log("CONNECT-DIAG: specifier unavailable request=${System.identityHashCode(this)} previouslyBound=$lost")
+                        result.unavailable()
+                        lost = networks.releaseRequest(this)
+                        log("CONNECT-DIAG: specifier unavailable request=${System.identityHashCode(this)} previouslyBound=${lost != null}")
                         log("WiFi: 系统专属网络请求已失效（可能为拒绝、撤销或热点不可用，不推定用户操作）")
                         latch.countDown()
                     }
-                    if (lost) onNetworkLost?.invoke(ssid) { callback.get() === this && !isCancelled() }
+                    lost?.let { onNetworkLost?.invoke(ssid, it) }
                 }
 
                 override fun onLost(network: Network) {
-                    var lost = false
-                    callback.runIfCurrent(this) {
-                        if (result.lost(network) && boundNetwork.compareAndSet(network, null)) {
-                            connectivityManager.bindProcessToNetwork(null)
-                            lost = true
-                        }
+                    var lost: (() -> Boolean)? = null
+                    networks.withRequest(this) {
+                        if (result.lost(network)) lost = networks.requestLost(this, network)
+                        log("CONNECT-DIAG: specifier network lost request=${System.identityHashCode(this)} network=$network; request remains registered")
                     }
-                    if (lost) onNetworkLost?.invoke(ssid) { callback.get() === this && !isCancelled() }
+                    lost?.let { onNetworkLost?.invoke(ssid, it) }
                 }
             }
-        if (!callback.replace(newCallback, { !isCancelled() }, ::disposeRequest)) return JoinResult.Unavailable
-        callback.runIfCurrent(newCallback) { bindingCurrent = { !isCancelled() && result.get() != null } }
-        log("CONNECT-DIAG: requesting system WiFi selection request=${System.identityHashCode(newCallback)}")
         val accepted =
             try {
-                callback.runIfCurrent(newCallback) {
-                    if (isCancelled()) throw java.util.concurrent.CancellationException()
+                networks.startRequest(newCallback, { !isCancelled() }) {
+                    log("CONNECT-DIAG: requesting system WiFi selection request=${System.identityHashCode(newCallback)}")
                     connectivityManager.requestNetwork(request, newCallback)
                 }
             } catch (error: Exception) {
                 log("WiFi: 发起应用专属网络请求失败（${error.message}）——可能需要位置权限或系统不支持")
                 false
             }
-        if (!accepted) {
-            release(newCallback)
-            return JoinResult.Unavailable
-        }
+        if (!accepted) return JoinResult.Unavailable
         val startedAt = SystemClock.uptimeMillis()
         val window = WifiJoinWindow(startedAt, timeoutMillis, graceMillis)
         var graceLogged = false
-        while (callback.get() === newCallback && window.waiting(SystemClock.uptimeMillis(), unavailable.get(), isCancelled())) {
+        while (networks.requestOwner() === newCallback && window.waiting(SystemClock.uptimeMillis(), unavailable.get(), isCancelled())) {
             if (!graceLogged && window.inGrace(SystemClock.uptimeMillis())) {
                 graceLogged = true
                 log("WIFI: specifier pending; extending current owned request by ${graceMillis}ms")
             }
             if (isCancelled()) {
-                release(newCallback)
+                networks.releaseRequest(newCallback)
                 return JoinResult.Unavailable
             }
             try {
                 if (latch.await(200, TimeUnit.MILLISECONDS)) break
             } catch (_: InterruptedException) {
-                release(newCallback)
+                networks.releaseRequest(newCallback)
                 return JoinResult.Unavailable
             }
         }
-        val network = if (!isCancelled() && callback.get() === newCallback) result.get() else null
+        val network = networks.requestResult(newCallback, { !isCancelled() }, ::isUsable)
         if (network == null) {
-            release(newCallback)
+            networks.releaseRequest(newCallback)
             log("CONNECT-DIAG: specifier incomplete request=${System.identityHashCode(newCallback)} elapsedMs=${SystemClock.uptimeMillis() - startedAt} reason=${if (unavailable.get()) "system-unavailable" else "deadline"}")
             return JoinResult.Unavailable
         }
@@ -357,13 +341,7 @@ class WifiCarPlayConnector(
         }
     }
 
-    /**
-     * 绑定「当前已连接的 WiFi」（用户手动在系统设置里加入热点后的兜底路径）。
-     * 热点无互联网时系统可能不把它设为默认网络，必须显式 bindProcessToNetwork，
-     * 我们的 socket 才会走 WiFi 而不是蜂窝。
-     * 带看门狗：WiFi 未连接时 requestNetwork 会无限静默挂起——5 秒无果给出明确指引
-     * （请求保持挂起，用户加入热点后仍会自动完成绑定并回调）。
-     */
+    /** Observe and bind an already connected target; this does not cancel an active request. */
     fun bindCurrentWifi(ssid: String, onResult: (Boolean) -> Unit = {}) {
         Bg.run("wifi-bind") { onResult(bindCurrentWifiBlocking(15_000L, ssid) != null) }
     }
@@ -388,118 +366,114 @@ class WifiCarPlayConnector(
         } && !isCancelled()
     }
 
-    /** Passive exact-target binding; observing a network does not request a new association. */
+    private class ReuseProbe(val expectedSsid: String?, val valid: () -> Boolean) {
+        val latch = CountDownLatch(1)
+        val result = AtomicReference<Network?>(null)
+        val lease = WifiNetworkLease<Network>()
+    }
+
+    /** One connection-scoped observer monitors bindings even after a reuse waiter finishes. */
+    private inner class WifiObserver : ConnectivityManager.NetworkCallback(FLAG_INCLUDE_LOCATION_INFO) {
+        private val capabilities = mutableMapOf<Network, NetworkCapabilities>()
+        private val links = mutableMapOf<Network, LinkProperties>()
+
+        override fun onAvailable(network: Network) {
+            networks.withObserver(this) {
+                if (networks.probeOwner() != null) log("WIFI: fallback candidate=$network awaiting ordered capabilities and link properties")
+            }
+        }
+
+        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+            networks.withObserver(this) { capabilities[network] = caps; tryBind(network) }
+        }
+
+        override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) {
+            networks.withObserver(this) { links[network] = properties; tryBind(network) }
+        }
+
+        fun retry() {
+            networks.withObserver(this) { capabilities.keys.toList().forEach(::tryBind) }
+        }
+
+        private fun tryBind(network: Network) {
+            val probe = networks.probeOwner() as? ReuseProbe ?: return
+            if (!probe.valid() || probe.result.get() != null) return
+            val caps = capabilities[network] ?: return
+            val properties = links[network] ?: return
+            val observedSsid = plainSsid((caps.transportInfo as? WifiInfo)?.ssid)
+            val target = io.github.shaonialife.carptocar.bt.TargetDevicePrefs.get(context)?.address
+            if (!identityProof.accepts(probe.expectedSsid, observedSsid, target, properties.linkAddresses.mapNotNull { it.address.hostAddress })) {
+                log("WIFI: fallback not authorized network=$network identity=${if (observedSsid == null) "unknown-no-matching-proof" else "ssid-mismatch"}")
+                return
+            }
+            if (!probe.lease.accept(network)) {
+                log("WIFI: fallback ignored replacement network=$network; requires a new vehicle request")
+                return
+            }
+            val bound = networks.bindProbe(probe, network, probe.valid)
+            if (bound) probe.result.set(network)
+            log("WIFI: fallback selected network=$network identity=${if (observedSsid != null) "ssid-visible" else "target-invite-and-exact-interface"} bound=$bound; lease pinned; activeRequestRetained=${networks.requestOwner() != null}")
+            log("WiFi: 目标身份已核对——绑定当前 WiFi（$network bindProcessToNetwork=$bound）")
+            probe.latch.countDown()
+        }
+
+        override fun onLost(network: Network) {
+            var lost: (() -> Boolean)? = null
+            networks.withObserver(this) {
+                capabilities.remove(network)
+                links.remove(network)
+                (networks.probeOwner() as? ReuseProbe)?.let {
+                    it.lease.lost(network)
+                    it.result.compareAndSet(network, null)
+                }
+                lost = networks.observerLost(this, network)
+                log("CONNECT-DIAG: observer network lost network=$network bindingLost=${lost != null} activeRequestRetained=${networks.requestOwner() != null}")
+            }
+            lost?.let { onNetworkLost?.invoke("", it) }
+        }
+    }
+
+    private fun ensureWifiObserver(isCancelled: () -> Boolean): Boolean {
+        val observer = WifiObserver()
+        return try {
+            networks.ensureObserver(observer, { !isCancelled() }) {
+                val request = NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                    .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build()
+                connectivityManager.registerNetworkCallback(request, observer)
+            }
+        } catch (error: Exception) {
+            log("WiFi: 注册网络观察失败（${error.message}）")
+            false
+        }
+    }
+
+    /** A bounded reuse probe owns no association request and cannot release one on exit. */
     fun bindCurrentWifiBlocking(
         timeoutMillis: Long,
         expectedSsid: String? = null,
         isCancelled: () -> Boolean = { false },
     ): Network? {
-        if (!prepareLocalNetwork(isCancelled)) return null
-        val request =
-            NetworkRequest
-                .Builder()
-                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .build()
-        val latch = CountDownLatch(1)
-        val result = AtomicReference<Network?>(null)
-        val lease = WifiNetworkLease<Network>()
-        val capabilities = java.util.concurrent.ConcurrentHashMap<Network, NetworkCapabilities>()
-        val links = java.util.concurrent.ConcurrentHashMap<Network, LinkProperties>()
-        val newCallback =
-            object : ConnectivityManager.NetworkCallback(ConnectivityManager.NetworkCallback.FLAG_INCLUDE_LOCATION_INFO) {
-                override fun onAvailable(network: Network) {
-                    log("WIFI: fallback candidate=$network awaiting ordered capabilities and link properties")
-                }
-
-                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
-                    capabilities[network] = caps
-                    tryBind(network)
-                }
-
-                override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) {
-                    links[network] = properties
-                    tryBind(network)
-                }
-
-                fun tryBind(network: Network) {
-                    if (callback.get() !== this) return
-                    if (boundNetwork.get() == network) return
-                    val caps = capabilities[network] ?: return
-                    val properties = links[network] ?: return
-                    val observedSsid = plainSsid((caps.transportInfo as? WifiInfo)?.ssid)
-                    val target = io.github.shaonialife.carptocar.bt.TargetDevicePrefs.get(context)?.address
-                    if (!identityProof.accepts(expectedSsid, observedSsid, target, properties.linkAddresses.mapNotNull { it.address.hostAddress })) {
-                        log("WIFI: fallback not authorized network=$network identity=${if (observedSsid == null) "unknown-no-matching-proof" else "ssid-mismatch"}")
-                        return
-                    }
-                    if (!lease.accept(network)) {
-                        log("WIFI: fallback ignored replacement network=$network; requires a new vehicle request")
-                        return
-                    }
-                    callback.runIfCurrent(this) {
-                        if (isCancelled()) return@runIfCurrent
-                        val bound = connectivityManager.bindProcessToNetwork(network)
-                        if (bound) {
-                            boundNetwork.set(network)
-                            result.set(network)
-                        }
-                        log("WIFI: fallback selected network=$network identity=${if (observedSsid != null) "ssid-visible" else "target-invite-and-exact-interface"} bound=$bound; lease pinned")
-                        log("WiFi: 目标身份已核对——绑定当前 WiFi（$network bindProcessToNetwork=$bound）")
-                        latch.countDown()
-                    }
-                }
-
-                override fun onLost(network: Network) {
-                    capabilities.remove(network); links.remove(network)
-                    var lost = false
-                    callback.runIfCurrent(this) {
-                        if (lease.lost(network) && boundNetwork.compareAndSet(network, null)) {
-                            result.compareAndSet(network, null)
-                            connectivityManager.bindProcessToNetwork(null)
-                            lost = true
-                        }
-                    }
-                    if (lost) onNetworkLost?.invoke("") { callback.get() === this && !isCancelled() }
+        if (!prepareLocalNetwork(isCancelled) || !ensureWifiObserver(isCancelled)) return null
+        val probe = ReuseProbe(expectedSsid) { !isCancelled() }
+        if (!networks.startProbe(probe, probe.valid)) return null
+        try {
+            (networks.observerOwner() as? WifiObserver)?.retry()
+            val deadline = SystemClock.uptimeMillis() + timeoutMillis
+            while (networks.probeOwner() === probe && SystemClock.uptimeMillis() < deadline) {
+                if (isCancelled()) return null
+                try {
+                    if (probe.latch.await(200, TimeUnit.MILLISECONDS)) break
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return null
                 }
             }
-        if (!callback.replace(newCallback, { !isCancelled() }, ::disposeRequest)) return null
-        callback.runIfCurrent(newCallback) {
-            bindingCurrent = { !isCancelled() && result.get() != null }
-            retryIdentity = { capabilities.keys.forEach { newCallback.tryBind(it) } }
+            return networks.probeResult(probe, probe.valid)
+        } finally {
+            networks.endProbe(probe)
         }
-        val accepted =
-            try {
-                // Observe every matching WiFi: a best-network request stops reporting the old
-                // network's loss after a replacement, even when our lease rejects that replacement.
-                callback.runIfCurrent(newCallback) {
-                    if (isCancelled()) throw java.util.concurrent.CancellationException()
-                    connectivityManager.registerNetworkCallback(request, newCallback)
-                }
-            } catch (error: Exception) {
-                log("WiFi: 绑定当前 WiFi 请求失败（${error.message}）")
-                false
-            }
-        if (!accepted) {
-            release(newCallback)
-            return null
-        }
-        val deadline = SystemClock.uptimeMillis() + timeoutMillis
-        while (SystemClock.uptimeMillis() < deadline) {
-            if (isCancelled()) {
-                release(newCallback)
-                return null
-            }
-            try {
-                if (latch.await(200, TimeUnit.MILLISECONDS)) break
-            } catch (_: InterruptedException) {
-                release(newCallback)
-                return null
-            }
-        }
-        val network = if (!isCancelled() && callback.get() === newCallback) result.get() else null
-        if (network == null) release(newCallback)
-        return network
     }
 
     /**
@@ -579,18 +553,8 @@ class WifiCarPlayConnector(
         return reused
     }
 
-    fun release() { callback.clear(dispose = ::disposeRequest) }
+    fun release() { networks.release() }
 
-    private fun release(owner: ConnectivityManager.NetworkCallback) {
-        callback.clear(owner, ::disposeRequest)
-    }
-
-    private fun disposeRequest(owner: ConnectivityManager.NetworkCallback) {
-        bindingCurrent = null
-        retryIdentity = null
-        runCatching { connectivityManager.unregisterNetworkCallback(owner) }
-        if (boundNetwork.getAndSet(null) != null) connectivityManager.bindProcessToNetwork(null)
-    }
     private companion object {
         /** 没权限读 SSID 时系统给的占位值。 */
         const val UNKNOWN_SSID = "<unknown ssid>"

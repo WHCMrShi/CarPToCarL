@@ -1,6 +1,6 @@
 package io.github.shaonialife.carptocar.net
 
-/** Specifier result lifecycle: unavailable/lost is terminal even after onAvailable. */
+/** Losing a Network clears that result; only request unavailability is terminal. */
 internal class WifiRequestState<T> {
     private var network: T? = null
     private var ended = false
@@ -17,7 +17,7 @@ internal class WifiRequestState<T> {
     }
     @Synchronized fun lost(expected: T): Boolean {
         if (ended || network != expected) return false
-        unavailable()
+        network = null
         return true
     }
 }

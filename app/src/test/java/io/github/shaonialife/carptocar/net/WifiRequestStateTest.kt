@@ -5,6 +5,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WifiRequestStateTest {
+    @Test fun lossOfNetworkDoesNotEndTheStillRegisteredRequest() {
+        val state = WifiRequestState<String>()
+        assertTrue(state.available("834") { true })
+        assertTrue(state.lost("834"))
+        assertNull(state.get())
+        assertTrue(state.available("835") { true })
+        assertEquals("835", state.get())
+        assertEquals("835", state.unavailable())
+        assertFalse(state.available("late") { error("request released") })
+    }
     @Test fun unavailableAfterSuccessfulBindRemovesResultAndPreventsLateRebind() {
         val state = WifiRequestState<String>()
         assertTrue(state.available("old") { true })
