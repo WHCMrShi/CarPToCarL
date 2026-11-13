@@ -3154,8 +3154,11 @@ class AirPlayClient(
         session.scope.start("airplay-disable-bluetooth") {
             if (bluetoothDisableSession !== session || !setupOwnerAlive(session.generation)) return@start
             try {
+                // DiPlay handleCommand and TROOPERS24 slide 32 use params.deviceID.
+                // The 2015 command-key table alone does not establish this envelope.
                 val body = BinaryPlist.encode(linkedMapOf(
-                    "type" to "disableBluetooth", "deviceID" to session.deviceId,
+                    "type" to "disableBluetooth",
+                    "params" to linkedMapOf("deviceID" to session.deviceId),
                 ))
                 log("BT-DISABLE: request generation=${session.generation} deviceIDSource=session-SETUP channel=control")
                 val (status, _) = request(

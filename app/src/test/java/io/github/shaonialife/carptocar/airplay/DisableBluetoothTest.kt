@@ -71,7 +71,13 @@ class DisableBluetoothTest {
         val (head, command) = f.request()
         assertTrue(head.startsWith("POST /command RTSP/1.0\r\n"))
         assertTrue(head.contains("Content-Type: application/x-apple-binary-plist"))
-        assertEquals(mapOf("type" to "disableBluetooth", "deviceID" to session.deviceId), command)
+        assertEquals(setOf("type", "params"), command.keys)
+        assertEquals("disableBluetooth", command["type"])
+        // DiPlay handleCommand reads only body["params"]; TROOPERS24 slide 32
+        // independently shows the phone sending deviceID inside that dictionary.
+        val params = command["params"] as? Map<*, *>
+        assertNotNull("receiver must be able to read command parameters", params)
+        assertEquals(mapOf("deviceID" to session.deviceId), params)
         f.respond(head)
         repeat(3) { f.client.disableBluetoothAfterActivation(true, true) }
         f.assertNoRequest()
@@ -82,10 +88,11 @@ class DisableBluetoothTest {
         f.session()
         f.client.disableBluetoothAfterActivation(true, true)
         val (head, _) = f.request()
-        f.respond(head, "500 Internal Server Error")
+        f.respond(head, "422 Unprocessable Entity")
         f.client.disableBluetoothAfterActivation(true, true)
         f.assertNoRequest()
         assertTrue(f.logs.any { it.contains("accepted=false") })
+        assertTrue(f.logs.any { it.contains("422 Unprocessable Entity") && it.contains("disconnection unconfirmed") })
     }
 
     @Test fun readinessRequiresBothActivationAndWifiIap2() = Fixture().use { f ->
@@ -118,7 +125,7 @@ class DisableBluetoothTest {
         f.session("AA:BB:CC:44:55:66")
         f.client.disableBluetoothAfterActivation(true, true)
         val (head, command) = f.request()
-        assertEquals("AA:BB:CC:44:55:66", command["deviceID"])
+        assertEquals("AA:BB:CC:44:55:66", (command["params"] as? Map<*, *>)?.get("deviceID"))
         f.respond(head)
     }
 
