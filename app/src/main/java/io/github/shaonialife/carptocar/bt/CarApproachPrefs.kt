@@ -11,10 +11,10 @@ import android.content.Context
  */
 object CarApproachPrefs {
     /**
-     * 默认开：只在**已指定目标车机**时才可能触发（见 CarApproachPolicy.NO_TARGET），
-     * 因此不会误连测试台或其它已配对设备。
+     * 默认关闭；用户开启且已指定目标车机后才可能触发。
+     * 已保存的用户选择优先于默认值。
      */
-    const val DEFAULT_ENABLED = true
+    const val DEFAULT_ENABLED = false
 
     private const val PREFS_NAME = "settings"
     private const val KEY_ENABLED = "car_approach_autostart"

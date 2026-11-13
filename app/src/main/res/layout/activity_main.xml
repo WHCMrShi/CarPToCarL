@@ -561,7 +561,7 @@
                                             android:layout_width="wrap_content"
                                             android:layout_height="wrap_content"
                                             android:layout_marginEnd="16dp"
-                                            android:text="监听日志"
+                                            android:text="实时显示"
                                             android:textColor="@color/m3_on_surface"
                                             android:textSize="16sp"
                                             android:textStyle="normal" />
@@ -574,7 +574,7 @@
                                         app:switchMinWidth="48dp"
                                         app:switchPadding="16dp"
                                             xmlns:app="http://schemas.android.com/apk/res-auto"
-                                            android:contentDescription="监听日志"
+                                            android:contentDescription="实时显示"
                                             android:minHeight="48dp"
                                             android:minWidth="48dp" />
                                         <Space

@@ -879,7 +879,7 @@ class MainActivity : AppCompatActivity() {
         switchCarApproach.isChecked = CarApproachPrefs.enabled(this)
 
 
-        // 开关默认就是开的，用户可能从没碰过它——进界面时按 7 天节流提醒一次。
+        // 用户已开启时，进界面按 7 天节流提醒一次。
         // 延后 3 秒提示，避免打断首页首次展示。
         if (switchCarApproach.isChecked && TargetDevicePrefs.get(this) != null) {
             mainHandler.postDelayed(
