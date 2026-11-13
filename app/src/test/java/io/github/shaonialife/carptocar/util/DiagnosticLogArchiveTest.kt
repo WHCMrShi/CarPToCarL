@@ -53,6 +53,10 @@ class DiagnosticLogArchiveTest {
             "WIFI-POLICY: ownedSuggestionsRemoved=1 status=0 remaining=0 ready=true",
             "WIFI-MEMORY: waiting for current target presence",
             "BT-PROFILE: cancelled",
+            "BT-ACTION: id=1 source=outbound phase=DIALING",
+            "BT-RELEASE: action=1 source=outbound-retry requests={HFP=ACCEPTED} after={HFP=CONNECTED}",
+            "BT-LIFECYCLE: accepted direction=inbound owner=2",
+            "BT-GUARD: release attempts=1",
             "IDLE: check source=service lateMs=1200 verdict=UI_VISIBLE",
             "APPROACH: target ACL disconnected",
             "SVC: lock-release wakeHeld=false wifiHeld=false",
@@ -78,5 +82,6 @@ class DiagnosticLogArchiveTest {
         val exported = DiagnosticLogArchive.read(main)
         evidence.forEach { assertTrue(it, exported.contains(it)) }
         assertFalse(DiagnosticLogArchive.isDiagnostic("VIDEO-PATH: RAW rx: binary payload"))
+        assertFalse(DiagnosticLogArchive.isDiagnostic("BT-RELEASE: RAW rx: binary payload"))
     }
 }

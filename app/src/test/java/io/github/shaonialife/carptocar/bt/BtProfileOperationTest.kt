@@ -8,16 +8,18 @@ import org.junit.Test
 class BtProfileOperationTest {
     private val links = BtLinkOwnership { 1L }
     private val scope = BtProfileOperationScope()
+    private fun <P> online(vararg profiles: P) = profiles.associateWith { BtProfileState.CONNECTED }
+    private val accepted = BtDisconnectRequest.ACCEPTED
 
     @Test fun unchangedOperationKeepsProfileAndDeviceFallbackOrder() {
         val events = mutableListOf<String>()
-        val submitted = disconnectProfilesForOperation(
-            scope.capture(links), { listOf("HFP", "A2DP") },
-            { profile -> { events += profile; Unit } },
-            { timeout, current -> assertTrue(current()); events += "wait:$timeout"; false },
-            { events += "device" },
+        val result = disconnectProfilesForOperation(
+            scope.capture(links), { online("HFP", "A2DP") },
+            { profile -> { events += profile; accepted } },
+            { _, timeout, current -> assertTrue(current()); events += "wait:$timeout"; online("HFP", "A2DP") },
+            { events += "device"; accepted },
         )
-        assertEquals(listOf("HFP", "A2DP"), submitted)
+        assertEquals(setOf("HFP", "A2DP"), result.requests.keys)
         assertEquals(listOf("HFP", "A2DP", "wait:1500", "device", "wait:500"), events)
     }
 
@@ -25,9 +27,9 @@ class BtProfileOperationTest {
         val operation = scope.capture(links)
         var deviceCalls = 0
         disconnectProfilesForOperation(
-            operation, { listOf(1) }, { { Unit } },
-            { _, current -> links.claim("inbound"); assertFalse(current()); false },
-            { deviceCalls++ },
+            operation, { online(1) }, { { accepted } },
+            { _, _, current -> links.claim("inbound"); assertFalse(current()); online(1) },
+            { deviceCalls++; accepted },
         )
         assertEquals(0, deviceCalls)
         assertFalse(operation.isCurrent())
@@ -57,9 +59,9 @@ class BtProfileOperationTest {
         val worker = Thread {
             try {
                 disconnectProfilesForOperation(
-                    operation, { listOf(1, 2) },
-                    { entered.countDown(); check(release.await(3, TimeUnit.SECONDS)); { profileCalls++; Unit } },
-                    { _, _ -> false }, { deviceCalls++ },
+                    operation, { online(1, 2) },
+                    { entered.countDown(); check(release.await(3, TimeUnit.SECONDS)); { profileCalls++; accepted } },
+                    { _, _, _ -> online(1) }, { deviceCalls++; accepted },
                 )
             } catch (error: Throwable) { failure = error } finally { finished.countDown() }
         }
@@ -77,19 +79,19 @@ class BtProfileOperationTest {
     @Test fun ownerChangeDuringStatusLookupPreventsAllActions() {
         val operation = scope.capture(links)
         assertTrue(disconnectProfilesForOperation(
-            operation, { links.claim("inbound"); listOf(1) },
-            { error("must not query another proxy") }, { _, _ -> error("must not wait") },
+            operation, { links.claim("inbound"); online(1) },
+            { error("must not query another proxy") }, { _, _, _ -> error("must not wait") },
             { error("must not disconnect") },
-        ).isEmpty())
+        ).requests.isEmpty())
     }
 
     @Test fun stopOrTargetRoundChangeCancelsRemainingProfileAndFallback() {
         val operation = scope.capture(links)
         val sent = mutableListOf<Int>()
         disconnectProfilesForOperation(
-            operation, { listOf(1, 2) },
-            { profile -> { sent += profile; scope.invalidate() } },
-            { _, _ -> error("obsolete wait") }, { error("obsolete fallback") },
+            operation, { online(1, 2) },
+            { profile -> { sent += profile; scope.invalidate(); accepted } },
+            { _, _, _ -> error("obsolete wait") }, { error("obsolete fallback") },
         )
         assertEquals(listOf(1), sent)
         assertFalse(operation.isCurrent())
@@ -100,11 +102,11 @@ class BtProfileOperationTest {
         links.claim("inbound")!!
         val operation = scope.capture(links)
         var calls = 0
-        val submitted = disconnectProfilesForOperation(
-            operation, { listOf(1) }, { { calls++; Unit } },
-            { _, _ -> false }, { error("active RFCOMM must not be disconnected") },
+        val result = disconnectProfilesForOperation(
+            operation, { online(1) }, { { calls++; accepted } },
+            { _, _, _ -> online(1) }, { error("active RFCOMM must not be disconnected") },
         )
-        assertEquals(listOf(1), submitted)
+        assertEquals(setOf(1), result.requests.keys)
         assertEquals(1, calls)
         assertTrue(operation.isCurrent())
     }
@@ -113,19 +115,19 @@ class BtProfileOperationTest {
         var current = true
         val operation = scope.capture(links) { current }
         disconnectProfilesForOperation(
-            operation, { listOf(1) }, { { Unit } },
-            { _, _ -> current = false; false }, { error("cancelled fallback") },
+            operation, { online(1) }, { { accepted } },
+            { _, _, _ -> current = false; online(1) }, { error("cancelled fallback") },
         )
         assertFalse(operation.isCurrent())
     }
 
     @Test fun delayedPairingCleanupDoesNotRecaptureNewSession() {
         val operation = scope.capture(links)
-        disconnectProfilesForOperation(operation, { emptyList<Int>() }, { null }, { _, _ -> true }, {})
+        disconnectProfilesForOperation(operation, { emptyMap<Int, BtProfileState>() }, { null }, { _, _, _ -> emptyMap() }, { accepted })
         links.claim("outbound")!!.finish()
         assertTrue(disconnectProfilesForOperation(
-            operation, { error("second cleanup must not run") }, { _: Int -> null }, { _, _ -> false }, {},
-        ).isEmpty())
+            operation, { error("second cleanup must not run") }, { _: Int -> null }, { _, _, _ -> online(1) }, { accepted },
+        ).requests.isEmpty())
     }
 
     @Test fun retiredSameOwnerInvalidatesOperation() {

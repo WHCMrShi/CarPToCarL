@@ -10,27 +10,26 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * 蓝牙「**只配对、不连接**」策略。
+ * 目标设备的音频配置文件释放；三个入口与出站拨号共用动作租约。
  *
- * 奥迪 MIB3 实测（2026-10-18，用户报告）：手机与车机处于蓝牙**已连接**状态
- * （HFP 通话 / A2DP 媒体配置文件在线）时，车机不开放无线 CarPlay 的 iAP2 服务
- * 窗口——表现为 `BT-C: 连接失败（车机未就绪或不在无线配对窗口）` 每 3 秒重试。
- * 真 iPhone 的无线 CarPlay 也不依赖这些配置文件：控制通道走 iAP2 RFCOMM（独立
- * SDP 服务），声音走 WiFi 上的 AirPlay。因此正确形态是：**系统级配对 + iAP2
- * RFCOMM，其余配置文件一律不连**。
+ * Q4 2026-11-11 日志有 HFP/A2DP 在线、出站失败后入站成功的时序，
+ * 但不能证明音频配置文件是唯一拒绝原因，更不能从它推断 iPhone 内部策略。
+ * 证据与实现边界见 docs/q4-carplay-interaction-model.md 的 2026-11-13 记录。
  *
- * 实现说明：`BluetoothHeadset/A2dp/LeAudio.disconnect(BluetoothDevice)` 是
- * **@SystemApi**——编译期不可见，但运行时注解只要求 `BLUETOOTH_CONNECT`
- * （本应用已持有），因此反射可调。查询状态用公开的 `getProfileProxy` +
- * `connectedDevices`（需要主 Looper，应用进程有）。
- *
- * 曾试过把这段挪到 Shizuku UserService（shell uid）执行，实测不可行：
- * UserService 里 `BluetoothManager.getAdapter()` 返回 null（无主 Looper 的应用
- * 上下文），查询恒为「未连接」，反而掩盖真实状态。故固定在应用进程内做。
+ * 沿用既有反射 disconnect；隐藏接口可能失败或被系统拒绝，权限不等于成功。
+ * getProfileProxy/getConnectionState 查询缺失或抛错记 UNKNOWN；DISCONNECTED
+ * 仅表示查询报告离线，不是空口确认。请求返回值和后续观测分别记录。
  */
 object BtProfiles {
     private val operationScope = BtProfileOperationScope()
-    internal fun invalidatePendingOperations() = operationScope.invalidate()
+    private val actions = BtActionCoordinator()
+    internal fun invalidatePendingOperations() {
+        operationScope.invalidate()
+        actions.cancelObsoleteAction()
+    }
+    internal fun cancelObsoleteAction() = actions.cancelObsoleteAction()
+    internal fun acquireAction(operation: BtProfileOperation, source: String, log: (String) -> Unit) =
+        actions.acquire(operation, source, log)
     internal fun captureOperation(current: () -> Boolean = { true }): BtProfileOperation =
         operationScope.capture(BtSessionGate.links, current)
     /** 守卫一直拿不到对端地址时，空转多久就收工（毫秒）。 */
@@ -55,41 +54,45 @@ object BtProfiles {
     /** profile id → 已获取的代理（进程内复用；代理本身无会话状态）。 */
     private val proxies = HashMap<Int, ProfileProxyLease<BluetoothProfile>>()
 
-    /** 该地址当前在线（已连接）的配置文件名称。 */
-    fun connectedNames(
+    /** Missing proxies, permission failures and unsupported profiles are unknown, never offline. */
+    internal fun states(
         context: Context,
         address: String,
-    ): List<String> =
-        profiles.mapNotNull { id ->
-            if (Thread.currentThread().isInterrupted) return@mapNotNull null
-            val p = proxy(context, id) ?: return@mapNotNull null
-            val connected =
-                try {
-                    @Suppress("DEPRECATION")
-                    p.connectedDevices.any { it.address.equals(address, ignoreCase = true) }
-                } catch (_: Throwable) {
-                    false
-                }
-            if (connected) profileName(id) else null
+    ): Map<String, BtProfileState> {
+        val device = remoteDevice(context, address)
+        return profiles.associate { id ->
+            profileName(id) to observeBtProfileState {
+                if (device == null || Thread.currentThread().isInterrupted) null
+                else proxy(context, id)?.getConnectionState(device)
+            }
         }
+    }
 
     /**
      * 尽力断开该设备的全部配置文件连接。
      *
-     * @return 已尝试提交配置级断开的名称；不表示系统已完成断开。
+     * Requests and observed states are reported separately. All callers share the action lease.
      */
     internal fun disconnect(
         context: Context,
         device: BluetoothDevice,
         operation: BtProfileOperation,
-    ): List<String> {
+        action: BtActionCoordinator.Lease? = null,
+        source: String = "pair",
+        log: (String) -> Unit = {},
+    ): BtProfileReleaseResult<String> {
         val address =
             try {
                 device.address
             } catch (_: SecurityException) {
-                return emptyList()
+                val result = BtProfileReleaseResult(
+                    after = profiles.associate { profileName(it) to BtProfileState.UNKNOWN },
+                    superseded = !operation.isCurrent(),
+                )
+                log("BT-RELEASE: source=$source addressUnavailable=true ${result.describe()}")
+                return result
             }
-        return disconnectAddress(context, address, operation, device)
+        return disconnectAddress(context, address, operation, device, action, source, log)
     }
 
     /** 同 [disconnect]，只给地址（守卫按地址轮询时用）。 */
@@ -98,33 +101,45 @@ object BtProfiles {
         address: String,
         operation: BtProfileOperation,
         deviceHint: BluetoothDevice? = null,
-    ): List<String> {
-        val device = deviceHint ?: remoteDevice(context, address)
-        if (device == null) return emptyList()
-        return disconnectProfilesForOperation(
-            operation,
-            connected = { connectedNames(context, address) },
-            prepareDisconnect = { name ->
-                val id = profiles.first { profileName(it) == name }
-                proxy(context, id)?.let { service -> { disconnectProfile(service, device); Unit } }
-            },
-            awaitDisconnected = { timeout, current -> awaitDisconnected(context, address, timeout, current) },
-            disconnectDevice = {
-                // Never tear down an active RFCOMM owner, even if this profile operation began on that owner.
-                runCatching { BluetoothDevice::class.java.getMethod("disconnect").invoke(device) }
-            },
-        )
+        action: BtActionCoordinator.Lease? = null,
+        source: String = "guard",
+        log: (String) -> Unit = {},
+    ): BtProfileReleaseResult<String> {
+        val lease = action ?: acquireAction(operation, source, log)
+            ?: return BtProfileReleaseResult(superseded = true)
+        check(lease.operation === operation)
+        try {
+            lease.phase("RELEASING_PROFILES")
+            val device = deviceHint ?: remoteDevice(context, address)
+            val result = disconnectProfilesForOperation(
+                operation,
+                snapshot = { states(context, address) },
+                prepareDisconnect = { name ->
+                    val id = profiles.first { profileName(it) == name }
+                    if (device == null) null else proxy(context, id)?.let { service ->
+                        { disconnectProfile(service, device) }
+                    }
+                },
+                awaitDisconnected = { targets, timeout, current ->
+                    awaitDisconnected(context, address, targets, timeout, current)
+                },
+                disconnectDevice = {
+                    // Coordinator excludes concurrent local dials; owner check still protects inbound RFCOMM.
+                    submitBtDisconnect { BluetoothDevice::class.java.getMethod("disconnect").invoke(device) }
+                },
+            )
+            log("BT-RELEASE: action=${lease.id} source=$source ${result.describe()} (ACCEPTED=系统接受请求，DISCONNECTED=查询报告离线)")
+            return result
+        } finally {
+            if (action == null) lease.close()
+        }
     }
 
     /**
-     * 音频配置守卫：**会话期间持续**把该设备的 HFP/A2DP 断开（2026-11-08 按宝马 fork 移植）。
+     * 沿用既有建链期守卫的节奏和退出条件，不把周期性查询视为 Q4 拒绝原因的证明。
+     * 每轮先等待共同动作租约，再重新查询；拨号或另一轮释放未结束时不并行清理。
      *
-     * 为什么一次性 [disconnect] 不够：车机（以及它那一侧的蓝牙栈）会在我们断开后
-     * 自己把配置文件再拉回来——宝马 NBT EVO + 荣耀实测，握手期会有 2~4 分钟的
-     * 「连上又断」循环，期间车机只要看到 HFP/A2DP 在线就不开放 iAP2 窗口。所以要在
-     * 整段建链期反复确认它没被拉起来，iAP2 会话一建立（或用户断开）就收工。
-     *
-     * 跑在独立后台线程上；本方法阻塞到退出为止，返回「实际断开了几次」。
+     * 跑在独立后台线程上；返回尝试配置释放的轮数（包括请求结果未知），不代表实际离线次数。
      */
     fun guardAudioProfiles(
         context: Context,
@@ -144,7 +159,7 @@ object BtProfiles {
             if (!AudioProfileGuardPolicy.shouldKeepGuarding(elapsed)) {
                 onEvent(
                     "BT-GUARD: 已盯满 ${AudioProfileGuardPolicy.MAX_MILLIS / 1000}s，" +
-                        "停止（断开 $drops 次）——仍未建立 iAP2 会话",
+                        "停止（释放尝试 $drops 轮）——仍未建立 iAP2 会话",
                 )
                 return drops
             }
@@ -159,15 +174,13 @@ object BtProfiles {
                 }
             } else {
                 idlePolls = 0
-                val operation = captureOperation { !shouldStop() && address.equals(addressProvider(), true) }
+                val operation = captureOperation {
+                    !shouldStop() && address.equals(addressProvider(), true) &&
+                        AudioProfileGuardPolicy.shouldKeepGuarding(SystemClock.uptimeMillis() - started)
+                }
                 if (operation.isCurrent()) {
-                    val dropped = disconnectAddress(context, address, operation)
-                    if (dropped.isNotEmpty()) {
-                        drops++
-                        onEvent(
-                            "BT-GUARD: 已请求断开 ${dropped.joinToString("/")}（第 $drops 次；系统完成状态另核对）",
-                        )
-                    }
+                    val result = disconnectAddress(context, address, operation, log = onEvent)
+                    if (result.requests.isNotEmpty()) drops++
                 }
             }
             try {
@@ -179,31 +192,26 @@ object BtProfiles {
         return drops
     }
 
-    /** 断开后仍在线的配置文件（用于日志判断是否真的断开）。 */
-    fun stillConnected(
-        context: Context,
-        address: String,
-    ): List<String> = connectedNames(context, address)
-
     private fun awaitDisconnected(
         context: Context,
         address: String,
+        targets: Set<String>,
         timeoutMillis: Long,
         current: () -> Boolean,
-    ): Boolean {
+    ): Map<String, BtProfileState> {
         val deadline = SystemClock.uptimeMillis() + timeoutMillis
+        var observed = profiles.associate { profileName(it) to BtProfileState.UNKNOWN }
         while (current() && SystemClock.uptimeMillis() < deadline) {
-            val disconnected = connectedNames(context, address).isEmpty()
-            if (!current()) return false
-            if (disconnected) return true
+            observed = states(context, address)
+            if (!current() || targets.all { observed[it] == BtProfileState.DISCONNECTED }) return observed
             try {
                 Thread.sleep(120)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
-                return false
+                return observed
             }
         }
-        return current() && connectedNames(context, address).isEmpty() && current()
+        return observed
     }
 
     @SuppressLint("MissingPermission")
@@ -265,15 +273,11 @@ object BtProfiles {
     private fun disconnectProfile(
         proxy: BluetoothProfile,
         device: BluetoothDevice,
-    ): Boolean =
-        try {
+    ): BtDisconnectRequest =
+        submitBtDisconnect {
             proxy.javaClass
                 .getMethod("disconnect", BluetoothDevice::class.java)
                 .invoke(proxy, device)
-                ?.let { it as? Boolean }
-                ?: true
-        } catch (_: Throwable) {
-            false
         }
 }
 

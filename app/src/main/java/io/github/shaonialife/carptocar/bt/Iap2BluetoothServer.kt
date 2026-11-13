@@ -220,6 +220,8 @@ class Iap2BluetoothServer(
                 }
             }
             if (owner == null) { runCatching { socket.close() }; continue }
+            // Inbound is never queued behind local release/dial. Cancel only the obsolete dial's socket.
+            BtProfiles.cancelObsoleteAction()
             log("BT-LIFECYCLE: accepted direction=inbound owner=${owner.id}")
             Thread({ runSession(socket, owner, epoch, callbacks) }, "iap2-bt-session").apply {
                 isDaemon = true

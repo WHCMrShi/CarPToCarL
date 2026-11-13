@@ -1227,7 +1227,7 @@ object SessionController {
                         },
                         onEvent = { line -> appendLog(line) },
                     )
-                appendLog("BT-GUARD: 守卫收工（共断开 $drops 次）")
+                appendLog("BT-GUARD: 守卫收工（释放尝试 $drops 轮，状态观测见 BT-RELEASE）")
             } catch (error: Throwable) {
                 appendLog("BT-GUARD: 守卫异常 - ${error.message ?: error.javaClass.simpleName}")
             } finally {
@@ -1907,13 +1907,13 @@ object SessionController {
         bluetoothClient?.start()
         bluetoothServer?.start()
         // 诊断（奥迪实测：手机与车机「蓝牙已连接」时车机不开放 CarPlay）：
-        // 连之前把目标设备的蓝牙配置文件状态打出来，失败时一眼看出是不是这个原因。
+        // 启动时观测目标配置文件；它与拨号并行，只提供状态证据，不推断失败原因。
         Bg.run("bt-profile-diag") {
             val target = appContext?.let { TargetDevicePrefs.get(it) } ?: return@run
-            val connected = BtProfiles.connectedNames(context.applicationContext, target.address)
+            val states = BtProfiles.states(context.applicationContext, target.address)
             appendLog(
-                "BT-PROFILE: 连接前「${target.name}」的蓝牙配置文件状态=" +
-                    (connected.takeIf { it.isNotEmpty() }?.joinToString("/") ?: "未连接"),
+                "BT-PROFILE: 启动诊断「${target.name}」的蓝牙配置文件状态=" +
+                    "$states（UNKNOWN=查询未确认）",
             )
         }
         // 音频配置守卫（2026-11-08，按宝马 fork 移植）：车机只要看到 HFP/A2DP 在线就

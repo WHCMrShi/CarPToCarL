@@ -1682,13 +1682,7 @@ class MainActivity : AppCompatActivity() {
                 Bg.run("bt-pair-only") {
                     repeat(2) { attempt ->
                         if (!profileOperation.isCurrent()) return@run
-                        val dropped = BtProfiles.disconnect(app, device, profileOperation)
-                        if (dropped.isNotEmpty()) {
-                            log(
-                                "BT-PAIR: 已断开配对后自动建立的 ${dropped.joinToString("/")} 连接" +
-                                    "（保持仅配对，避免车机拒绝 CarPlay）",
-                            )
-                        }
+                        BtProfiles.disconnect(app, device, profileOperation, source = "pair", log = { log(it) })
                         if (attempt == 0) {
                             try {
                                 Thread.sleep(1_500)
