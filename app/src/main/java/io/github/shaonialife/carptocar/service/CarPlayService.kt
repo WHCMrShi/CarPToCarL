@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.NotificationCompat
 import io.github.shaonialife.carptocar.MainActivity
+import io.github.shaonialife.carptocar.R
 import io.github.shaonialife.carptocar.SessionController
 import io.github.shaonialife.carptocar.bt.CarIdleGuard
 import io.github.shaonialife.carptocar.util.DebugFileLog
@@ -320,7 +321,7 @@ class CarPlayService : Service() {
             )
         val notification = NotificationCompat
             .Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+            .setSmallIcon(R.drawable.ic_notification_flow_c)
             .setContentTitle("CarPToCarL · 车机连接")
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))

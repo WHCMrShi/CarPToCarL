@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Flow C foreground for notifications: no launcher background or adaptive-icon inset.
+     Systems that tint small icons use the same C-and-arrow silhouette. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+    <group android:translateX="-12" android:translateY="-16">
+        <path
+            android:pathData="M91,39 C63,15 28,33 28,64 C28,95 62,112 88,91"
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="9"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M65,43 L91,64 L65,85 M46,64 L91,64"
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="@color/q4_action_accent"
+            android:strokeWidth="8"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>
