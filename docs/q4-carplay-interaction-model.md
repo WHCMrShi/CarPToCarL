@@ -2,6 +2,14 @@
 
 更新日期：2026-11-13。本文件服务于 `codex/audi-q4-etron` 的专用适配，作为后续连接实验的持续交接记录。描述的是本车已观察到的行为与应用策略，不将其他车型的时序要求直接推广到 Q4，也不把推断写成车机固件规范。
 
+## 2026-11-13：Wi-Fi生命周期继续排查（未改代码）
+
+新增[记忆预连接、临时配置移除与默认网络切换核查](vehicle-tests/2026-11-13-q4-network-comparison/wifi-lifecycle-review.md)及[补充摘录](vehicle-tests/2026-11-13-q4-network-comparison/wifi-lifecycle.redacted.log)。午间 `be8a44c` 的首个specifier由记忆预连接在CarLife控制连接前发起；首次available后旧Network消失，0x5703再次触发复用，而复用callback替换会先注销旧主动请求。系统随后移除临时配置、自动重连保存配置并建立新Network，构成有源码依据的关联链。事后系统策略允许主动优先未验证Wi-Fi；原CarLife选择可能未随新Network继承，但没有故障现场字段证明该选择的实现或失效机制，不能宣称完整根因已确认。
+
+早间 `aa2579b-dirty` 也是CarLife先于CarPlay RECORD，但Wi-Fi记忆路径直接复用已有Network；午间则先发主动请求。相关Wi-Fi逻辑在早间提交基线已存在，尚不能归因于新增蓝牙协调提交。用户允许评估取消记忆路径，未要求实施：建议先独立对照“暂停凭据到达前主动预连接，保留凭据记忆和0x5703后正常入网”，再决定是否长期保留此路径。同时审查主动请求与被动复用共用所有权所造成的拆链副作用。两种启动顺序都需要后续验证，本轮没有新增实车验证。
+
+用户明确只允许普通App可取得的权限/API，不要求用户ADB授权。普通App不能直接强制其他应用全部走蜂窝，系统特权/ADB写策略方向已排除。继续定位并避免本应用造成的重新关联；本轮没有修改代码、手机设置或权限，只检查文档与脱敏证据，未跑单测/构建。disableBluetooth暂时搁置。
+
 ## 2026-11-13：实车回报——命令422与默认网络切换
 
 后续[原始报文及系统历史核对](vehicle-tests/2026-11-13-q4-network-comparison/protocol-and-system-review.md)：手机现存RTSP记录中，disableBluetooth为103字节有效binary plist、两个顶层string键，CSeq=24；deviceID同时匹配本次SETUP和只读查询的系统蓝牙地址；发送在Wi-Fi iAP2就绪及第二次RECORD成功之后。422响应体为空，尚无证据指定拒绝原因。用户强调网络问题与此命令分开调查，优先检查命令之前的commits。

@@ -1,0 +1,49 @@
+# Additional read-only Wi-Fi lifecycle evidence, collected 2026-11-13.
+# L = 1-based source line. Each section keeps source event order (app duplicates removed).
+# Config IDs and Connectivity Network IDs are distinct. No identities or protocol payloads.
+# Connectivity policy section is a later snapshot, NOT the 12:41 failure-time state.
+
+# Source: CarPToCarL-log-20261113-124359.txt
+# SHA-256: 9c19cc0fa33a7f055fbbd9fbe9a0348a9007a3eb9e81a781ac61e41a8a8f59ef
+L43 [12:40:36.353] PATH-DIAG: round=1 active=true stage=WIFI_REUSE attempt=1 event=BEGIN elapsedMs=11201
+L44 [12:40:36.359] PATH-DIAG: round=1 active=true stage=WIFI_REUSE attempt=1 event=END durationMs=4 elapsedMs=11205 outcome=NULL
+L45 [12:40:36.360] PATH-DIAG: round=1 active=true stage=WIFI_SPECIFIER attempt=1 event=BEGIN elapsedMs=11207
+L100 [12:40:49.005] WiFi: 已加入应用专属网络 "[TARGET_SSID]"（834 bindProcessToNetwork=true）——不影响其它应用联网
+L101 [12:40:49.005] PATH-DIAG: round=1 active=true stage=WIFI_SPECIFIER attempt=1 event=END durationMs=12646 elapsedMs=23853 outcome=RETURNED
+L1139 [12:40:58.779] >>> 拿到车机热点凭据（0x5703）——立即绑定 WiFi + 广播 _carplay-ctrl
+L152 [12:40:58.780] WIFI: 缓存的网络已失效或不再绑定——由新请求替换并重新加入
+L154 [12:40:58.799] PATH-DIAG: round=1 active=true stage=WIFI_REUSE attempt=2 event=BEGIN elapsedMs=33629
+L158 [12:40:58.840] WIFI: 缓存的网络已失效或不再绑定——由新请求替换并重新加入
+L159 [12:40:58.841] WIFI: "[TARGET_SSID]" 已有一次入网请求在跑——等它的结果，不重复请求（再发一次会把在跑的那次 release 掉）
+L160 [12:40:58.841] PATH-DIAG: round=1 active=true stage=WIFI_SHARED_WAIT attempt=1 event=BEGIN elapsedMs=33689
+L171 [12:41:01.902] PATH-DIAG: round=1 active=true stage=WIFI_REUSE attempt=2 event=END durationMs=3120 elapsedMs=36749 outcome=RETURNED
+L173 [12:41:01.903] PATH-DIAG: round=1 active=true stage=WIFI_SHARED_WAIT attempt=1 event=END durationMs=3062 elapsedMs=36751 outcome=true
+
+# Source: dumpsys-wifi.txt
+# SHA-256: 0d18d46c59bd6986c9f98827e0ead67f2c7fd1fe6c85b30e24c88cfb75eb84c3
+L41821 2026-11-13T12:40:56.550745 - startConnectivityScan: screenOn=true wifiState=disconnected scanImmediately=true wifiEnabled=true mAutoJoinEnabled=false mAutoJoinEnabledExternal=true mAutoJoinEnabledExternalSetByDeviceAdmin=false mPnoScanEnabledByFramework=true mEnablePnoScanAfterWifiToggle=true mSpecificNetworkRequestInProgress=true mTrustedConnectionAllowed=true isSufficiencyCheckEnabled=true isAssociatedNetworkSelectionEnabled=false noPotentialNetworkAvailable=false
+L41836 2026-11-13T12:40:59.098346 - startConnectivityScan: screenOn=true wifiState=disconnected scanImmediately=true wifiEnabled=true mAutoJoinEnabled=true mAutoJoinEnabledExternal=true mAutoJoinEnabledExternalSetByDeviceAdmin=false mPnoScanEnabledByFramework=true mEnablePnoScanAfterWifiToggle=true mSpecificNetworkRequestInProgress=false mTrustedConnectionAllowed=true isSufficiencyCheckEnabled=true isAssociatedNetworkSelectionEnabled=false noPotentialNetworkAvailable=false
+
+# Source: dumpsys-connmetrics.txt
+# SHA-256: b823706f64f845850a53e72a0de85233f18f22c50335a3a7b196aba31735048f
+L305 ConnectivityMetricsEvent(12:40:48.828, netId=834, transports={1}): NetworkEvent(NETWORK_CONNECTED, 0ms)
+L306 ConnectivityMetricsEvent(12:40:48.829, netId=834, transports={1}): NetworkEvent(NETWORK_FIRST_VALIDATION_SUCCESS, 0ms)
+L308 ConnectivityMetricsEvent(12:40:56.571, netId=834, transports={1}): NetworkEvent(NETWORK_DISCONNECTED, 0ms)
+L313 ConnectivityMetricsEvent(12:40:59.108, netId=835, transports={1}): NetworkEvent(NETWORK_DISCONNECTED, 0ms)
+L325 ConnectivityMetricsEvent(12:41:01.807, netId=836, transports={1}): NetworkEvent(NETWORK_CONNECTED, 0ms)
+L331 ConnectivityMetricsEvent(12:41:12.095, netId=836, transports={1}): ValidationProbeEvent(PROBE_HTTP:599 FIRST_VALIDATION, 10018ms)
+L333 ConnectivityMetricsEvent(12:41:12.102, netId=836, transports={1}): ValidationProbeEvent(PROBE_HTTPS:599 FIRST_VALIDATION, 10012ms)
+L336 ConnectivityMetricsEvent(12:41:12.119, netId=836, transports={1}): NetworkEvent(NETWORK_VALIDATION_FAILED, 0ms)
+L347 ConnectivityMetricsEvent(12:41:23.295, netId=836, transports={1}): NetworkEvent(NETWORK_VALIDATION_FAILED, 0ms)
+L358 ConnectivityMetricsEvent(12:41:35.712, netId=836, transports={1}): NetworkEvent(NETWORK_VALIDATION_FAILED, 0ms)
+L450 ConnectivityMetricsEvent(12:43:46.909, netId=836, transports={1}): NetworkEvent(NETWORK_DISCONNECTED, 0ms)
+
+# Source: dumpsys-connectivity.txt
+# SHA-256: d9e4ed43b207900a7d990ffb867246ee28a2c644c8de28f845c498bc579912d9
+L676 Bad Wi-Fi avoidance: false
+L677   Config restrict:               true
+L678   Actively prefer bad wifi:      true
+L679   Avoid bad wifi setting:        prompt
+L680   Actively prefer bad wifi conf: force true
+L681
+L682   Network overrides:
