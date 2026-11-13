@@ -88,9 +88,12 @@ object DarkMessageDialog {
         if (cancelable) {
             dialog.setOnCancelListener { onCancel?.invoke() }
         }
-        dialog.setOnShowListener {
-            PanelWindow.apply(dialog, activity)
-        }
+        // onShow is dispatched after the window is attached: resizing there can
+        // expose a default-width frame before reflowing and recentering the panel.
+        // Install AppCompat's content first, then set final window attributes
+        // before show() attaches it. Rotation is still handled by PanelWindow.
+        dialog.create()
+        PanelWindow.apply(dialog, activity)
         dialog.show()
         return dialog
     }
