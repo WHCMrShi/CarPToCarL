@@ -1,18 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 图标前景：圆角屏幕 + 播放三角（车机投屏意象） -->
+<!-- Flow C: white C and theme-red transfer arrow, inset for adaptive icon masks. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-
-    <path
-        android:pathData="M26,34 A8,8 0 0 1 34,26 L74,26 A8,8 0 0 1 82,34 L82,74 A8,8 0 0 1 74,82 L34,82 A8,8 0 0 1 26,74 Z"
-        android:strokeColor="#7EE3A0"
-        android:strokeWidth="4"
-        android:fillColor="#00000000" />
-
-    <path
-        android:pathData="M47,43 L67,54 L47,65 Z"
-        android:fillColor="#7EE3A0" />
+    android:viewportWidth="128"
+    android:viewportHeight="128">
+    <group android:pivotX="64" android:pivotY="64"
+        android:scaleX="0.85" android:scaleY="0.85">
+        <path
+            android:pathData="M91,39 C63,15 28,33 28,64 C28,95 62,112 88,91"
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="9"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M65,43 L91,64 L65,85 M46,64 L91,64"
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="@color/q4_action_accent"
+            android:strokeWidth="8"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
 </vector>

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#0D1117</color>
+    <color name="ic_launcher_background">#141414</color>
 
     <!-- 手机界面：中性层级，少量 Audi Progressive Red 操作点缀。 -->
     <color name="m3_surface">#F2F2F2</color>
