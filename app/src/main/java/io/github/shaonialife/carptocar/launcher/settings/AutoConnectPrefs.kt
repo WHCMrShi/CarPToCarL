@@ -11,7 +11,7 @@ import android.content.Context
  * 在「连接准备」卡里关掉即可，关掉后仍需手动点按钮。
  *
  * 只在**冷启动**（`savedInstanceState == null`）时触发一次，
- * 旋转 / 重建不会重复发起；免责声明未接受时先暂缓，接受后再续上。
+ * 旋转 / 重建不会重复发起。
  */
 object AutoConnectPrefs {
     const val DEFAULT_ENABLED = true

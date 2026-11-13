@@ -40,9 +40,6 @@ import io.github.shaonialife.carptocar.input.TouchRouter
 import io.github.shaonialife.carptocar.launcher.VirtualLauncher
 import io.github.shaonialife.carptocar.launcher.settings.AppOrientationCompat
 import io.github.shaonialife.carptocar.launcher.settings.AutoConnectPrefs
-import io.github.shaonialife.carptocar.legal.DisclaimerDialog
-import io.github.shaonialife.carptocar.legal.DisclaimerPrefs
-import io.github.shaonialife.carptocar.legal.needsDisclaimerAtLaunch
 import io.github.shaonialife.carptocar.ui.DarkMessageDialog
 import io.github.shaonialife.carptocar.ui.PanelWindow
 import io.github.shaonialife.carptocar.ui.ScreenDimmer
@@ -73,7 +70,6 @@ class MainActivity : AppCompatActivity() {
     /** 连接中的默认副标题（无阶段提示时）。 */
     private companion object {
         const val DEFAULT_CONNECTING_HINT = "正在准备连接…"
-        const val KEY_DISCLAIMER_DEADLINE = "disclaimer_deadline"
 
         /** 本机蓝牙地址未填写：英雄卡副标题与输入框下方提示共用同一句。 */
         const val HINT_MAC_MISSING = "请先保存本机蓝牙地址"
@@ -119,13 +115,8 @@ class MainActivity : AppCompatActivity() {
     // 英雄卡实时帧率：1s 轮询对 VideoSender 已发帧计数取差值
     private var lastSentFrames = 0L
 
-    /** 免责声明倒计时截止时刻（elapsedRealtime；旋转重建后透传，不重新计时）。 */
-    private var disclaimerDeadlineAt = 0L
-
-    private var activeDisclaimer: androidx.appcompat.app.AlertDialog? = null
-
     /**
-     * 冷启动自动连接请求挂起中：等前置条件齐备（免责声明已接受、启动残留扫描已结束、
+     * 冷启动自动连接请求挂起中：等前置条件齐备（启动残留扫描已结束、
      * 英雄卡空闲）才真正发起。旋转/重建不会置位——[maybeAutoConnect] 全程幂等。
      */
     private var autoConnectRequested = false
@@ -364,7 +355,6 @@ class MainActivity : AppCompatActivity() {
      * 启动后自动连接（默认开启，开关在「连接准备」卡里）。
      *
      * 满足全部前置条件才发起，任一不满足就**原地返回、保留请求**，由对应时机再调一次：
-     * - 免责声明未接受 → 等 [showDisclaimer] 的 onAccept 回调续上；
      * - 启动残留扫描进行中 / 有残留待确认 → 等 [detectResidualDisplays] 收尾续上
      *   （否则「是否清理残留屏」弹窗会和连接流程的热点确认弹窗抢焦点）；
      * - 已在连接/已连接 → 不重复发起。
@@ -379,7 +369,6 @@ class MainActivity : AppCompatActivity() {
             log("AUTOCONNECT: 已关闭——等待手动点「启动连接」")
             return
         }
-        if (!DisclaimerPrefs.hasAcceptedCurrent(this)) return
         if (startupCheckRunning || pendingResidualDisplays != null) return
         if (SessionController.isSessionRunning() || SessionController.sessionStarting.get()) return
         if (heroState != HeroState.IDLE) return
@@ -690,8 +679,6 @@ class MainActivity : AppCompatActivity() {
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
                 .cancel(CarApproachReceiver.BLOCKED_NOTIFICATION_ID)
         }
-        // 旋转/重建：沿用原倒计时截止时刻（onResume 据此续弹）
-        disclaimerDeadlineAt = savedInstanceState?.getLong(KEY_DISCLAIMER_DEADLINE, 0L) ?: 0L
 
         heroStateText = findViewById(R.id.heroStateText)
         btnResidualCleanup = findViewById(R.id.btnResidualCleanup)
@@ -813,18 +800,6 @@ class MainActivity : AppCompatActivity() {
             if (!isFinishing && !isDestroyed) applyContentLayout()
         }
 
-        // 免责声明：未接受当前版本时强制弹（不可取消、需倒计时 + 滑到底）。
-        // savedState 非空（旋转/重建）时复用原截止时刻，不重新计时。
-        val needsDisclaimer =
-            savedInstanceState == null &&
-                needsDisclaimerAtLaunch(
-                    DisclaimerPrefs.acceptedVersion(this),
-                    DisclaimerPrefs.CURRENT_VERSION,
-                )
-        if (needsDisclaimer) {
-            showDisclaimer(requireAcceptance = true)
-        }
-
         // 启动后自动连接：只在**冷启动**发起（旋转/重建不重复）。
         // 真正发起由 maybeAutoConnect 判定——前置条件不齐时它会等下一次时机。
         // 「靠近车机」拉起的这一轮即使 Activity 正在后台重建，也要重新武装一次。
@@ -854,31 +829,6 @@ class MainActivity : AppCompatActivity() {
             }
             mainHandler.postDelayed({ maybeAutoConnect() }, 700L)
         }
-    }
-
-    /** 底部「免责声明」入口：只读重看（不限制时长、不要求滑到底）。 */
-    private fun showDisclaimer(requireAcceptance: Boolean) {
-        if (activeDisclaimer?.isShowing == true) return
-        if (requireAcceptance && disclaimerDeadlineAt == 0L) {
-            disclaimerDeadlineAt = SystemClock.elapsedRealtime() + DisclaimerDialog.COUNTDOWN_MS
-        }
-        activeDisclaimer =
-            DisclaimerDialog
-                .show(
-                    activity = this,
-                    requireAcceptance = requireAcceptance,
-                    deadlineAt = disclaimerDeadlineAt,
-                    onDecline = {
-                        // 放弃使用：结束本任务并退出（不用 System.exit，保留正常生命周期收尾）。
-                        // 若已有会话在跑，先正常断开，避免留下无人管理的推流与虚拟屏。
-                        autoConnectRequested = false
-                        runCatching { SessionController.disconnect(this) }
-                        finishAndRemoveTask()
-                    },
-                    // 接受后再续上冷启动自动连接（未接受前不能发起任何连接）
-                    onAccept = { mainHandler.postDelayed({ maybeAutoConnect() }, 400L) },
-                    onDismiss = { activeDisclaimer = null },
-                )
     }
 
     /** onCreate 的 UI 初始化尾部：开关/按钮/折叠卡（会话逻辑不变，仅挂新界面）。 */
@@ -930,11 +880,11 @@ class MainActivity : AppCompatActivity() {
 
 
         // 开关默认就是开的，用户可能从没碰过它——进界面时按 7 天节流提醒一次。
-        // 延后 3 秒且要求「免责声明已接受」，避免和首次启动的免责声明弹窗叠在一起。
+        // 延后 3 秒提示，避免打断首页首次展示。
         if (switchCarApproach.isChecked && TargetDevicePrefs.get(this) != null) {
             mainHandler.postDelayed(
                 {
-                    if (!isFinishing && !isDestroyed && DisclaimerPrefs.hasAcceptedCurrent(this)) {
+                    if (!isFinishing && !isDestroyed) {
                         ensureBatteryExempt()
                         // 两半缺一不可：电池优化保「收得到广播」，悬浮窗保「起得来界面」
                         ensureOverlayPermission()
@@ -1878,7 +1828,7 @@ class MainActivity : AppCompatActivity() {
                             "可在「文件管理 → 下载 → CarPToCarL」中找到，也可直接分享给开发者排查问题。",
                     actions =
                         listOf(
-                            DarkMessageDialog.Action("打开文件", DarkMessageDialog.Emphasis.PRIMARY) {
+                            DarkMessageDialog.Action("打开文件") {
                                 openExportedFile(result.uri, result.displayPath)
                             },
                             DarkMessageDialog.Action("打开文件夹") {
@@ -2258,20 +2208,11 @@ class MainActivity : AppCompatActivity() {
         mainHandler.post(heroTick)
         // 从系统设置/别的界面回来：门禁提示与按钮状态重新对一次（地址可能已补填）
         refreshMacGate()
-        // 旋转/重建后尚未接受：用原截止时刻续弹（不重新等 10 秒）
-        if (needsDisclaimerAtLaunch(
-                DisclaimerPrefs.acceptedVersion(this),
-                DisclaimerPrefs.CURRENT_VERSION,
-            ) &&
-            activeDisclaimer?.isShowing != true
-        ) {
-            showDisclaimer(requireAcceptance = true)
-        }
+
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putLong(KEY_DISCLAIMER_DEADLINE, disclaimerDeadlineAt)
         outState.putBoolean("macEditing", macEditing)
         if (macEditing && ::macInput.isInitialized) outState.putString("macDraft", macInput.text.toString())
     }
@@ -2415,9 +2356,6 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         cancelHold?.cancel()
         super.onDestroy()
-        // 强制声明不得随 Activity 销毁残留窗口（旋转时 Activity 重建，onResume 会续弹）
-        runCatching { activeDisclaimer?.dismiss() }
-        activeDisclaimer = null
         // 蓝牙扫描/配对监听随界面销毁收尾：Activity 退出后不再需要（也避免广播泄漏）
         runCatching { stopTargetScan() }
         targetPicker = null

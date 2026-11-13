@@ -14,7 +14,7 @@ import java.lang.ref.WeakReference
  * 谁在显示由 [register] 登记（弱引用，不持有泄漏；失效条目在下次重算时清掉）。
  */
 object PanelWindow {
-    /** 面板宽度占屏宽比例（与目标车机选择、免责声明一致）。 */
+    /** 面板宽度占屏宽比例（与目标车机选择一致）。 */
     const val WIDTH_FRACTION = 0.92f
 
     private data class Entry(

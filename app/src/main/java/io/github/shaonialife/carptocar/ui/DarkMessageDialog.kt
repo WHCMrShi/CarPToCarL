@@ -16,7 +16,7 @@ import io.github.shaonialife.carptocar.R
  * **为什么不用裸 `AlertDialog.Builder.setMessage`**：系统对话框在
  * `Theme.AppCompat.DayNight` 下是浅色主题，与本应用全深色 UI 割裂
  * （2026-10-18 真机截图暴露）。这里自绘 `bg_dialog_panel` 面板，
- * 与免责声明 / 选择目标车机两个弹窗保持一致。
+ * 与选择目标车机弹窗保持一致。
  *
  * 布局规则：1~2 个操作横排靠右；3 个及以上竖排整宽（窄屏横排会挤爆）。
  */
@@ -133,11 +133,10 @@ object DarkMessageDialog {
                 }
 
                 Emphasis.TEXT -> {
-                    // 竖排时次要按钮也上胶囊底：否则只有主按钮是实心整宽胶囊，
-                    // 另两项是裸文字，视觉权重完全失衡（真机截图暴露）
+                    // 竖排操作采用独立底色，与日夜主题的弹窗面板均保持区分。
                     background =
                         activity.getDrawable(
-                            if (vertical) R.drawable.bg_btn_tonal else R.drawable.bg_tbtn,
+                            if (vertical) R.drawable.bg_dialog_action else R.drawable.bg_tbtn,
                         )
                     setTextColor(
                         activity.getColor(

@@ -44,8 +44,6 @@ android {
         testInstrumentationRunner = "io.github.shaonialife.carptocar.media.ArtworkEncodingInstrumentation"
         versionCode = appVersionCode
         versionName = appVersionName
-        // Q4 实车测试分支：以后构建也跳过首次启动声明，不写入虚假的用户接受记录。
-        buildConfigField("boolean", "SKIP_STARTUP_DISCLAIMER", "true")
         val sourceRevision = providers.environmentVariable("CARP_BUILD_REVISION").orElse("unknown").get()
             .replace(Regex("[^a-zA-Z0-9_-]"), "_").take(80)
         buildConfigField("String", "SOURCE_REVISION", "\"$sourceRevision\"")

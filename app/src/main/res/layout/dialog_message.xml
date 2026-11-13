@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 通用深色消息弹窗（标题 + 可滚动正文 + 右侧主操作）。
-     与「免责声明」「选择目标车机」同一套视觉：bg_dialog_panel + M3 令牌 + 胶囊按钮。
+     与「选择目标车机」同一套视觉：bg_dialog_panel + M3 令牌 + 胶囊按钮。
      系统 AlertDialog 默认浅色主题与本应用深色 UI 割裂（2026-10-18 真机暴露），
      需要提示框时统一走 DarkMessageDialog 而不是裸 AlertDialog。 -->
 <LinearLayout
