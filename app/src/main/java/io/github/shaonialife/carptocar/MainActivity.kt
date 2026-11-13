@@ -1141,7 +1141,7 @@ class MainActivity : AppCompatActivity() {
         }
         // 连接中：副标题跟随阶段提示（英雄卡内即可见，不必划到底部看日志）
         if (s == HeroState.CONNECTING) {
-            heroSubline.text = SessionController.phaseHint ?: DEFAULT_CONNECTING_HINT
+            heroSubline.text = (SessionController.phaseHint ?: DEFAULT_CONNECTING_HINT).trimEnd('…', '.', ' ')
         }
         // 启动残留屏检查进行中：状态与副标题临时切换为检查提示
         if (s == HeroState.IDLE && startupCheckRunning) {
@@ -1246,7 +1246,7 @@ class MainActivity : AppCompatActivity() {
                 )
             }
             HeroState.CONNECTING -> {
-                heroSubline.text = SessionController.phaseHint ?: DEFAULT_CONNECTING_HINT
+                heroSubline.text = (SessionController.phaseHint ?: DEFAULT_CONNECTING_HINT).trimEnd('…', '.', ' ')
                 styleCta(R.drawable.bg_cta_fill, R.color.m3_on_primary, R.drawable.ic_close, "长按取消连接")
             }
             HeroState.CONNECTED -> {
@@ -1451,8 +1451,8 @@ class MainActivity : AppCompatActivity() {
             addView(
                 inflateTargetRow(
                     parent = this,
-                    name = "自动（不指定目标）",
-                    address = "逐个尝试 · 接受任一设备连入",
+                    name = "自动",
+                    address = "轮询已配对设备",
                     action = if (current == null) "当前" else "选择",
                     highlighted = current == null,
                     iconTint = R.color.m3_outline,
@@ -1462,7 +1462,7 @@ class MainActivity : AppCompatActivity() {
                     log("TARGET: 已取消目标指定——出站逐个尝试已配对设备，入站接受任一设备")
                     // 先关弹窗再提示（snackbar 在 Activity 窗口内，会被弹窗盖住）
                     targetPicker?.dismiss()
-                    snack("已切换为自动（不指定目标）")
+                    snack("已切换为自动")
                 },
             )
         }
@@ -1487,7 +1487,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 单个设备行（两组共用；highlighted 时名称用主色）。 */
+    /** 单个设备行（两组共用；选中时红底白字）。 */
     private fun inflateTargetRow(
         parent: android.view.ViewGroup,
         name: String,
@@ -1505,24 +1505,20 @@ class MainActivity : AppCompatActivity() {
             )
         row.findViewById<TextView>(R.id.devName).apply {
             text = name
-            setTextColor(getColor(if (highlighted) R.color.q4_action_accent else R.color.m3_on_surface))
+            setTextColor(getColor(if (highlighted) android.R.color.white else R.color.m3_on_surface))
         }
-        row.findViewById<TextView>(R.id.devAddr).text = address
+        row.findViewById<TextView>(R.id.devAddr).apply {
+            text = address
+            setTextColor(getColor(if (highlighted) android.R.color.white else R.color.m3_mono_dim))
+        }
         row.findViewById<TextView>(R.id.devAction).apply {
-            // 当前项使用红色描边与对勾，避免只靠颜色区分选择状态。
-            if (highlighted) {
-                text = "✓ $action"
-                setTextColor(getColor(R.color.q4_action_accent))
-                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_tbtn)
-            } else {
-                text = action
-                setTextColor(getColor(R.color.m3_primary))
-                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_tbtn)
-            }
-            // 实心/描边切换后 padding 由 drawable 决定，不需要重设
-            setPadding(paddingLeft, paddingTop, paddingRight, paddingBottom)
+            text = action
+            setTextColor(getColor(if (highlighted) android.R.color.white else R.color.m3_primary))
+            background = if (highlighted) null else ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_tbtn)
         }
-        row.findViewById<ImageView>(R.id.devIcon).setColorFilter(getColor(iconTint))
+        row.findViewById<ImageView>(R.id.devIcon).setColorFilter(
+            getColor(if (highlighted) android.R.color.white else iconTint),
+        )
         row.setOnClickListener { onClick() }
         return row
     }

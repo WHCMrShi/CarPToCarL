@@ -20,13 +20,6 @@
         android:textColor="@color/m3_on_surface"
         android:textSize="17sp"
         android:textStyle="bold" />
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:text="已配对设备可直接选用；点击未配对的设备会发起系统蓝牙配对"
-        android:textColor="@color/m3_on_var"
-        android:textSize="14sp" />
     <ScrollView
         android:id="@+id/pickerScroll"
         android:layout_width="match_parent"

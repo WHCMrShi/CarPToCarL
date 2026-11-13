@@ -425,6 +425,7 @@
                                                 android:text="@string/clear_car_wifi_memory"
                                                 android:textColor="@color/m3_primary"
                                                 android:textSize="14sp"
+                                                android:textStyle="bold"
                                                 android:minHeight="48dp"
                                                 android:gravity="center"
                                                 android:focusable="true" />
