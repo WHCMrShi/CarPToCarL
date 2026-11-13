@@ -1815,17 +1815,16 @@ class MainActivity : AppCompatActivity() {
                 log("日志已导出（${scope.label}）: ${result.displayPath}（${result.bytes} 字节）")
                 val scopeNote =
                     if (scope == LogExporter.Scope.CURRENT_SESSION) {
-                        "仅含本次 App 启动之后的日志。需要更早的历史，请长按导出按钮。"
+                        "主日志仅含本次启动；可能附带历史异常记录。长按可导出留存历史。"
                     } else {
-                        "包含历史日志（文件上限 2MB，超出时只保留最近一段）。"
+                        "包含现存主日志及诊断记录；按容量轮转，无固定天数。"
                     }
                 DarkMessageDialog.show(
                     this,
                     title = "日志已导出",
                     message =
-                        "文件位置：\n${result.displayPath}\n\n" +
-                            "大小：${formatBytes(result.bytes)}\n$scopeNote\n\n" +
-                            "可在「文件管理 → 下载 → CarPToCarL」中找到，也可直接分享给开发者排查问题。",
+                        "${result.displayPath}\n\n" +
+                            "大小：${formatBytes(result.bytes)}\n$scopeNote",
                     actions =
                         listOf(
                             DarkMessageDialog.Action("打开文件") {

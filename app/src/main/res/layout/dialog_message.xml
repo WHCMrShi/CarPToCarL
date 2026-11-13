@@ -13,7 +13,7 @@
     android:paddingStart="18dp"
     android:paddingTop="18dp"
     android:paddingEnd="18dp"
-    android:paddingBottom="14dp">
+    android:paddingBottom="18dp">
     <TextView
         android:id="@+id/msgTitle"
         android:layout_width="match_parent"
