@@ -1104,9 +1104,9 @@ class MainActivity : AppCompatActivity() {
     private fun applyHeroState(s: HeroState) {
         heroStateText.text =
             when (s) {
-                HeroState.IDLE -> "未连接"
-                HeroState.CONNECTING -> "正在连接"
-                HeroState.CONNECTED -> "已连接"
+                HeroState.IDLE -> getString(R.string.connection_status_idle)
+                HeroState.CONNECTING -> getString(R.string.connection_status_connecting)
+                HeroState.CONNECTED -> getString(R.string.connection_status_connected)
             }
 
         when (s) {

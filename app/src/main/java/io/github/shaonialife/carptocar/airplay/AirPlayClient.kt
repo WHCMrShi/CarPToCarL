@@ -120,8 +120,14 @@ class AirPlayClient(
         val scope: ConnectionResources,
     ) {
         val attempted = java.util.concurrent.atomic.AtomicBoolean()
+        var accepted = false // Read/written under connectionLock; never means actual BT disconnection.
     }
     @Volatile private var bluetoothDisableSession: BluetoothDisableSession? = null
+
+    internal val bluetoothDisableAccepted: Boolean get() = synchronized(connectionLock) {
+        val session = bluetoothDisableSession
+        session != null && session.accepted && resources === session.scope && setupOwnerAlive(session.generation)
+    }
 
     private fun setupOwnerAlive(generation: Long): Boolean = synchronized(connectionLock) {
         lifecycleGeneration == generation && controlConnectionAlive
@@ -3166,6 +3172,11 @@ class AirPlayClient(
                     contentType = "application/x-apple-binary-plist", expectedScope = session.scope,
                 )
                 val accepted = status.split(' ').getOrNull(1)?.toIntOrNull() == 200
+                synchronized(connectionLock) {
+                    if (bluetoothDisableSession === session && resources === session.scope && setupOwnerAlive(session.generation)) {
+                        session.accepted = accepted
+                    }
+                }
                 log("BT-DISABLE: response generation=${session.generation} accepted=$accepted status=[$status]; profile/ACL disconnection unconfirmed")
             } catch (error: IOException) {
                 log("BT-DISABLE: request failed generation=${session.generation} reason=${error.message}; no retry")

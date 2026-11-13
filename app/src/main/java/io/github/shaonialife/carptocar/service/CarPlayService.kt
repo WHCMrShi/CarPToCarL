@@ -340,7 +340,8 @@ class CarPlayService : Service() {
         val connecting = SessionController.connectionRequested || SessionController.sessionStarting.get()
         // 空闲监听仍用普通通知；只为正在进行的连接会话申请 Live Updates。
         return if (streaming || connecting) {
-            LiveUpdateNotification.requestPromotion(this, notification, if (streaming) "已连接" else "连接中")
+            val shortText = getString(if (streaming) R.string.connection_status_connected else R.string.connection_status_connecting)
+            LiveUpdateNotification.requestPromotion(this, notification, shortText)
         } else {
             notification
         }

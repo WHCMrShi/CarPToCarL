@@ -30,6 +30,7 @@ class BtLinkOwnership(private val clock: () -> Long) {
         val permitsDeviceDisconnect: Boolean get() = synchronized(this@BtLinkOwnership) { isCurrent && active == null }
     }
     @Synchronized internal fun observe() = Observation(sequence, active)
+    @Synchronized internal fun activeToken(): Token? = active
 
     @Synchronized fun claim(direction: String): Token? = claimObserved(direction, null)
     @Synchronized internal fun claimObserved(direction: String, observation: Observation?): Token? {

@@ -1,6 +1,8 @@
 package io.github.shaonialife.carptocar.airplay
 
 import io.github.shaonialife.carptocar.iap2.Iap2SenderSession
+import io.github.shaonialife.carptocar.bt.BtLinkOwnership
+import io.github.shaonialife.carptocar.bt.BtLinkRecovery
 import io.github.shaonialife.carptocar.util.ConnectionResources
 import io.github.shaonialife.carptocar.util.DeviceIdentity
 import java.net.ServerSocket
@@ -18,11 +20,13 @@ class DisableBluetoothTest {
         val logs = Collections.synchronizedList(mutableListOf<String>())
         val responseLogged = CountDownLatch(1)
         val requestLogged = CountDownLatch(1)
+        val requestFailed = CountDownLatch(1)
         val client = AirPlayClient(
             Iap2SenderSession.CarPlayEndpoint("test", "", 0, 0, server.localPort, null, null, null, listOf("127.0.0.1")),
             { logs += it
                 if (it.startsWith("BT-DISABLE: response")) responseLogged.countDown()
                 if (it.startsWith("BT-DISABLE: request generation")) requestLogged.countDown()
+                if (it.startsWith("BT-DISABLE: request failed")) requestFailed.countDown()
             },
             requestClock = { System.nanoTime() / 1_000_000 },
         )
@@ -69,6 +73,7 @@ class DisableBluetoothTest {
         val session = f.session()
         f.client.disableBluetoothAfterActivation(true, true)
         val (head, command) = f.request()
+        assertFalse(f.client.bluetoothDisableAccepted)
         assertTrue(head.startsWith("POST /command RTSP/1.0\r\n"))
         assertTrue(head.contains("Content-Type: application/x-apple-binary-plist"))
         assertEquals(setOf("type", "params"), command.keys)
@@ -79,6 +84,7 @@ class DisableBluetoothTest {
         assertNotNull("receiver must be able to read command parameters", params)
         assertEquals(mapOf("deviceID" to session.deviceId), params)
         f.respond(head)
+        assertTrue(f.client.bluetoothDisableAccepted)
         repeat(3) { f.client.disableBluetoothAfterActivation(true, true) }
         f.assertNoRequest()
         assertTrue(f.logs.any { it.contains("accepted=true") && it.contains("disconnection unconfirmed") })
@@ -89,6 +95,7 @@ class DisableBluetoothTest {
         f.client.disableBluetoothAfterActivation(true, true)
         val (head, _) = f.request()
         f.respond(head, "422 Unprocessable Entity")
+        assertFalse(f.client.bluetoothDisableAccepted)
         f.client.disableBluetoothAfterActivation(true, true)
         f.assertNoRequest()
         assertTrue(f.logs.any { it.contains("accepted=false") })
@@ -99,6 +106,7 @@ class DisableBluetoothTest {
         val session = f.session()
         f.client.disableBluetoothAfterActivation(false, true)
         f.client.disableBluetoothAfterActivation(true, false)
+        assertFalse(f.client.bluetoothDisableAccepted)
         assertFalse(session.attempted.get())
         f.assertNoRequest()
         f.client.disableBluetoothAfterActivation(true, true)
@@ -139,5 +147,64 @@ class DisableBluetoothTest {
             f.peer = f.connect()
         }
         f.assertNoRequest()
+    }
+
+    @Test fun acceptedStateExpiresWhenControlConnectionCloses() = Fixture().use { f ->
+        f.session()
+        f.client.disableBluetoothAfterActivation(true, true)
+        f.respond(f.request().first)
+        assertTrue(f.client.bluetoothDisableAccepted)
+        f.client.close()
+        assertFalse(f.client.bluetoothDisableAccepted)
+        f.peer.close()
+        f.peer = f.connect()
+        f.session()
+        assertFalse(f.client.bluetoothDisableAccepted)
+    }
+
+    @Test fun lateResponseCannotAcceptReplacementSetupOnSameConnection() = Fixture().use { f ->
+        f.session()
+        f.client.disableBluetoothAfterActivation(true, true)
+        val (head, _) = f.request()
+        f.session()
+        f.respond(head)
+        assertFalse(f.client.bluetoothDisableAccepted)
+    }
+
+    @Test fun controlFailureDoesNotAcceptHandoff() = Fixture().use { f ->
+        f.session()
+        f.client.disableBluetoothAfterActivation(true, true)
+        f.request()
+        f.peer.close()
+        assertTrue(f.requestFailed.await(3, TimeUnit.SECONDS))
+        assertFalse(f.client.bluetoothDisableAccepted)
+    }
+
+    @Test fun missingResponseTimesOutWithoutAcceptingOrRetrying() = Fixture().use { f ->
+        f.session()
+        f.client.disableBluetoothAfterActivation(true, true)
+        f.request()
+        assertTrue(f.requestFailed.await(12, TimeUnit.SECONDS))
+        assertTrue(f.logs.any { it.startsWith("BT-DISABLE: request failed") && it.contains("RTSP 超时") })
+        assertFalse(f.client.bluetoothDisableAccepted)
+        f.client.disableBluetoothAfterActivation(true, true)
+        f.assertNoRequest()
+    }
+
+    @Test fun bluetoothCloseBeforeRealResponseStopsRecoveryAfter200Only() = Fixture().use { f ->
+        val links = BtLinkOwnership { 1_000L }
+        val recovery = BtLinkRecovery({ 1_000L }, 180_000L)
+        val owner = links.claim("outbound")!!
+        recovery.expectHandoff(owner) { f.client.bluetoothDisableAccepted }
+        f.session()
+        f.client.disableBluetoothAfterActivation(true, true)
+        val (head, _) = f.request()
+        owner.finish()
+        recovery.noteLost("car", owner)
+        assertEquals("car", recovery.target(true))
+        f.respond(head)
+        assertNull(recovery.target(true))
+        f.client.close()
+        assertEquals("car", recovery.target(true))
     }
 }

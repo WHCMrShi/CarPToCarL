@@ -2155,7 +2155,7 @@ object SessionController {
             // 本轮压根没拿到过凭据（0x5703 与 0x4301 都没到 / 用户手动连的）：
             // 没有密码就发不出入网请求，只能提示
             appendLog("WIFI: 本轮没有热点凭据（0x5703/0x4301 都未到）——无法自动重绑")
-            uiHintSink?.invoke("车机热点 \"$label\" 已断开——请重新启动连接")
+            uiHintSink?.invoke("车机热点已断开，请重新连接")
             return
         }
         if (!sessionWanted) {
@@ -2170,7 +2170,7 @@ object SessionController {
             }
             lastWifiRebindAt = now
         }
-        uiHintSink?.invoke("车机热点 \"$label\" 已断开——正在自动重绑")
+        uiHintSink?.invoke("车机热点已断开，正在重新连接")
         Bg.run("wifi-rebind") {
             var retired = false
             work.runIfCurrent {
@@ -5241,8 +5241,18 @@ object SessionController {
                                         )
                                     }
                                 }
-                                // Minimal protocol experiment: user starts CarLife beforehand; no source gate.
+                                // Send once after activation; no CarLife gate. Recovery follows the command result.
                                 if (!attemptCancelled() && currentClient === client) {
+                                    val handoffWork = connectionWork.capture()
+                                    val handoffSetup = setupWork.capture()
+                                    BtSessionGate.links.activeToken()?.let { owner ->
+                                        // Q4 15:23:47: command 200 -> BT EOF -> live Wi-Fi CarPlay.
+                                        // Register before sending, but suppress only after this session's 200.
+                                        BtSessionGate.expectBluetoothHandoff(owner) {
+                                            handoffWork.isCurrent && handoffSetup.isCurrent && !connectCancelled &&
+                                                currentClient === client && client.bluetoothDisableAccepted && client.controlSessionReady
+                                        }
+                                    }
                                     client.disableBluetoothAfterActivation(activationRecorded, client.controlSessionReady)
                                 }
                                 // RECORD 成功 = 会话活着。此刻丢弃报文缓冲：用户要的是

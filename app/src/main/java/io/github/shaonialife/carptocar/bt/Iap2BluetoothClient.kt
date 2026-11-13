@@ -375,15 +375,17 @@ class Iap2BluetoothClient(
             if (!BtSessionGate.sessionActive && BtSessionGate.linkLostAt != 0L) {
                 BtSessionGate.clearLinkLost()
             }
-            val recoveryPeers = BtSessionGate.linkRecoveryTarget()
+            val recovery = BtSessionGate.linkRecoveryDecision()
+            val recoveryPeers = recovery.target
             if (BtSessionGate.inboundActive || (BtSessionGate.sessionActive && recoveryPeers == null)) {
-                // 走到这里且还挂着「掉线登记」的，只可能是恢复窗口已过（linkRecoveryTarget 返回 null）
-                if (BtSessionGate.sessionActive && BtSessionGate.linkLostPeerAddress != null) {
-                    BtSessionGate.clearLinkLost()
-                    log(
+                // A live accepted handoff pauses recovery without discarding its original deadline.
+                // Use one decision: a 200 or Wi-Fi close can arrive between separate state reads.
+                if (BtSessionGate.sessionActive && recovery.owner != null && !recovery.expectedHandoff) {
+                    BtSessionGate.clearLinkLost(recovery.owner)
+                    if (recovery.expired) log(
                         "BT-C: 控制链路 ${BtSessionGate.LINK_RECOVERY_WINDOW_MILLIS / 1000} 秒内没连回来" +
                             "——停止补连（CarPlay 画面/声音不受影响，下次整轮连接再试）",
-                    )
+                    ) else log("BT-C: retired recovery owner=${recovery.owner.id}; newer BT session owns the link")
                 }
                 failStreak = 0; passiveFailRounds = 0
                 sleepQuietly(2_000)
@@ -769,8 +771,10 @@ class Iap2BluetoothClient(
                 callbacks.closed(owner)
             }
             if (completed && running && generation.get() == epoch && !manualTeardown && BtSessionGate.sessionActive) {
-                BtSessionGate.noteLinkLost(peerAddress)
-                log(
+                BtSessionGate.noteLinkLost(peerAddress, owner)
+                if (BtSessionGate.expectedBluetoothHandoff()) {
+                    log("BT-C: expected handoff owner=${owner.id}; disableBluetooth accepted and Wi-Fi control live, BT recovery paused")
+                } else log(
                     "BT-C: CarPlay 会话仍在，但 iAP2 控制链路已断（${peerAddress ?: "地址未知"}）" +
                         "——只对它单独补连，最长 ${BtSessionGate.LINK_RECOVERY_WINDOW_MILLIS / 1000} 秒",
                 )
@@ -869,6 +873,18 @@ object BtSessionGate {
      */
     @Volatile
     var sessionActive: Boolean = false
+        set(value) {
+            field = value
+            if (!value) linkRecovery.reset()
+        }
+
+    private val linkRecovery = BtLinkRecovery({ android.os.SystemClock.uptimeMillis() }, LINK_RECOVERY_WINDOW_MILLIS)
+
+    internal fun expectBluetoothHandoff(owner: BtLinkOwnership.Token, acceptedAndLive: () -> Boolean) =
+        linkRecovery.expectHandoff(owner, acceptedAndLive)
+
+    internal fun expectedBluetoothHandoff(): Boolean = linkRecovery.expectedHandoff()
+    internal fun linkRecoveryDecision(): BtLinkRecovery.Decision = linkRecovery.decision(sessionActive)
 
     /**
      * 「CarPlay 在跑、但我们自己的 iAP2 控制链路掉了」——掉线那一台的地址与时刻。
@@ -882,12 +898,10 @@ object BtSessionGate {
      * 记下掉线的那台：出站循环在 CarPlay 期间**只对它**重连，连上即清；超过
      * [LINK_RECOVERY_WINDOW_MILLIS] 还没连回来就认输（打一行日志，回到静音）。
      */
-    @Volatile
-    var linkLostPeerAddress: String? = null
+    val linkLostPeerAddress: String? get() = linkRecovery.address
 
     /** 掉线时刻（uptimeMillis，0 = 没有待恢复的链路）。 */
-    @Volatile
-    var linkLostAt: Long = 0L
+    val linkLostAt: Long get() = linkRecovery.lostAt
 
     /** 单条控制链路的恢复窗口：超时后不再拨（CarPlay 本身不受影响）。 */
     const val LINK_RECOVERY_WINDOW_MILLIS = 180_000L
@@ -930,29 +944,15 @@ object BtSessionGate {
     }
 
     /** 记一次「控制链路掉线」，交给出站循环单独重连。 */
-    fun noteLinkLost(address: String?) {
-        if (address == null) return
-        linkLostPeerAddress = address
-        linkLostAt = android.os.SystemClock.uptimeMillis()
-    }
+    fun noteLinkLost(address: String?, owner: BtLinkOwnership.Token) = linkRecovery.noteLost(address, owner)
 
     /** 链路已恢复（或用户已停止）——清掉恢复任务。 */
-    fun clearLinkLost() {
-        linkLostPeerAddress = null
-        linkLostAt = 0L
-    }
+    fun clearLinkLost(owner: BtLinkOwnership.Token? = null) = linkRecovery.clearLoss(owner)
 
     /**
-     * 当前需要恢复的目标地址；null = 不需要（没有掉线 / CarPlay 已结束 / 已超窗）。
+     * 当前需要恢复的目标地址；null = 没有掉线、会话结束、owner退役、超窗或预期交接。
      *
      * CarPlay 会话结束时 [sessionActive] 会被 SessionController 清掉，这里跟着失效。
      */
-    fun linkRecoveryTarget(): String? {
-        if (!sessionActive) return null
-        val address = linkLostPeerAddress ?: return null
-        val at = linkLostAt
-        if (at == 0L) return null
-        if (android.os.SystemClock.uptimeMillis() - at > LINK_RECOVERY_WINDOW_MILLIS) return null
-        return address
-    }
+    fun linkRecoveryTarget(): String? = linkRecovery.target(sessionActive)
 }
