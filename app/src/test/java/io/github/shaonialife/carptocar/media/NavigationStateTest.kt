@@ -94,21 +94,21 @@ class NavigationStateTest {
     @Test fun durationFormattingAndBlankRoadAreSafe() {
         assertEquals("59:59", NavigationState.formatDrivingDuration(3599999))
         assertEquals("1:00:00", NavigationState.formatDrivingDuration(3600000))
-        assertEquals("1.0公里", NavigationState.formatDistance(1000))
+        assertEquals("1千米", NavigationState.formatDistance(1000))
         val state = started()
         state.receive(owner, event(1, road = " \t"), 0)
         assertEquals("   ", state.display(300).artist)
     }
-    @Test fun unmappedShowAndUpdateUseRoadWithoutChangingIconOrProgress() {
+    @Test fun unmappedShowAndUpdateUseNeutralLabelWithoutChangingIconOrProgress() {
         for (code in listOf(0, 25, 26, 27, 28) + (45..68) + listOf(-1, 77, 999)) {
             val state = NavigationState().apply { begin(owner) }
             state.receive(owner, event(1, code, "隧道道路", 1000, byteArrayOf(1)), 0)
-            assertEquals("1.0公里 隧道道路", state.display(300).nowPlaying().title)
+            assertEquals("1千米 途径", state.display(300).nowPlaying().title)
             val updatedIcon = byteArrayOf(2, 3)
             state.receive(owner, event(2, code, "下一道路", 500, updatedIcon), 1000)
             val view = state.display(1300)
             val media = view.nowPlaying()
-            assertEquals("500米 下一道路", media.title)
+            assertEquals("500米 途径", media.title)
             assertEquals("暂无音乐", media.album)
             assertEquals("下一道路", media.artist)
             assertEquals(0, media.durationMs)
@@ -117,11 +117,11 @@ class NavigationStateTest {
         }
     }
 
-    @Test fun unmappedTitlePreservesUnnamedAndBlankRoadExactlyAsReceived() {
+    @Test fun unmappedTitleUsesNeutralLabelEvenWhenRoadIsUnnamedOrBlank() {
         for (road in listOf("无名道路", "", "   ", "  原始道路  ")) {
             val state = NavigationState().apply { begin(owner) }
             state.receive(owner, event(2, 25, road, 26), 0)
-            assertEquals("26米 $road", state.display(300).nowPlaying().title)
+            assertEquals("26米 途径", state.display(300).nowPlaying().title)
         }
     }
 
@@ -138,7 +138,7 @@ class NavigationStateTest {
         for ((code, text) in actions) {
             val state = NavigationState().apply { begin(owner) }
             state.receive(owner, event(1, code, "原始道路", 1000), 0)
-            assertEquals("code=$code", "1.0公里 $text", state.display(300).nowPlaying().title)
+            assertEquals("code=$code", "1千米 $text", state.display(300).nowPlaying().title)
             val icon = byteArrayOf(8, 9)
             state.receive(owner, event(2, code, "下一道路", 500, icon), 1000)
             val view = state.display(1300)

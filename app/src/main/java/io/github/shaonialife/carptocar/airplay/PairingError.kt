@@ -133,17 +133,16 @@ object PairingPolicy {
     ): String =
         when {
             code == PairingErrorCode.AUTHENTICATION && stage == PairingStage.PAIR_VERIFY ->
-                "车机不认这台手机的配对身份：到车机「已连接设备/手机列表」里删掉本机再重连，" +
-                    "或在本机「断开」后重新配对。在此之前只能用明文会话（无音频、无触摸）"
+                "请在车机中删除本机配对记录后重连"
             code == PairingErrorCode.AUTHENTICATION ->
-                "车机拒绝了本次配对：先试「已配对设备」快路径；仍失败就去车机侧删掉本机的配对记录"
+                "请尝试「已配对设备」或删除车机中的本机配对记录"
             code == PairingErrorCode.MAX_PEERS ->
-                "车机保存的设备已达上限：到车机上删掉一台旧设备后重连"
+                "请在车机中删除一台旧设备后重连"
             code == PairingErrorCode.MAX_TRIES ->
-                "车机的配对尝试次数已用尽：等它自己解除（通常几分钟），期间可继续用明文会话"
+                "配对次数已达上限，请稍后重试"
             code == PairingErrorCode.BACKOFF || code == PairingErrorCode.BUSY ->
-                "车机暂时不接受配对：已按退避重试，无需操作"
+                "车机暂忙，正在重试"
             else ->
-                "配对失败：车机上重新点一次本机图标；若持续失败请导出日志"
+                "请在车机上重新选择本机，仍失败请导出日志"
         }
 }

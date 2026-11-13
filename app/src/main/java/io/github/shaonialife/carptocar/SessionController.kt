@@ -2409,7 +2409,7 @@ object SessionController {
             askWifiJoinChoice(
                 DialogSpec(
                     title = "WiFi 未开启",
-                    message = "连接车机热点需要打开手机 WLAN。是否打开 WLAN 设置？",
+                    message = "是否打开 WLAN 设置以连接车机热点？",
                     positive = "打开 WLAN 设置",
                     negative = "取消",
                 ),
@@ -2418,7 +2418,7 @@ object SessionController {
         when (open) {
             true -> {
                 openWlanSettings()
-                uiHintSink?.invoke("请在 WLAN 设置中打开 WiFi 开关")
+                uiHintSink?.invoke("请在设置中开启 WLAN")
             }
 
             false -> {
@@ -2477,9 +2477,7 @@ object SessionController {
                 DialogSpec(
                     title = "未能加入车机热点",
                     message =
-                        "系统没有允许加入 \"${wifi.ssid}\"（可能点了拒绝，或热点不在范围内）。\n\n" +
-                            "「重试」会再次弹出系统确认框。也可以到 WLAN 设置手动连接——" +
-                            "手动连接会把热点保存为系统网络，可能影响移动数据。",
+                        "请重试连接车机热点「${wifi.ssid}」（手动连接可能影响手机流量）",
                     positive = "重试",
                     negative = "打开 WLAN 设置",
                 ), needed,
@@ -2565,8 +2563,7 @@ object SessionController {
                 DialogSpec(
                     title = "连接车机热点",
                     message =
-                        "将自动加入 \"${wifi.ssid}\" 热点。该热点无互联网，系统可能自动切回原 WiFi。" +
-                            "\n\n出现断连时，请到 WLAN 设置中主动连接 \"${wifi.ssid}\"（手动连接不会被切回）。",
+                        "是否加入车机热点「${wifi.ssid}」（无互联网，系统可能自动切走）？",
                     positive = "继续自动加入",
                     negative = "打开 WLAN 设置",
                 ),
@@ -2622,7 +2619,7 @@ object SessionController {
             Thread.sleep(800)
         }
         phaseHint = "热点已切走，请在 WLAN 中重连"
-        uiHintSink?.invoke("未能在热点驻留——请到 WLAN 设置中主动连接 ${wifi.ssid}")
+        uiHintSink?.invoke("请到 WLAN 设置重新连接车机热点")
         appendLog(
             ">>> WiFi 自动加入超时（可能被系统切回原 WiFi）——" +
                 "请到 系统设置>WLAN 手动连接 \"${wifi.ssid}\"（手动连接不会被自动切回）",
@@ -2718,7 +2715,7 @@ object SessionController {
                     cm.setPrimaryClip(
                         android.content.ClipData.newPlainText("carplay-wifi", passphrase),
                     )
-                    uiHintSink?.invoke("热点密码已复制（${passphrase.length} 位）——粘贴到密码框即可")
+                    uiHintSink?.invoke("车机热点密码已复制")
                 }
             }
         }
@@ -2981,8 +2978,7 @@ object SessionController {
                         DialogSpec(
                             title = "检测到已连接 $ssid",
                             message =
-                                "车机尚未经蓝牙下发连接信息（0x4301）。是否把当前网络 \"$ssid\" 当车机热点，" +
-                                    "直接尝试 mDNS/网关连接？（点「继续等待」则保持蓝牙保活等车机下发）",
+                                "是否将当前 Wi-Fi「$ssid」作为车机热点尝试连接？",
                             positive = "按车机热点继续",
                             negative = "继续等待",
                         ),
@@ -3656,9 +3652,9 @@ object SessionController {
         )
         uiHintSink?.invoke(
             if (after.disabled) {
-                "本车机音频不兼容，下次连接将自动只推视频"
+                "音频不兼容，下次连接仅传画面"
             } else {
-                "该音频档位导致断开，已记录；重连会自动换档"
+                "音频断开，重连时自动切换档位"
             },
         )
     }
@@ -4953,8 +4949,7 @@ object SessionController {
                                 )
                                 phaseHint = "CarPlay 异常，请重启车机"
                                 uiHintSink?.invoke(
-                                    "车机侧 CarPlay 服务异常（只答应了 SETUP，事件口/信息口都不通）——" +
-                                        "请在车机上把 CarPlay 关掉再打开后重试",
+                                    "请在车机上重启 CarPlay 后重试",
                                 )
                                 runCatching { client.close() }
                                 return@run
@@ -5376,7 +5371,7 @@ object SessionController {
                                         "）；若反复如此请在车机上重启 CarPlay",
                                 )
                                 phaseHint = "车机拒绝画面连接，请重试"
-                                uiHintSink?.invoke("车机拒绝了屏幕流（SETUP）——若反复如此请重启车机侧 CarPlay")
+                                uiHintSink?.invoke("画面连接被拒绝，请重启车机 CarPlay")
                                 runCatching { client.close() }
                             }
                         } else {
@@ -5386,7 +5381,7 @@ object SessionController {
                             // 「连上之后自动断开」，无从判断是会话建立失败。
                             phaseHint = "车机拒绝会话，请重试"
                             appendLog("AIRPLAY: 会话建立失败——主动关闭控制通道，本轮结束")
-                            uiHintSink?.invoke("接收端拒绝了会话建立（SETUP）——请查看日志中的 deviceID 提示")
+                            uiHintSink?.invoke("车机拒绝连接，请查看日志")
                             runCatching { client.close() }
                         }
                     }
@@ -5538,7 +5533,7 @@ object SessionController {
         if (!cancelled()) {
             phaseHint = "请在 WLAN 中连接车机热点"
             appendLog(">>> 等待车机热点超时——请到 设置>WLAN 加入 \"${wifi.ssid}\" 后重新连接")
-            uiHintSink?.invoke("未连上车机热点 \"${wifi.ssid}\"——请到 WLAN 设置中主动连接")
+            uiHintSink?.invoke("请到 WLAN 设置连接车机热点")
         }
         onBound(false)
     }

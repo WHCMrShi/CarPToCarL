@@ -75,7 +75,7 @@ class MainActivity : AppCompatActivity() {
         const val HINT_MAC_MISSING = "请先保存本机蓝牙地址"
 
         /** 未填写时被拦下的 Snackbar 文案。 */
-        const val TIP_MAC_MISSING = "本机蓝牙地址未填写 —— 请先在「连接准备」里填写并保存"
+        const val TIP_MAC_MISSING = "请在「连接准备」中保存本机蓝牙地址"
 
         /** 地址就绪时的英雄卡副标题（与「未填写」提示互斥）。 */
         const val HINT_IDLE_READY = "点击下方按钮发起连接"
@@ -318,8 +318,7 @@ class MainActivity : AppCompatActivity() {
             activity = this,
             title = "缺少「$names」权限",
             message =
-                "连接蓝牙和热点需要附近设备权限；核对当前热点名称需要精确位置权限。" +
-                    "我们不读取手机坐标。请到应用权限设置允许对应权限后重试。",
+                "请允许所缺权限以连接蓝牙、识别车机热点（不读取手机坐标）",
             actions =
                 listOf(
                     DarkMessageDialog.Action("知道了") {},
@@ -390,9 +389,7 @@ class MainActivity : AppCompatActivity() {
         DarkMessageDialog.show(
             this,
             "允许后台运行",
-            "「靠近车机自动启动」要在 App 没打开时收到车机的蓝牙信号。\n\n" +
-                "系统若对本应用限制后台（电池优化 / 应用启动管理），这条信号可能被丢掉，" +
-                "表现为有时能自动连、有时没反应。请在接下来的系统页面里选择「不限制 / 允许」。",
+            "请将后台运行设为「不限制 / 允许」，以便靠近车机时自动启动",
             listOf(
                 DarkMessageDialog.Action("稍后", DarkMessageDialog.Emphasis.TEXT) {
                     log("APPROACH: 未豁免电池优化——后台自动启动可能被系统限流")
@@ -420,9 +417,7 @@ class MainActivity : AppCompatActivity() {
         DarkMessageDialog.show(
             this,
             "允许后台打开界面",
-            "车机靠近时，手机往往黑屏在口袋里——系统默认不许应用在这时把自己弹到前台。\n\n" +
-                "把「显示在其他应用上层」给本应用，系统才会放行这次启动；否则它会静默拦下：" +
-                "日志里写着已拉起，屏幕上却什么也没有，接收端也连不上。",
+            "请允许「显示在其他应用上层」，以便靠近车机时从后台打开界面",
             listOf(
                 DarkMessageDialog.Action("稍后", DarkMessageDialog.Emphasis.TEXT) {
                     log("APPROACH: 未授予「显示在其他应用上层」——后台拉起界面可能被系统拦下")
@@ -498,8 +493,7 @@ class MainActivity : AppCompatActivity() {
                 activity = this,
                 title = "需要开启位置服务",
                 message =
-                    "读取已连接热点的名称需要开启位置服务，用于复用车机热点、减少重复选网。" +
-                        "我们不读取手机坐标。开启后请重试。",
+                    "请开启位置服务以识别车机热点（不读取手机坐标）",
                 actions =
                     listOf(
                         DarkMessageDialog.Action("取消") {},
@@ -527,7 +521,7 @@ class MainActivity : AppCompatActivity() {
             DarkMessageDialog.show(
                 activity = this,
                 title = "蓝牙未开启",
-                message = "与车机的无线配对通信依赖蓝牙。请先开启手机蓝牙，并确认已与车机配对。",
+                message = "请开启手机蓝牙并与车机配对",
                 actions =
                     listOf(
                         DarkMessageDialog.Action("取消") {},
@@ -947,12 +941,12 @@ class MainActivity : AppCompatActivity() {
             val resolved = DeviceIdentity.bluetoothMac(this, forceRetry = true)
             when {
                 result == null -> {
-                    snack("地址格式不对——需 12 位十六进制，如 AA:BB:CC:DD:EE:FF")
+                    snack("请按 AA:BB:CC:DD:EE:FF 格式填写地址")
                     log("MAC: 保存失败——输入无法解析为蓝牙地址（${macInput.text}）")
                 }
                 resolved == DeviceIdentity.PLACEHOLDER_MAC -> {
                     macInput.setText("")
-                    snack("已清除手填地址——将使用自动解析结果")
+                    snack("已清除手填地址，改用自动识别")
                     log("MAC: 已清除手填地址，当前自动解析=${DeviceIdentity.PLACEHOLDER_MAC}（接收端会拒绝）")
                 }
                 else -> {
@@ -972,8 +966,8 @@ class MainActivity : AppCompatActivity() {
         // （需要时可在代码里直接调用 provision()），界面不再暴露。
 
         findViewById<TextView>(R.id.btnClearWifiMemory).setOnClickListener {
-            if (SessionController.clearRememberedWifi(this)) snack("已清除车机 Wi-Fi 记忆，下次通过蓝牙重新获取")
-            else snack("请先断开连接，再清除 Wi-Fi 记忆")
+            if (SessionController.clearRememberedWifi(this)) snack("已清除车机热点记忆")
+            else snack("请先断开连接再清除车机热点记忆")
         }
         // 目标车机选择：配对了多台车机时指定唯一目标（只向它发请求/只接受它连入）
         btnPickTarget.setOnClickListener { showTargetPicker() }
@@ -1268,8 +1262,8 @@ class MainActivity : AppCompatActivity() {
             } else if (!granted) {
                 pendingTargetScan = false
                 targetPicker?.let { _ ->
-                    updatePickerStatus("未授予「附近的设备」权限——无法扫描；可到系统设置授权后重开本弹窗", warn = true)
-                    pickerToast("未授予「附近的设备」权限——无法扫描附近设备")
+                    updatePickerStatus("请在设置中允许「附近的设备」权限后重试", warn = true)
+                    pickerToast("请允许「附近的设备」权限后重试")
                 }
             }
         }
@@ -1293,7 +1287,7 @@ class MainActivity : AppCompatActivity() {
                 null
             }
         if (adapter == null || !adapter.isEnabled) {
-            snack("蓝牙未开启——请先开启蓝牙")
+            snack("请先开启蓝牙")
             return
         }
         val view = layoutInflater.inflate(R.layout.dialog_target_picker, null)
@@ -1478,7 +1472,7 @@ class MainActivity : AppCompatActivity() {
                 false
             }
         if (!started) {
-            updatePickerStatus("扫描启动失败——请确认蓝牙已开启后点「重新扫描」", warn = true)
+            updatePickerStatus("请开启蓝牙后重新扫描", warn = true)
         } else {
             log("BT-SCAN: 开始扫描附近蓝牙设备")
         }
@@ -1542,11 +1536,11 @@ class MainActivity : AppCompatActivity() {
             }
         if (ok) {
             log("BT-PAIR: 已发起与「$name」($address) 的配对——请在系统弹窗确认")
-            pickerNotice("正在配对「$name」：请在系统弹窗确认")
+            pickerNotice("请在系统弹窗确认配对「$name」")
         } else {
             pendingBondAddress = null
             log("BT-PAIR: 配对「$name」($address) 发起失败（设备可能已配对或蓝牙忙）")
-            pickerNotice("无法发起配对——请在系统蓝牙设置中手动配对")
+            pickerNotice("请到系统蓝牙设置中手动配对")
         }
     }
 
@@ -1631,7 +1625,7 @@ class MainActivity : AppCompatActivity() {
                 pendingBondAddress = null
                 log("BT-PAIR: 与 $address 配对未完成（用户取消或失败）")
                 // 弹窗仍开着：用 Toast（浮在弹窗之上）+ 弹窗内状态行，不用被遮挡的 snackbar
-                pickerNotice("配对未完成——可再点「配对」重试，或到系统蓝牙设置手动配对")
+                pickerNotice("配对未完成，请重试")
             }
             // BOND_BONDING：继续等（系统确认框未应答）
         }
@@ -1661,7 +1655,7 @@ class MainActivity : AppCompatActivity() {
                     ""
                 },
         )
-        snack("目标已设为「$name」——只向该设备发请求")
+        snack("目标已设为「$name」")
         updateReadyRow()
     }
 
@@ -1736,7 +1730,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 if (result == null) {
-                    snack("导出失败——请检查存储空间后重试", 4_000L)
+                    snack("导出失败，请检查存储空间", 4_000L)
                     return@runOnUiThread
                 }
                 log("日志已导出（${scope.label}）: ${result.displayPath}（${result.bytes} 字节）")
@@ -1850,7 +1844,7 @@ class MainActivity : AppCompatActivity() {
             snack("请按路径打开：$displayPath", 5_000L)
             return
         }
-        snack("没有可打开文件的应用——请到文件管理器中按上述路径查找", 5_000L)
+        snack("请用文件管理器打开已导出的日志", 5_000L)
     }
 
     /** 分享日志文件（微信/QQ/邮件等），内容 URI 带临时读权限。 */
@@ -2039,13 +2033,11 @@ class MainActivity : AppCompatActivity() {
     /** 启动检测到残留 CarPlay 虚拟屏：询问是否立即清理（上次会话异常退出遗留）。 */
     private fun promptResidualDisplays(residual: List<Pair<Int, String>>) {
         if (isFinishing || isDestroyed) return
-        val names = residual.joinToString("\n") { "· ${it.second}（displayId=${it.first}）" }
         DarkMessageDialog.show(
             activity = this,
             title = "检测到残留虚拟屏",
             message =
-                "发现 ${residual.size} 个上次会话遗留的 CarPlay 虚拟屏：\n$names\n\n" +
-                    "残留屏会持续占用显示资源，并可能影响下次连接。是否立即清理？",
+                "是否清理 ${residual.size} 个残留虚拟屏以释放显示资源？",
             actions =
                 listOf(
                     DarkMessageDialog.Action("暂不") {},

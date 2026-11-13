@@ -113,7 +113,7 @@ internal class NavigationState {
         val turn = current
         val guide = phase == "guide" && turn != null
         return NavigationDisplay(
-            title = if (guide) "${formatDistance(turn!!.distance)} ${turnName(turn.turn) ?: turn.road}" else when (phase) {
+            title = if (guide) "${formatDistance(turn!!.distance)} ${turnName(turn.turn)}" else when (phase) {
                 "end" -> "导航结束"
                 else -> "等待导航"
             },
@@ -129,7 +129,8 @@ internal class NavigationState {
             return if (seconds < 3_600) String.format(Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60)
             else String.format(Locale.ROOT, "%d:%02d:%02d", seconds / 3_600, seconds / 60 % 60, seconds % 60)
         }
-        fun formatDistance(meters: Int): String = if (meters < 1000) "${meters}米" else String.format(Locale.ROOT, "%.1f公里", meters / 1000.0)
+        fun formatDistance(meters: Int): String = if (meters < 1000) "${meters}米"
+        else String.format(Locale.ROOT, "%.1f", meters / 1000.0).removeSuffix(".0") + "千米"
         /*
          * Previous mapping (9768a2a), retained for comparison.
          * Unmapped codes use the original road name, including 25..28 and Base 45..68.
@@ -143,14 +144,14 @@ internal class NavigationState {
             else -> null
         }
          */
-        fun turnName(code: Int): String? = when (code) {
+        fun turnName(code: Int): String = when (code) {
             1 -> "直行"; 2 -> "右前方转弯"; 3 -> "右转"; 4 -> "右后方转弯"; 5 -> "掉头"
             6 -> "左后方转弯"; 7 -> "左转"; 8 -> "左前方转弯"; 9 -> "进入环岛"; 10 -> "出环岛"
             11 -> "靠左行驶"; 12 -> "靠右行驶"; 13 -> "靠左进入主路"; 14 -> "左分叉直行"
             15 -> "靠右进入主路"; 16 -> "右分叉直行"; 17 -> "分叉路走中间"; 18 -> "靠左驶入辅路"; 19 -> "靠右驶入辅路"
             20 -> "走左侧分叉"; 21 -> "走右侧分叉"; 22 -> "走中间分叉"; 23 -> "出发点"
             24 -> "到达目的地"; 29 -> "进入轮渡"; 30 -> "离开轮渡"; 31 -> "经过收费站"
-            // Car+ action names: IC is interpreted as 辅路; Base (45..68) remains unmapped.
+            // Car+ action names: IC is interpreted as 辅路; unmapped codes use the neutral 途径.
             32 -> "靠左直行进入辅路"; 33 -> "靠右直行进入辅路"
             34 -> "靠左直行"; 35 -> "靠右直行"
             36 -> "左分叉直行"; 37 -> "中间分叉直行"; 38 -> "右分叉直行"
@@ -158,7 +159,7 @@ internal class NavigationState {
             42 -> "左分叉直行进入辅路"; 43 -> "中间分叉直行进入辅路"; 44 -> "右分叉直行进入辅路"
             69 -> "前方驶出环岛"; 70 -> "左侧驶出环岛"; 71 -> "左后方驶出环岛"; 72 -> "左前方驶出环岛"
             73 -> "右侧驶出环岛"; 74 -> "右后方驶出环岛"; 75 -> "右前方驶出环岛"; 76 -> "环岛内掉头"
-            else -> null
+            else -> "途径"
         }
     }
 }
