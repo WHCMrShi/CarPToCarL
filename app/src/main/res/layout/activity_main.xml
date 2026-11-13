@@ -411,6 +411,15 @@
                                             android:textColorHint="@color/m3_on_var"
                                             android:textSize="14sp" />
 
+                                        <TextView
+                                            android:id="@+id/wifiMemoryStatus"
+                                            android:layout_width="match_parent"
+                                            android:layout_height="wrap_content"
+                                            android:layout_marginTop="6dp"
+                                            android:text="正在读取热点记忆…"
+                                            android:textColor="@color/m3_on_var"
+                                            android:textSize="12sp" />
+
                                         <LinearLayout
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
