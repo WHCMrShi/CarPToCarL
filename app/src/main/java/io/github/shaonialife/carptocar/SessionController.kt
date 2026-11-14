@@ -3158,15 +3158,11 @@ object SessionController {
     }
 
     private fun installAudio(lease: SessionEpoch.Lease, candidate: AudioSender, state: () -> Unit): Boolean {
-        candidate.setResourceOutput((lease.owner as AirPlayClient).audioOutputMode)
         if (!audioEpoch.isCurrent(lease) || !candidate.startPassthrough()) { candidate.stop(); return false }
         candidate.setMediaPaused(!CarLifeHijack.mediaForwardingAllowed)
         var previous: AudioSender? = null
         val installed = audioEpoch.commit(lease) {
             previous = audioSender
-            // Ownership may have changed while startPassthrough was preparing sockets/queues.
-            candidate.setResourceOutput((lease.owner as AirPlayClient).audioOutputMode)
-            candidate.setMediaPaused(!CarLifeHijack.mediaForwardingAllowed)
             audioSender = candidate
             state()
         }
@@ -5302,18 +5298,6 @@ object SessionController {
                                             "AUDIO: 等控制会话就绪超时（${AUDIO_CONTROL_SESSION_WAIT_MS}ms）" +
                                                 "——照常音频 SETUP（不拆链）"
                                         },
-                                    )
-                                }
-                                val resourceLease = audioEpoch.capture(client)
-                                if (resourceLease != null) {
-                                    client.startAudioArbitration(
-                                        input = { CarLifeHijack.audioIntent() },
-                                        alive = { !attemptCancelled() && currentClient === client && audioEpoch.isCurrent(resourceLease) },
-                                        output = { mode -> audioEpoch.commit(resourceLease) { audioSender?.setResourceOutput(mode) } },
-                                        pause = { if (audioEpoch.isCurrent(resourceLease)) CarLifeHijack.pauseMediaFromCar("audio-resource") },
-                                        resume = { if (audioEpoch.isCurrent(resourceLease)) CarLifeHijack.resumeMediaFromCar("audio-resource-return") },
-                                        subscribe = CarLifeHijack::addPlaybackListener,
-                                        unsubscribe = CarLifeHijack::removePlaybackListener,
                                     )
                                 }
                                 val audioStarted = startAudioChannel(context, client, sessionKey, host)

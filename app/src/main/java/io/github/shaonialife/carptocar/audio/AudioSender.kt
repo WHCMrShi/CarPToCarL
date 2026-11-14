@@ -415,7 +415,6 @@ class AudioSender(
                 log = log,
                 failed = { error -> log("AUDIO-DIAG: PCM worker failed=${error.javaClass.simpleName}"); stop() },
             )
-            ingress?.setOutputMode(resourceOutput)
             startSyncLoop()
             startSilenceKeepAlive()
             true
@@ -447,17 +446,6 @@ class AudioSender(
     val hasRealInput: Boolean get() = realInputSeen.get()
     private val continuity = AudioContinuityWindow()
     @Volatile private var ingress: AudioIngressQueue? = null
-    @Volatile private var resourceOutput = AudioOutputMode.ALLOW
-    private val discardFraming = java.util.concurrent.atomic.AtomicBoolean(false)
-    val hasPendingSpeech: Boolean get() = ingress?.pendingSpeech() == true
-    fun setResourceOutput(mode: AudioOutputMode) {
-        if (resourceOutput != mode) {
-            resourceOutput = mode
-            discardFraming.set(true)
-            log("AUDIO-RESOURCE: output=$mode pendingSpeech=$hasPendingSpeech")
-        }
-        ingress?.setOutputMode(mode)
-    }
     fun clearPendingMedia() {
         val removed = ingress?.clearMedia() ?: 0
         log("MEDIA-CONTROL: pendingMediaCleared=$removed tts=preserved inFlight=not-retractable")
@@ -614,7 +602,7 @@ class AudioSender(
 
     private fun processPcmLocked(srcPcm: ByteArray, size: Int, srcRate: Int, srcChannels: Int, gap: Boolean) {
         if (!running.get()) return
-        if (gap || discardFraming.getAndSet(false)) {
+        if (gap) {
             pcmFrames.clear(); passthroughBuffer.reset(); markerPending = true
             // Count discontinuities in the bounded stage summary, preserving reset semantics.
         }
@@ -703,7 +691,6 @@ class AudioSender(
 
     /** 走与采集循环一致的封包/编码/发送路径（[feedPcm] 与采集循环共用）。 */
     private fun dispatchPcm(pcm: ByteArray, offset: Int = 0, size: Int = pcm.size): Boolean {
-        if (resourceOutput != AudioOutputMode.ALLOW) return true
         return try {
             if (codec == AudioCodec.PCM) {
                 sendPayload(pcm, offset, size).also { if (!it) stop() }
@@ -808,7 +795,6 @@ class AudioSender(
      */
     @Synchronized
     private fun sendSyncOnce(first: Boolean): Boolean {
-        if (resourceOutput != AudioOutputMode.ALLOW) return false
         val client = syncSocket ?: return false
         var deferred = false
         for (attempt in 0 until SYNC_SEND_ATTEMPTS) {
@@ -1004,7 +990,6 @@ class AudioSender(
     @Synchronized
     private fun sendPayload(payload: ByteArray, offset: Int = 0, size: Int = payload.size): Boolean {
         if (!running.get()) return false
-        if (resourceOutput != AudioOutputMode.ALLOW) return true
         val client = socket ?: return false
         val sampled = samplePacket
         samplePacket = false

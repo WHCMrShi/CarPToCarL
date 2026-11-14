@@ -10,31 +10,6 @@ import org.junit.Test
  * （对照 DiPlay `AudioStream.kt`：AAD=头 4..12、密文=12..n-8、nonce=尾 8B 小端）。
  */
 class AudioSenderTest {
-    @Test fun ownershipGateBlocksActualPacketPathIncludingCaptureAndAacPayloads() {
-        val audio = sender()
-        val packets = java.util.concurrent.atomic.AtomicInteger()
-        val udp = object : java.net.DatagramSocket() {
-            override fun send(packet: java.net.DatagramPacket) { packets.incrementAndGet() }
-        }
-        val clazz = AudioSender::class.java
-        clazz.getDeclaredField("running").apply { isAccessible = true }.let {
-            (it.get(audio) as java.util.concurrent.atomic.AtomicBoolean).set(true)
-        }
-        clazz.getDeclaredField("socket").apply { isAccessible = true }.set(audio, udp)
-        val send = clazz.getDeclaredMethod("sendPayload", ByteArray::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
-            .apply { isAccessible = true }
-        val pcm = ByteArray(AudioSender.PACKET_BYTES)
-        try {
-            for (mode in listOf(AudioOutputMode.DROP, AudioOutputMode.HOLD)) {
-                audio.setResourceOutput(mode)
-                assertEquals(true, send.invoke(audio, pcm, 0, pcm.size))
-                assertEquals(0, packets.get())
-            }
-            audio.setResourceOutput(AudioOutputMode.ALLOW)
-            assertEquals(true, send.invoke(audio, pcm, 0, pcm.size))
-            assertEquals(1, packets.get())
-        } finally { audio.stop(); udp.close() }
-    }
     private val key = ByteArray(32) { (it * 7 + 1).toByte() }
 
     private fun sender() =
