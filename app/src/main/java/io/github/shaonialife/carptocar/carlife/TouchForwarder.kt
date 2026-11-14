@@ -7,11 +7,12 @@ import kotlin.concurrent.withLock
 
 /** 有界、单消费者触摸发送。队列和输出流属于同一连接，stop 后不再接受事件。 */
 internal class TouchForwarder(
-    private val output: OutputStream,
+    private var output: OutputStream,
     private val onWrite: () -> Unit = {},
     private val onFailure: (Exception) -> Unit = {},
     private val onOverflow: () -> Unit = {},
     private val onStats: (String) -> Unit = {},
+    private val reconnect: (() -> OutputStream?)? = null,
 ) {
     private val lock = ReentrantLock()
     private val ready = lock.newCondition()
@@ -22,6 +23,7 @@ internal class TouchForwarder(
     private var stopped = false
     private var resetting = false
     private var dropping = false
+    private var freshDownRequired = false
     private var worker: Thread? = null
 
     fun start() =
@@ -63,6 +65,12 @@ internal class TouchForwarder(
         var overflow = false
         lock.withLock {
             if (stopped) return
+            if (freshDownRequired) {
+                val down = service == CarLifeProtocol.TOUCH_DOWN ||
+                    (service == CarLifeProtocol.TOUCH_ACTION && action == CarLifeProtocol.TouchAction.DOWN)
+                if (!down) return
+                freshDownRequired = false
+            }
             val terminal =
                 service == CarLifeProtocol.TOUCH_UP ||
                     (service == CarLifeProtocol.TOUCH_ACTION && action == CarLifeProtocol.TouchAction.UP)
@@ -154,6 +162,7 @@ internal class TouchForwarder(
         }
         try {
             while (true) {
+              try {
                 val reset =
                     lock.withLock {
                         while (!stopped && !resetting && size == 0) ready.await()
@@ -228,6 +237,20 @@ internal class TouchForwarder(
                     x = event[1]
                     y = event[2]
                 }
+              } catch (error: java.io.IOException) {
+                if (reconnect == null || lock.withLock { stopped }) throw error
+                val replacement = reconnect.invoke() ?: throw error
+                if (lock.withLock { stopped }) return
+                output = replacement
+                // Cancel all pointers. Never replay an ambiguously delivered DOWN/MOVE/UP.
+                // A failed cancellation escapes this catch and escalates to owner recovery.
+                write(CarLifeProtocol.TOUCH_ACTION, 0, 0, CarLifeProtocol.TouchAction.CANCEL)
+                lock.withLock {
+                    size = 0; resetting = false; dropping = false; freshDownRequired = true
+                }
+                pressed = false; second = false; compound = false
+                onStats("TOUCH-RECOVERY: local=ready oldGesture=cancelled queued=dropped next=fresh-down")
+              }
             }
         } catch (error: InterruptedException) {
             Thread.currentThread().interrupt()

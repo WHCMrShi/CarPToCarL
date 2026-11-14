@@ -15,7 +15,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class CarLifeTouchRecoveryTest {
     /** 只模拟握手完成状态，避免启动 Android 时钟/真实固定端口；生产故障回调和 stop 原样执行。 */
     private fun connectedClient(log: (String) -> Unit = {}): CarLifeHuClient {
-        val client = CarLifeHuClient(log = log, onVideoFrame = { _, _, _ -> })
+        val client = CarLifeHuClient(log = { if (it.contains("已停止本轮连接")) log(it) }, onVideoFrame = { _, _, _ -> })
+        client.connectTouch = { throw IOException("local reconnect unavailable") }
         val field = CarLifeHuClient::class.java.getDeclaredField("running")
         field.isAccessible = true
         (field.get(client) as AtomicBoolean).set(true)

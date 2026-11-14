@@ -527,7 +527,9 @@ class CarLifeHuClient(
                     probeQueue.joinToString(",") + "）",
             )
         }
-        touchOut?.let(::startTouchForwarding)
+        startTouchForwarding(touchOut ?: object : OutputStream() {
+            override fun write(value: Int) { throw java.io.IOException("touch port unavailable") }
+        })
 
         startReader("carlife-cmd") { cmdReader(cmd.getInputStream()) }
         sockets[CarLifeProtocol.PORT_VIDEO]?.let { video ->
@@ -573,6 +575,46 @@ class CarLifeHuClient(
 
     @Volatile
     private var touchForwarder: TouchForwarder? = null
+    private val touchConnectionLock = Any()
+    /** Socket factory is replaceable in tests; only used for local 9340 recovery. */
+    internal var connectTouch: () -> Socket = {
+        Socket().also { socket ->
+            try {
+                socket.tcpNoDelay = true
+                socket.connect(InetSocketAddress(host, CarLifeProtocol.PORT_TOUCH), connectTimeoutMs)
+            } catch (error: Exception) {
+                runCatching { socket.close() }
+                throw error
+            }
+        }
+    }
+
+    private fun reconnectTouch(): OutputStream? {
+        if (!running.get()) return null
+        synchronized(touchConnectionLock) {
+            touchOut = null
+            runCatching { sockets.remove(CarLifeProtocol.PORT_TOUCH)?.close() }
+        }
+        log("TOUCH-RECOVERY: local=start port=9340 replay=false")
+        return try {
+            val socket = connectTouch()
+            synchronized(touchConnectionLock) {
+                if (!running.get()) { socket.close(); return null }
+                try {
+                    socket.getOutputStream().also {
+                        sockets[CarLifeProtocol.PORT_TOUCH] = socket
+                        touchOut = it
+                    }
+                } catch (error: Exception) {
+                    socket.close()
+                    throw error
+                }
+            }
+        } catch (error: Exception) {
+            log("TOUCH-RECOVERY: local=failed error=${error.javaClass.simpleName}; fallback=CarLife-reconnect")
+            null
+        }
+    }
 
     /** 与 CarPlay 输入会话一同退役队列，CarLife 连接本身继续保留。 */
     fun retireTouchInput() {
@@ -584,10 +626,10 @@ class CarLifeHuClient(
             output,
             onWrite = { sentTouchCount++ },
             onStats = log,
+            reconnect = ::reconnectTouch,
             onFailure = { error ->
                 val wasRunning = running.get()
-                // 部分帧可能已经送出，不能在原流上重试。先停止整个故障客户端，
-                // 让 CarLifeHijack 既有的守候循环重建连接和手势状态。
+                // Only failed local reconnect/cancellation escalates to the existing HU recovery.
                 stop()
                 if (wasRunning) log("CARLIFE: 触摸通道写入失败，已停止本轮连接，等待重新接管 - ${error.message}")
             },
@@ -1845,10 +1887,12 @@ class CarLifeHuClient(
     }
 
     private fun closeAll() {
+        synchronized(touchConnectionLock) {
         for ((_, socket) in sockets) runCatching { socket.close() }
         sockets.clear()
         cmdOut = null
         touchOut = null
+        }
     }
 
     private fun startReader(name: String, body: () -> Unit) {
