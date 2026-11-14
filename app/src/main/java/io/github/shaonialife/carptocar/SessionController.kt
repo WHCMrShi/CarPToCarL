@@ -234,16 +234,6 @@ object SessionController {
     private val CONNECT_RETRY_BACKOFF_MS = longArrayOf(3_000L, 10_000L, 30_000L)
 
     /**
-     * 推流中「因车机邀请而主动重建」的防抖窗口（ms）。
-     *
-     * 重建本身要 3~4 秒（退役 + 重新绑定 + 配对 + SETUP + 等 IDR），而被车机拆掉要等
-     * 18~20 秒，所以正常情况下重建永远划算。这个窗口只防一种极端：车机在会话刚起来时
-     * 连续发邀请，两侧互相拆——那样会比被拆更糟（永远出不了首帧）。
-     * ID7 实测的邀请间隔是 18~22 秒（含我们重连耗时），15 秒窗口刚好放行、又能挡住抖动。
-     */
-    private val STREAMING_INVITE_REBUILD_GAP_MS = 15_000L
-
-    /**
      * 建链失败自动重试的互斥 + 序号。
      *
      * [retryGeneration] 是「这一轮重试还算不算数」的令牌：车机 ctrl 邀请到达时
@@ -259,13 +249,10 @@ object SessionController {
      * 推流期间收到的 ctrl 邀请计数与时刻（2026-11-03 ID7 实测）。
      *
      * 以前推流中的邀请直接 `return` 丢掉，日志里一个字都没有——ID7 反复断流时
-     * 完全看不出车机来过，排障只能靠猜。现在至少记一行，并按下面两条规则处理。
+     * 完全看不出车机来过，排障只能靠猜。只记诊断，不将邀请解释为断链证据。
      */
     private var streamingInviteCount = 0
     private var lastStreamingInviteAt = 0L
-
-    /** 上一次「因推流中邀请而主动重建」的时刻（防抖，避免车机抖动时反复拆会话）。 */
-    private var lastInviteRebuildAt = 0L
 
     /** Activity onCreate 时调用：登记 applicationContext 并创建会话对象（幂等）。 */
     fun ensure(context: Context) {
@@ -1311,10 +1298,8 @@ object SessionController {
      * 空闲态收到邀请 = 对方正在等我们连，比任何退避计时器都权威：立刻把挂着的重试
      * 作废、马上起一轮。
      *
-     * **推流态**以前是直接忽略（"让在跑的那轮自己走完"）。2026-11-03 ID7 日志证明这个假设
-     * 不成立：它发邀请的语义是「我要重建会话」，我们不理，它就在 18~20 秒后把正在推流的
-     * 那条会话 reset 掉——15 次断流每一次前面都有一条邀请。现在交给
-     * [onCtrlInviteWhileStreaming] 判断（见那里的两条规则）。
+     * 推流态只记录邀请；旧 ID7 日志中的先后关联不能证明邀请要求拆除正常会话。
+     * 不缓存本次邀请供之后重试使用；真实控制/视频故障仍由各自的故障路径处理。
      */
     private fun onCtrlInvite(receiverId: String?) {
         if (!sessionWanted || connectCancelled) return
@@ -1324,7 +1309,7 @@ object SessionController {
             "targetMatches=${io.github.shaonialife.carptocar.net.WifiIdentityProof.matchesReceiver(target, receiverId)} setupPending=${sessionStarting.get()} " +
             "controlAlive=${currentClient?.controlConnectionAlive == true} videoRunning=${isStreaming()} network=${wifiConnector?.currentNetwork}; request-received-only")
         if (isStreaming()) {
-            onCtrlInviteWhileStreaming(receiverId)
+            onCtrlInviteWhileStreaming()
             return
         }
         if (sessionStarting.get() && currentClient?.controlConnectionAlive == true) {
@@ -1381,66 +1366,18 @@ object SessionController {
         }
     }
 
-    /**
-     * 推流中收到车机 ctrl 邀请：先记下来，再按两条规则决定要不要主动重建。
-     *
-     * 为什么不能继续静默忽略（2026-11-03 ID7 实测，15 次断流全部有邀请在前）：
-     * 车机发邀请的语义是「**我要重建这条会话**」——它认为当前会话不完整（那台车机
-     * 是因为音频 SETUP 三档全 400）。我们不配合，它就等 18~20 秒后自己 reset 掉
-     * 正在推流的那条会话，表现为黑屏；然后我们重连、推流、再被邀请、再被拆，死循环。
-     *
-     * 两条规则：
-     *  1. **任何一条推流中的邀请都要落日志**（带次数、距上次间隔）。以前完全静默，
-     *     排障时无法把"黑屏"与"车机来过邀请"关联起来——这是这次排查最费时的坑。
-     *  2. **主动重建**，但加 [STREAMING_INVITE_REBUILD_GAP_MS] 防抖：重建要 3~4 秒
-     *     （退役 + 重新配对 + SETUP），比等车机 18 秒后拆会话划算得多；防抖只防
-     *     "车机抖动时两侧反复拆"这种极端情况。
-     *
-     * 不动的情况：没端点（还没走完热点那步）、正在建链（交给那一轮）、防抖窗口内。
-     */
-    private fun onCtrlInviteWhileStreaming(receiverId: String?) {
+    /** 邀请不是链路失败证据：不修改端点、工作代次、重试计数或当前流。 */
+    private fun onCtrlInviteWhileStreaming() {
         val now = android.os.SystemClock.uptimeMillis()
         val seen = ++streamingInviteCount
         val sincePrev = if (lastStreamingInviteAt == 0L) -1L else now - lastStreamingInviteAt
         lastStreamingInviteAt = now
         appendLog(
-            "CTRL: 推流中收到车机邀请（receiver=${receiverId ?: "?"}，本流第 $seen 次" +
-                (if (sincePrev >= 0) "，距上次 ${sincePrev}ms" else "，本次推流首次") +
-                "）——车机语义是「要重建会话」，不再静默丢弃",
+            "CTRL-INVITE: streaming=true action=observe count=$seen intervalMs=$sincePrev " +
+                "controlAlive=${currentClient?.controlConnectionAlive == true} " +
+                "controlReady=${currentClient?.controlSessionReady == true}; 保留当前会话，故障由原路径处理",
         )
-        if (connectCancelled || !sessionWanted) return
-        val endpoint = lastGoodEndpoint
-        if (endpoint == null) {
-            appendLog("CTRL: 推流中邀请——但还没有热点端点可用，只能继续推流并等车机下发 0x4301")
-            return
-        }
-        if (sessionStarting.get()) {
-            appendLog("CTRL: 推流中邀请——本轮已有会话在交接，交给它处理")
-            return
-        }
-        val sinceRebuild =
-            if (lastInviteRebuildAt == 0L) Long.MAX_VALUE else now - lastInviteRebuildAt
-        if (sinceRebuild < STREAMING_INVITE_REBUILD_GAP_MS) {
-            appendLog(
-                "CTRL: 距上次因邀请重建 ${sinceRebuild}ms（防抖 ${STREAMING_INVITE_REBUILD_GAP_MS}ms）" +
-                    "——先不动，避免两侧反复拆会话",
-            )
-            return
-        }
-        lastInviteRebuildAt = now
-        appendLog("CTRL: 主动退役当前会话并按车机要求重建（预计 3~4 秒无画面，比被它 18 秒后拆掉划算）")
-        val work = connectionWork.capture()
-        Bg.run("ctrl-invite-rebuild") {
-            if (!work.isCurrent) return@run
-            if (connectCancelled || !sessionWanted) return@run
-            // 先退役：onCarPlayEndpoint 开头有「推流中忽略端点」的守卫，不退役就进不去。
-            runCatching { work.runIfCurrent { retireSession() } }
-                .onFailure { appendLog("CTRL: 退役旧会话失败（${it.message}）——仍尝试重连") }
-            work.runIfCurrent { setupWork.end(); sessionStarting.set(false); connectCancelled = false }
-            onCarPlayEndpoint(endpoint, "推流中车机邀请要求重建", work)
-        }
     }
-
     /** 本机端口是否在监听（CarLife 引擎 7240）。600ms 足够，本机回环不会慢。 */
     private fun probeLocalPort(port: Int): Boolean =
         try {
@@ -4223,8 +4160,6 @@ object SessionController {
         // 阶段计时清零：从这里开始算「这次连接一共多久」。
         mutate { connectBudget.begin(source) }
         // 新一轮推流：邀请计数归零（日志里"本流第 N 次"才读得懂）。
-        // 注意**不清 [lastInviteRebuildAt]**：防抖必须跨会话生效，否则重建出来的新会话
-        // 一收到邀请就再拆一次，会变成"永远在重建、永远出不了画面"。
         mutate { streamingInviteCount = 0; lastStreamingInviteAt = 0L }
         // 空端点 = 新协议车机（GM/Cinemo 等）声明会发 0x4301 但窗口内未到。
         // Iap2SenderSession 已不再为此拆链，保活泵会把晚到的 0x4301 经 onLateEndpoint
