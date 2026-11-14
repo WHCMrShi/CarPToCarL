@@ -399,9 +399,14 @@ object SessionController {
      * 优先级：**先直投当前活跃音乐会话的 transportControls**（不依赖焦点路由，精确命中
      * 手机音乐 App，避开 CarPToCarL 自身 AudioTrack 抢占焦点导致的「暂停不生效」），
      * 直投失败再回退到 AudioManager 全局路由。
+     * 活跃 CarLife 的播放/暂停先交给独立命令线程，补发明确硬键；全部投递失败仍走系统兜底。
      */
     fun dispatchMediaKey(keyCode: Int) {
-        if (CarLifeHijack.handleMediaKey(keyCode)) return
+        if (CarLifeHijack.handleMediaKey(keyCode) { dispatchSystemMediaKey(keyCode) }) return
+        dispatchSystemMediaKey(keyCode)
+    }
+
+    private fun dispatchSystemMediaKey(keyCode: Int) {
         val action = MediaSessionsState.transportActionFor(keyCode)
         if (action >= 0 && MediaSessionsState.dispatchTransport(action)) {
             return
@@ -3159,7 +3164,6 @@ object SessionController {
 
     private fun installAudio(lease: SessionEpoch.Lease, candidate: AudioSender, state: () -> Unit): Boolean {
         if (!audioEpoch.isCurrent(lease) || !candidate.startPassthrough()) { candidate.stop(); return false }
-        candidate.setMediaPaused(!CarLifeHijack.mediaForwardingAllowed)
         var previous: AudioSender? = null
         val installed = audioEpoch.commit(lease) {
             previous = audioSender

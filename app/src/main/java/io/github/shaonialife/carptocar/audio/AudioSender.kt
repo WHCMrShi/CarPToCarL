@@ -446,14 +446,6 @@ class AudioSender(
     val hasRealInput: Boolean get() = realInputSeen.get()
     private val continuity = AudioContinuityWindow()
     @Volatile private var ingress: AudioIngressQueue? = null
-    fun clearPendingMedia() {
-        val removed = ingress?.clearMedia() ?: 0
-        log("MEDIA-CONTROL: pendingMediaCleared=$removed tts=preserved inFlight=not-retractable")
-    }
-    fun setMediaPaused(paused: Boolean) {
-        val removed = ingress?.setMediaPaused(paused) ?: 0
-        log("MEDIA-CONTROL: ingressPaused=$paused removed=$removed tts=preserved inFlight=not-retractable")
-    }
 
     private var keepAliveThread: Thread? = null
 

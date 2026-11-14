@@ -66,10 +66,15 @@ class CarLifeHuClient(
      * 采样率也可能不同（TTS 常见 16k 单声道），所以必须各自带格式送进发送端重采样。
      */
     private val onTtsPcm: (pcm: ByteArray, size: Int) -> Unit = { _, _ -> },
-    /** PAUSE/RESUME 通知用于同步锚点；播放资格由独立状态机裁决。 */
+    /**
+     * 引擎音频**开停信号**（0x30002 开始 / 0x30003 停止，长度 0 的裸类型包）。
+     *
+     * 真机实证（2026-10-26，奥迪 MIB3）：这两个包出现在「引擎音频真正开始/停止推 PCM」
+     * 的同一瞬间——来电期间只有 0x30003、挂断恢复播放时才有 0x30002。上层据此在恢复时
+     * 补发同步包重新对齐车机时钟（[io.github.shaonialife.carptocar.audio.AudioSender.resyncAnchor]）。
+     * 只当「信号」用，不作为是否转发 PCM 的裁决——停止后万一还有 PCM 仍然照常转发。
+     */
     private val onAudioGate: (active: Boolean) -> Unit = {},
-    private val onMediaActivity: (CarLifeMediaActivity) -> Unit = {},
-    private val mediaPlaybackExpected: () -> Boolean? = { null },
     /**
      * 外部「此刻**应该**有声音」的信号（上层按音乐会话是否在播判断）。
      *
@@ -307,7 +312,7 @@ class CarLifeHuClient(
     private val ttsChan = AudioChannel(CarLifeProtocol.PORT_TTS, "TTS", isTts = true)
 
     /**
-     * 引擎音频是否处于「活跃」态（0x30004 恢复 / 0x30003 暂停）。
+     * 引擎音频是否处于「活跃」态（0x30002 开 / 0x30003 停）。
      *
      * 沉默看门狗的判据之一：引擎刚说过「开始推音频」却一直没有 PCM，是明确的异常。
      * 只当参考信号，不用来裁决是否转发 PCM（见 [onAudioGate] 注释）。
@@ -762,9 +767,6 @@ class CarLifeHuClient(
 
             CarLifeProtocol.MD_MODULE_STATUS -> {
                 val modules = CarLifeProtocol.parseModuleStatus(payload)
-                modules.firstOrNull { it.first == 3 }?.let {
-                    onMediaActivity(if (it.second == 1) CarLifeMediaActivity.FOCUS_GAINED else CarLifeMediaActivity.FOCUS_RELEASED)
-                }
                 voiceObservation.update(modules)?.let { message -> runCatching { log(message) } }
                 hudObserver.moduleStatus(modules, android.os.SystemClock.uptimeMillis())
                 val automaticIds = CarLifeProtocol.automaticModuleControlIds(modules)
@@ -1301,8 +1303,8 @@ class CarLifeHuClient(
     }
 
     /**
-     * 下车机硬键（0x68008）。目前只用于语音键：车机按下方向盘语音键 → 我们发
-     * `HardKey.VR_START`，CarLife+ 用**手机自己的麦克风**起语音识别。
+     * 下发车机硬键（0x68008），用于媒体播放/暂停及语音键。
+     * `HardKey.VR_START` 让 CarLife+ 用手机自己的麦克风起语音识别。
      */
     fun sendHardKeyCode(keycode: Int): Boolean {
         if (!running.get()) return false
@@ -1580,7 +1582,6 @@ class CarLifeHuClient(
                                 )
                                 onAudioFormat(rate, channels)
                                 channel.announced = true
-                                onMediaActivity(CarLifeMediaActivity.INITIALIZED)
                             }
                         }
 
@@ -1594,31 +1595,23 @@ class CarLifeHuClient(
                             }
                             if (length > 0) {
                                 noteAudioPcm(channel)
-                                onMediaActivity(CarLifeMediaActivity.PCM)
                                 onAudioPcm(payload, length)
                             }
                         }
 
                         // 引擎音频开停信号（长度 0）：来电/路由切换时引擎会先发 STOP，
                         // 挂断恢复播放再发 START。只上报，不拦截音频。
-                        CarLifeProtocol.MUSIC_PKG_RESUME -> {
-                            log("MEDIA-CONTROL: wire=0x30004 event=RESUME")
+                        CarLifeProtocol.MUSIC_PKG_START -> {
+                            log("CARLIFE: $label 引擎音频开始（0x30002）")
                             engineAudioActive = true
                             playbackEvidence.engine(android.os.SystemClock.uptimeMillis(), true)
-                            onMediaActivity(CarLifeMediaActivity.RESUME)
                             onAudioGate(true)
                         }
 
                         CarLifeProtocol.MUSIC_PKG_STOP -> {
-                            log("MEDIA-CONTROL: wire=0x30002 event=STOP cycle-boundary=true")
-                            onMediaActivity(CarLifeMediaActivity.STOP)
-                        }
-
-                        CarLifeProtocol.MUSIC_PKG_PAUSE -> {
-                            log("MEDIA-CONTROL: wire=0x30003 event=PAUSE")
+                            log("CARLIFE: $label 收到引擎音频停止 0x30003（原因未提供）")
                             engineAudioActive = false
                             playbackEvidence.engine(android.os.SystemClock.uptimeMillis(), false)
-                            onMediaActivity(CarLifeMediaActivity.PAUSE)
                             onAudioGate(false)
                         }
 
@@ -1639,10 +1632,7 @@ class CarLifeHuClient(
         } finally {
             // 只有「我这一代读线程仍是最新」才允许判死：旧线程被 close() 时也会走到这里，
             // 若无条件置死就会把刚接上的新通道立刻判死，形成重连死循环。
-            if (channel.generation == generation) {
-                channel.dead = true
-                if (!isTts) onMediaActivity(CarLifeMediaActivity.TRANSPORT_CLOSED)
-            }
+            if (channel.generation == generation) channel.dead = true
         }
     }
 
@@ -1680,7 +1670,7 @@ class CarLifeHuClient(
     private fun superviseAudio(channel: AudioChannel) {
         val now = android.os.SystemClock.uptimeMillis()
         val external = audioExpected()
-        val expected = mediaPlaybackExpected() ?: playbackEvidence.expected(now, external)
+        val expected = playbackEvidence.expected(now, external)
         channel.expectation.observe(now, expected)
         val socket = sockets[channel.port]
         if (socket == null || socket.isClosed || channel.dead) {

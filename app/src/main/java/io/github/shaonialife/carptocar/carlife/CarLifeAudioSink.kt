@@ -17,15 +17,14 @@ import io.github.shaonialife.carptocar.audio.AudioSender
  */
 internal class CarLifeAudioSink(
     private val log: (String) -> Unit,
-    /**
-     * 是否参与「音乐会话暂停 → 丢弃残留 PCM」的联动。
-     *
-     * 媒体通道（9240）用 true：音乐 App 暂停后引擎仍会把排队 PCM 推完，不丢会重复播放。
-     * **TTS 通道（9241）必须用 false**：导航播报恰恰多发生在没放音乐 / 音乐被暂停的时候，
-     * 一旦套用这条联动，整段播报会被当成「残留」吃掉——这是「开导航没声音」的另一半原因
-     * （2026-10-27 日志：10:35:04 刚触发暂停丢弃，10:35:14 的导航 TTS 就来了）。
-     */
-    private val dropWhenPaused: Boolean = true,
+    /** Port origin only, for queue budgets; merged 9240 PCM is never music-only. */
+    private val speech: Boolean = false,
+    private val clock: () -> Long = { android.os.SystemClock.uptimeMillis() },
+    private val forward: (ByteArray, Int, Int, Int, Boolean) -> Boolean = { pcm, size, rate, channels, tts ->
+        val sender = io.github.shaonialife.carptocar.SessionController.audioSender
+        if (sender == null || !sender.isRunning) false
+        else { sender.feedPcm(pcm, size, rate, channels, speech = tts); true }
+    },
 ) {
     /** CarLife 引擎宣告的源采样率（CarlifeMusicInit；<=0 表示尚未宣告，按 48k 处理）。 */
     @Volatile
@@ -38,10 +37,6 @@ internal class CarLifeAudioSink(
     private var packets = 0L
     private var bytes = 0L
     private var lastReportAt = 0L
-
-    /** 因「音乐会话暂停」被丢弃的包数（诊断用：导航播报被误判暂停时能一眼看出来）。 */
-    private var droppedWhenPaused = 0L
-    private var lastDropReportAt = 0L
 
     /**
      * 电平统计（跟着 5 秒那条「音频直通」日志一起报）。
@@ -56,66 +51,6 @@ internal class CarLifeAudioSink(
     private var nonZeroSinceReport = 0L
 
     private var sampledSinceReport = 0L
-
-    /**
-     * 播放状态联动（车机按暂停 → 手机音乐 App PAUSED → 这里截断）。
-     *
-     * 根因（2026-10-24 实测）：音乐 App 收到暂停后，CarLife 引擎（`com.baidu.carlife.honor`）
-     * 的音频推流管道**不跟随停止**，继续把暂停前排队的 PCM 往车机送，表现为「重复播放」。
-     * 所以 CarPToCarL 侧必须自己兜底：检测到会话 PAUSED 时主动丢弃引擎仍在推的残留 PCM。
-     *
-     * **但截断必须有时限**（2026-10-26 修）：残留队列排空只需要几秒，而「暂停」状态可能
-     * 维持很久——连上车机时手机里放着一条暂停的音乐会话是极常见的情况，此时导航播报、
-     * 提示音全都会被当成「残留」丢掉，表现正是「刚连上开导航没声音，放音乐才有声」。
-     * 现在只在前 [PAUSE_DROP_WINDOW_MS] 内截断，之后恢复放行。
-     */
-    @Volatile
-    private var playbackPaused = false
-
-    /** 本轮「暂停」的起点（0 = 没在暂停）。 */
-    @Volatile
-    private var pausedSince = 0L
-
-    /** 「超时放行」只记一次，避免每秒刷屏。 */
-    private var pauseWindowExpiredLogged = false
-
-    /**
-     * 外部联动开关：音乐会话暂停时置 true（丢弃残留 PCM），恢复播放时置 false。
-     */
-    fun setPlaybackPaused(paused: Boolean) {
-        val changed = playbackPaused != paused
-        playbackPaused = paused
-        if (!paused) {
-            pausedSince = 0L
-            pauseWindowExpiredLogged = false
-            if (changed) log("CARLIFE: 音乐会话恢复——停止丢弃引擎 PCM")
-            return
-        }
-        if (changed || pausedSince == 0L) {
-            pausedSince = android.os.SystemClock.uptimeMillis()
-            pauseWindowExpiredLogged = false
-            log(
-                "CARLIFE: 音乐会话暂停——丢弃引擎残留 PCM（避免重复播放，" +
-                    "${PAUSE_DROP_WINDOW_MS / 1000} 秒后自动恢复放行）",
-            )
-        }
-    }
-
-    /** 当前这包 PCM 是否该按「暂停残留」丢掉（只在暂停后的一小段窗口内）。 */
-    private fun shouldDropPaused(now: Long): Boolean {
-        if (!playbackPaused) return false
-        val since = pausedSince
-        if (since == 0L) return true
-        if (now - since < PAUSE_DROP_WINDOW_MS) return true
-        if (!pauseWindowExpiredLogged) {
-            pauseWindowExpiredLogged = true
-            log(
-                "CARLIFE: 暂停已超过 ${PAUSE_DROP_WINDOW_MS / 1000} 秒——恢复放行 PCM" +
-                    "（残留队列早已排空，避免误丢导航播报/提示音）",
-            )
-        }
-        return false
-    }
 
     /** 手机宣告的音频格式（CarlifeMusicInit）。重复调用无副作用。 */
     @Synchronized
@@ -137,22 +72,13 @@ internal class CarLifeAudioSink(
         size: Int,
     ) {
         if (size <= 0) return
-        // 音乐会话暂停后的一小段窗口内：丢弃引擎仍在推的残留 PCM（避免重复播放）
-        val now = android.os.SystemClock.uptimeMillis()
-        if (dropWhenPaused && shouldDropPaused(now)) {
-            countDroppedWhenPaused()
-            return
-        }
         if (srcRate <= 0) {
             configure(
                 if (sampleRate > 0) sampleRate else DEFAULT_RATE,
                 if (channels > 0) channels else 2,
             )
         }
-        val sender = io.github.shaonialife.carptocar.SessionController.audioSender
-        if (sender == null || !sender.isRunning) return
-        // 直通：交给 AudioSender 重采样 + 封包 + 发送
-        sender.feedPcm(pcm, size, srcRate, srcChannels, speech = !dropWhenPaused)
+        if (!forward(pcm, size, srcRate, srcChannels, speech)) return
         sampleLevel(pcm, size)
         packets++
         bytes += size
@@ -182,38 +108,13 @@ internal class CarLifeAudioSink(
         packets = 0
         bytes = 0
         lastReportAt = 0
-        droppedWhenPaused = 0
-        lastDropReportAt = 0
-        pauseWindowExpiredLogged = false
-        pausedSince = 0L
         peakSinceReport = 0
         nonZeroSinceReport = 0
         sampledSinceReport = 0
     }
 
-    /**
-     * 「暂停中丢弃」的诊断计数。
-     *
-     * 触发条件只看媒体会话状态（`nowPlaying.playing == false`），而导航播报、系统提示音
-     * 很多时候**不产生** PLAYING 会话——一旦被误判成暂停，音频就会被静默丢掉，
-     * 表现为「刚连上开导航没声音，开始放音乐才有声」。这里每 5 秒记一条，
-     * 下次导出日志就能直接确认是不是这条路径吃掉了声音。
-     */
-    private fun countDroppedWhenPaused() {
-        droppedWhenPaused++
-        val now = android.os.SystemClock.uptimeMillis()
-        if (lastDropReportAt == 0L) {
-            lastDropReportAt = now
-            return
-        }
-        if (now - lastDropReportAt < DROP_REPORT_INTERVAL_MS) return
-        log("CARLIFE: 暂停期间丢弃 ${droppedWhenPaused} 包 PCM（若此时本应有导航/媒体声音，说明会话状态被误判）")
-        droppedWhenPaused = 0
-        lastDropReportAt = now
-    }
-
     private fun reportIfDue() {
-        val now = android.os.SystemClock.uptimeMillis()
+        val now = clock()
         if (lastReportAt == 0L) {
             lastReportAt = now
             return
@@ -241,17 +142,6 @@ internal class CarLifeAudioSink(
         const val MAX_RATE = 48_000
         const val REPORT_INTERVAL_MS = 5_000L
 
-        /** 「暂停中丢弃」日志节流（30 秒一条，避免长时间暂停刷屏）。 */
-        const val DROP_REPORT_INTERVAL_MS = 30_000L
-
-        /**
-         * 暂停后**只在这段窗口内**丢弃 PCM。
-         *
-         * 引擎暂停后残留的排队 PCM 只够排几秒；窗口设成 15 秒既能把重复播放彻底压住，
-         * 又不会因为「手机里常驻一条暂停的音乐会话」把导航播报/提示音长期吃掉。
-         */
-        const val PAUSE_DROP_WINDOW_MS = 15_000L
-
         /** 电平统计的「非零」门限（约 -66dBFS，低于它的样本算静音底噪）。 */
         const val SILENCE_FLOOR = 16
     }
@@ -261,9 +151,8 @@ internal class CarLifeAudioSink(
 internal fun carLifeAudioTypeName(type: Int): String =
     when (type) {
         CarLifeProtocol.MUSIC_PKG_INIT -> "INIT"
-        CarLifeProtocol.MUSIC_PKG_STOP -> "STOP边界"
-        CarLifeProtocol.MUSIC_PKG_PAUSE -> "暂停"
-        CarLifeProtocol.MUSIC_PKG_RESUME -> "恢复"
+        CarLifeProtocol.MUSIC_PKG_START -> "开始"
+        CarLifeProtocol.MUSIC_PKG_STOP -> "停止"
         CarLifeProtocol.MUSIC_PKG_NORMAL -> "PCM"
         CarLifeProtocol.TTS_PKG_INIT -> "TTS-INIT"
         0x40002 -> "TTS-开始"
