@@ -120,8 +120,18 @@ class AirPlayClient(
         val scope: ConnectionResources,
     ) {
         val attempted = java.util.concurrent.atomic.AtomicBoolean()
+        val queued = java.util.concurrent.atomic.AtomicBoolean()
+        @Volatile var readiness: BluetoothDisableReadiness? = null
+        @Volatile var deferredReason: String? = null
         var accepted = false // Read/written under connectionLock; never means actual BT disconnection.
     }
+    internal class BluetoothDisableReadiness(
+        val recordSucceeded: Boolean,
+        val iap2Ready: () -> Boolean,
+        val source: () -> (() -> Boolean)?,
+        val workCurrent: () -> Boolean,
+        val beforeSend: () -> Unit,
+    )
     @Volatile private var bluetoothDisableSession: BluetoothDisableSession? = null
 
     internal val bluetoothDisableAccepted: Boolean get() = synchronized(connectionLock) {
@@ -673,6 +683,8 @@ class AirPlayClient(
         scope.start("airplay-feedback", unique = true) {
             var sent = 0
             while (owns(owner, scope)) {
+                // Late source/control readiness uses this existing heartbeat, not a new poller.
+                evaluateBluetoothDisable()
                 try {
                     val (status, body) = request("POST", "/feedback", ByteArray(0), expectedScope = scope)
                     sent++
@@ -3139,24 +3151,47 @@ class AirPlayClient(
         }
 
     /**
-     * CarPlay §23.3.7.3: phone -> accessory, on the Controller control channel.
-     * One attempt after activation and Wi-Fi iAP2 readiness; no CarLife gate or retry.
-     * The response is protocol acknowledgement, not proof of Bluetooth disconnection.
+     * Arm this SETUP's one attempt. No source means defer, never disconnect Bluetooth
+     * needed to start CarLife. The existing feedback loop rechecks late readiness.
+     * A source lease refers to a live current HU, not a notice or cached frame.
      */
-    internal fun disableBluetoothAfterActivation(recordSucceeded: Boolean, iap2Ready: Boolean) {
+    internal fun disableBluetoothAfterActivation(
+        recordSucceeded: Boolean,
+        source: () -> (() -> Boolean)?,
+        workCurrent: () -> Boolean,
+        beforeSend: () -> Unit = {},
+        iap2Ready: () -> Boolean = { controlSessionReady },
+    ) {
         val session = bluetoothDisableSession ?: return
+        session.readiness = BluetoothDisableReadiness(recordSucceeded, iap2Ready, source, workCurrent, beforeSend)
+        evaluateBluetoothDisable()
+    }
+
+    internal fun evaluateBluetoothDisable() {
+        val session = bluetoothDisableSession ?: return
+        val readiness = session.readiness ?: return
+        if (session.attempted.get() || session.queued.get()) return
+        fun current(): Boolean = bluetoothDisableSession === session && session.readiness === readiness &&
+            resources === session.scope && setupOwnerAlive(session.generation) && readiness.workCurrent()
+        fun defer(reason: String) {
+            if (session.deferredReason != reason) {
+                session.deferredReason = reason
+                log("BT-DISABLE: deferred reason=$reason generation=${session.generation}")
+            }
+        }
         val reason = when {
-            !recordSucceeded -> "record-not-accepted"
-            !iap2Ready -> "wifi-iap2-not-ready"
+            !current() -> "session-retired"
+            !readiness.recordSucceeded -> "record-not-accepted"
             !session.bluetoothAdvertised -> "receiver-bluetoothIDs-missing"
             DeviceIdentity.normalize(session.deviceId) == null -> "local-bluetooth-address-unavailable"
-            !setupOwnerAlive(session.generation) || resources !== session.scope -> "session-retired"
+            !readiness.iap2Ready() -> "wifi-iap2-not-ready"
             else -> null
         }
-        if (reason != null) { log("BT-DISABLE: skipped reason=$reason"); return }
-        if (!session.attempted.compareAndSet(false, true)) return
-        session.scope.start("airplay-disable-bluetooth") {
-            if (bluetoothDisableSession !== session || !setupOwnerAlive(session.generation)) return@start
+        if (reason != null) { defer(reason); return }
+        val sourceLease = readiness.source()
+        if (sourceLease == null || !sourceLease()) { defer("carlife-source-not-ready"); return }
+        if (!session.queued.compareAndSet(false, true)) return
+        val worker = session.scope.start("airplay-disable-bluetooth") {
             try {
                 // DiPlay handleCommand and TROOPERS24 slide 32 use params.deviceID.
                 // The 2015 command-key table alone does not establish this envelope.
@@ -3164,10 +3199,21 @@ class AirPlayClient(
                     "type" to "disableBluetooth",
                     "params" to linkedMapOf("deviceID" to session.deviceId),
                 ))
-                log("BT-DISABLE: request generation=${session.generation} deviceIDSource=session-SETUP channel=control")
+                log("BT-DISABLE: queued generation=${session.generation}; source lease captured")
                 val (status, _) = request(
                     "POST", "/command", body,
                     contentType = "application/x-apple-binary-plist", expectedScope = session.scope,
+                    beforeWrite = {
+                        // Recheck after waiting for the RTSP writer. A stopped/replaced
+                        // source or SETUP cannot spend the attempt or affect its successor.
+                        if (!current() || !readiness.iap2Ready() || !sourceLease()) {
+                            defer("readiness-changed-before-write")
+                            throw IOException("Bluetooth handoff readiness changed")
+                        }
+                        if (!session.attempted.compareAndSet(false, true)) throw IOException("Bluetooth handoff already attempted")
+                        readiness.beforeSend()
+                        log("BT-DISABLE: request generation=${session.generation} deviceIDSource=session-SETUP channel=control")
+                    },
                 )
                 val accepted = status.split(' ').getOrNull(1)?.toIntOrNull() == 200
                 synchronized(connectionLock) {
@@ -3177,9 +3223,12 @@ class AirPlayClient(
                 }
                 log("BT-DISABLE: response generation=${session.generation} accepted=$accepted status=[$status]; profile/ACL disconnection unconfirmed")
             } catch (error: IOException) {
-                log("BT-DISABLE: request failed generation=${session.generation} reason=${error.message}; no retry")
+                if (session.attempted.get()) log("BT-DISABLE: request failed generation=${session.generation} reason=${error.message}; no retry")
+            } finally {
+                session.queued.set(false)
             }
         }
+        if (worker == null) session.queued.set(false)
     }
 
     /**
@@ -3551,6 +3600,7 @@ class AirPlayClient(
         contentType: String = "application/octet-stream",
         extraHeaders: List<Pair<String, String>> = emptyList(),
         expectedScope: ConnectionResources? = null,
+        beforeWrite: (() -> Unit)? = null,
     ): Pair<String, ByteArray> {
         if (cancelled || disposed || closingConnection || Thread.currentThread().isInterrupted) throw IOException("连接已退役")
         val client = socket ?: throw IOException("未连接")
@@ -3562,6 +3612,7 @@ class AirPlayClient(
             if (socket !== client || (expectedScope != null && (resources !== expectedScope || expectedScope.isClosed))) {
                 throw IOException("请求所属连接已退役")
             }
+            beforeWrite?.invoke()
             cseq = ++cSeq
             // 先登记再写：响应可能在 write 返回前就到达
             pendingResponses[cseq] = queue

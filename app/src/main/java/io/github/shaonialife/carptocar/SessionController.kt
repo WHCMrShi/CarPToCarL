@@ -5236,19 +5236,30 @@ object SessionController {
                                         )
                                     }
                                 }
-                                // Send once after activation; no CarLife gate. Recovery follows the command result.
+                                // CarPlay-first retains Bluetooth until the current CarLife source is live.
+                                // The existing feedback heartbeat rechecks late source/control readiness.
                                 if (!attemptCancelled() && currentClient === client) {
                                     val handoffWork = connectionWork.capture()
                                     val handoffSetup = setupWork.capture()
-                                    BtSessionGate.links.activeToken()?.let { owner ->
-                                        // Q4 15:23:47: command 200 -> BT EOF -> live Wi-Fi CarPlay.
-                                        // Register before sending, but suppress only after this session's 200.
-                                        BtSessionGate.expectBluetoothHandoff(owner) {
-                                            handoffWork.isCurrent && handoffSetup.isCurrent && !connectCancelled &&
-                                                currentClient === client && client.bluetoothDisableAccepted && client.controlSessionReady
-                                        }
+                                    val handoffTarget = videoSender
+                                    val handoffCurrent = {
+                                        handoffWork.isCurrent && handoffSetup.isCurrent && !connectCancelled &&
+                                            currentClient === client && handoffTarget != null &&
+                                            videoSender === handoffTarget && handoffTarget.isRunning
                                     }
-                                    client.disableBluetoothAfterActivation(activationRecorded, client.controlSessionReady)
+                                    client.disableBluetoothAfterActivation(
+                                        activationRecorded,
+                                        source = { handoffTarget?.let { CarLifeHijack.bluetoothHandoffSource(it) } },
+                                        workCurrent = handoffCurrent,
+                                        beforeSend = {
+                                            BtSessionGate.links.activeToken()?.let { owner ->
+                                                // Only this SETUP's 200 suppresses recovery, including EOF-before-200.
+                                                BtSessionGate.expectBluetoothHandoff(owner) {
+                                                    handoffCurrent() && client.bluetoothDisableAccepted && client.controlSessionReady
+                                                }
+                                            }
+                                        },
+                                    )
                                 }
                                 // RECORD 成功 = 会话活着。此刻丢弃报文缓冲：用户要的是
                                 // 「连不上」的现场，正常连接不需要快照（省空间也省导出体积）。

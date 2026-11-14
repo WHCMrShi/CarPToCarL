@@ -330,6 +330,7 @@ object CarLifeHijack {
     /** 最近一个 GOP 缓存（从关键帧起），供会话建立瞬间「补历史帧」。 */
     private val gop = ArrayDeque<Pair<ByteArray, Boolean>>()
     @Volatile private var activeSourceIdentity: Any? = null
+    @Volatile private var activeSourceEvidence: CarLifeSourceEvidence? = null
     private var gopSourceIdentity: Any? = null
     private var gopOriginAt = 0L // Diagnostic only; valid while the original keyframe is retained.
     private var gopBytes = 0
@@ -354,6 +355,20 @@ object CarLifeHijack {
 
     /** 已劫持并收到流（车机连接前就该为 true）。 */
     val isStreaming: Boolean get() = running.get() && client?.isRunning == true && hasVideo
+
+    /** Current, live CarLife input only; cached/notice frames and retired source callbacks cannot qualify. */
+    internal fun bluetoothHandoffSource(owner: VideoSender): (() -> Boolean)? {
+        val hu = client ?: return null
+        val identity = activeSourceIdentity ?: return null
+        val evidence = activeSourceEvidence ?: return null
+        val scope = warmScope
+        return evidence.lease {
+            running.get() && !scope.isClosed && warmScope === scope &&
+                client === hu && hu.isRunning && activeSourceIdentity === identity &&
+                activeSourceEvidence === evidence && sender === owner && owner.isRunning &&
+                projectionOwner.isCurrent(owner)
+        }
+    }
 
     /**
      * 最近 10s 内源侧**真的出过视频帧**。判定一律以真实视频流为准（用户明确要求）：
@@ -727,6 +742,8 @@ object CarLifeHijack {
         client?.stop()
         client = null
         activeSourceIdentity = null
+        activeSourceEvidence?.retire()
+        activeSourceEvidence = null
         audioSink?.stop()
         audioSink = null
         ttsSink?.stop()
@@ -778,6 +795,7 @@ object CarLifeHijack {
             val mediaState = CarLifeNowPlayingState()
             nowPlayingState = mediaState
             val sourceIdentity = Any()
+            val sourceEvidence = CarLifeSourceEvidence({ android.os.SystemClock.uptimeMillis() })
             synchronized(this) {
                 if (!scope.isClosed && running.get()) io.github.shaonialife.carptocar.media.NavigationNowPlaying.begin(sourceIdentity)
             }
@@ -786,7 +804,11 @@ object CarLifeHijack {
                 // routeAudio → sink.write → feedPcm 返回前已消费或复制；GOP 视频仍独立持有数组。
                 borrowPcmInput = true,
                 log = { line -> logSink?.invoke(line) },
-                onVideoFrame = { data, key, ts -> if (!scope.isClosed) { zeroFrameRecovery.reset(); onFrame(data, key, ts, sourceIdentity) } },
+                onVideoFrame = { data, key, ts -> if (!scope.isClosed) {
+                    sourceEvidence.frame(data.size)
+                    zeroFrameRecovery.reset()
+                    onFrame(data, key, ts, sourceIdentity)
+                } },
                 requestZeroFrameRecovery = { idle, hasFrame, retries ->
                     !scope.isClosed && running.get() && zeroFrameRecovery.acquire(idle, hasFrame, retries, sender != null)
                 },
@@ -844,7 +866,14 @@ object CarLifeHijack {
             }
             val adopted = connected && synchronized(this) {
                 if (!running.get() || scope.isClosed || !hu.isRunning) false
-                else { resetTouchState(); client = hu; activeSourceIdentity = sourceIdentity; true }
+                else {
+                    resetTouchState()
+                    activeSourceEvidence?.retire()
+                    client = hu
+                    activeSourceIdentity = sourceIdentity
+                    activeSourceEvidence = sourceEvidence
+                    true
+                }
             }
             if (adopted) {
                 announcedWait = false
@@ -872,6 +901,7 @@ object CarLifeHijack {
             while (running.get() && !scope.isClosed && hu.isRunning) {
                 sleep(500)
             }
+            sourceEvidence.retire()
             hu.stop()
             if (nowPlayingState === mediaState) {
                 io.github.shaonialife.carptocar.media.NavigationNowPlaying.end(sourceIdentity)
@@ -883,6 +913,7 @@ object CarLifeHijack {
                 if (client === hu) {
                     client = null
                     activeSourceIdentity = null
+                    activeSourceEvidence = null
                     resetTouchState()
                 }
             }
