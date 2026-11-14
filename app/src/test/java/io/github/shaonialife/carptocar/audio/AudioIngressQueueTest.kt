@@ -7,6 +7,25 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AudioIngressQueueTest {
+    @Test fun pendingOwnershipHoldsFirstTtsUntilGrantAndDenialDropsQueuedSpeech() {
+        val delivered = java.util.concurrent.LinkedBlockingQueue<Int>()
+        AudioIngressQueue(consume = { bytes, _, _, _ -> delivered.add(bytes[0].toInt()) }, clock = { 0L }).use { queue ->
+            queue.setOutputMode(AudioOutputMode.HOLD)
+            assertTrue(queue.offer(ByteArray(4) { 1 }, 4, 16000, 1, true))
+            assertTrue(queue.pendingSpeech())
+            assertNull(delivered.poll(100, TimeUnit.MILLISECONDS))
+            queue.setOutputMode(AudioOutputMode.ALLOW)
+            assertEquals(1, delivered.poll(3, TimeUnit.SECONDS))
+            queue.setOutputMode(AudioOutputMode.HOLD)
+            assertTrue(queue.offer(ByteArray(4) { 2 }, 4, 16000, 1, true))
+            queue.setOutputMode(AudioOutputMode.DROP)
+            assertFalse(queue.offer(ByteArray(4) { 3 }, 4, 16000, 1, true))
+            queue.setOutputMode(AudioOutputMode.ALLOW)
+            assertTrue(queue.offer(ByteArray(4) { 4 }, 4, 16000, 1, true))
+            assertEquals(4, delivered.poll(3, TimeUnit.SECONDS))
+            assertTrue(delivered.isEmpty())
+        }
+    }
     @Test fun pauseClearsQueuedMediaAndRejectsLateMediaButPreservesNavigation() {
         val entered = CountDownLatch(1); val release = CountDownLatch(1); val speech = CountDownLatch(1)
         val values = java.util.concurrent.CopyOnWriteArrayList<Int>()

@@ -846,6 +846,8 @@ class AirPlayClient(
 
     fun close() = synchronized(closeLock) {
         onResourceModesChanged = null
+        audioResourceSignal = null
+        audioArbitrationStarted = false
         log("CONNECT-DIAG: client=${System.identityHashCode(this)} close pairing=$pairingInProgress disposed=$disposed cancelled=$cancelled pending=${pendingResponses.size} eventSocket=${eventCommandSocket != null} iapLinkPresent=${iapLink != null}")
         val inFlight = pendingResponses.isNotEmpty()
         val closing = synchronized(connectionLock) {
@@ -1044,6 +1046,87 @@ class AirPlayClient(
     }
 
     private val resourceModes = ResourceModes()
+    private val audioOutputLock = Any()
+    @Volatile internal var audioOutputMode = io.github.shaonialife.carptocar.audio.AudioOutputMode.ALLOW
+        private set
+    @Volatile private var audioResourceSignal: (() -> Unit)? = null
+    @Volatile private var audioArbitrationStarted = false
+
+    internal fun startAudioArbitration(
+        input: () -> Q4AudioArbitrator.Input,
+        alive: () -> Boolean,
+        output: (io.github.shaonialife.carptocar.audio.AudioOutputMode) -> Unit,
+        pause: () -> Unit,
+        resume: () -> Unit,
+        subscribe: (() -> Unit) -> Unit,
+        unsubscribe: (() -> Unit) -> Unit,
+    ) {
+        synchronized(connectionLock) {
+            if (audioArbitrationStarted || resources.isClosed || cancelled || disposed) return
+            audioArbitrationStarted = true
+        }
+        val generation = lifecycleGeneration
+        val scope = resources
+        val wake = Object()
+        val current = { generation == lifecycleGeneration && !scope.isClosed && alive() }
+        val applyOutput = { mode: io.github.shaonialife.carptocar.audio.AudioOutputMode ->
+            synchronized(audioOutputLock) {
+                if (current()) {
+                    val effective = if (mode == io.github.shaonialife.carptocar.audio.AudioOutputMode.ALLOW && !resourceModes.audio.snapshot().owned)
+                        io.github.shaonialife.carptocar.audio.AudioOutputMode.DROP else mode
+                    audioOutputMode = effective
+                    output(effective)
+                }
+            }
+        }
+        val signal: () -> Unit = {
+            if (current()) {
+                val state = resourceModes.audio.snapshot()
+                val desired = input()
+                if (state.borrowers > 0) applyOutput(io.github.shaonialife.carptocar.audio.AudioOutputMode.DROP)
+                else if (!state.owned && (desired.media || desired.navigation)) {
+                    applyOutput(io.github.shaonialife.carptocar.audio.AudioOutputMode.HOLD)
+                }
+                synchronized(wake) { wake.notifyAll() }
+            }
+        }
+        val arbiter = Q4AudioArbitrator(resourceModes.audio, input, current,
+            publish = { proposal -> publishAudioResource(proposal, current) },
+            output = applyOutput, pause = pause, resume = resume, log = log)
+        subscribe(signal)
+        audioResourceSignal = signal
+        if (!scope.own(AutoCloseable { unsubscribe(signal) })) return
+        log("AUDIO-RESOURCE: enabled policy=q4-audio-v1 screen=unchanged negotiated-stream=retained")
+        signal()
+        scope.start("q4-audio-resources") {
+            try {
+                while (current()) {
+                    arbiter.step()
+                    synchronized(wake) { if (current()) wake.wait(250) }
+                }
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } catch (error: Exception) {
+                applyOutput(io.github.shaonialife.carptocar.audio.AudioOutputMode.DROP)
+                log("AUDIO-RESOURCE: worker=failed error=${error.javaClass.simpleName}; output=DROP reconnect-required")
+            }
+        }
+    }
+
+    private fun publishAudioResource(proposal: Q4AudioResources.Proposal, current: () -> Boolean): Boolean = synchronized(modeWriteLock) {
+        if (!current() || resourceModes.audio.snapshot() != proposal.before) return false
+        val body = BinaryPlist.encode(mapOf("type" to "modesChanged", "params" to mapOf("resources" to listOf(proposal.after.resource()))))
+        try {
+            val (status, response) = request("POST", "/command", body, contentType = "application/x-apple-binary-plist")
+            val accepted = Q4AudioResources.accepted(status, response)
+            val committed = accepted && current() && resourceModes.audio.commit(proposal)
+            log("AUDIO-RESOURCE: publish=${proposal.action} rtsp=$status bodyAccepted=$accepted committed=$committed expectedRevision=${proposal.before.revision}")
+            committed
+        } catch (error: Exception) {
+            log("AUDIO-RESOURCE: publish=${proposal.action} error=${error.javaClass.simpleName} committed=false")
+            false
+        }
+    }
     private val modeWriteLock = Any()
     private val modeUpdateQueued = java.util.concurrent.atomic.AtomicBoolean(false)
     @Volatile private var modeAttemptedVersion = -1L
@@ -1052,7 +1135,13 @@ class AirPlayClient(
     internal fun screenRecoveryAllowed(): Boolean = resourceModes.canRecoverScreen()
 
     internal fun handleModeChange(command: Map<*, *>) {
+        synchronized(audioOutputLock) {
+        val previousAudio = resourceModes.audio.snapshot()
         resourceModes.change((command["params"] as? Map<*, *>) ?: command)
+        val nextAudio = resourceModes.audio.snapshot()
+        if (nextAudio != previousAudio) log("AUDIO-RESOURCE: car-change before=$previousAudio after=$nextAudio")
+        audioResourceSignal?.invoke()
+        }
         log("RESOURCE-DIAG: change version=${resourceModes.snapshot().version} screenRecoveryAllowed=${screenRecoveryAllowed()}")
         scheduleModeUpdate()
     }

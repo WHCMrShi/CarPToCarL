@@ -66,6 +66,7 @@ class CarLifeHuClient(
      * 采样率也可能不同（TTS 常见 16k 单声道），所以必须各自带格式送进发送端重采样。
      */
     private val onTtsPcm: (pcm: ByteArray, size: Int) -> Unit = { _, _ -> },
+    private val onTtsStopped: () -> Unit = {},
     /** PAUSE/RESUME 通知用于同步锚点；播放资格由独立状态机裁决。 */
     private val onAudioGate: (active: Boolean) -> Unit = {},
     private val onMediaActivity: (CarLifeMediaActivity) -> Unit = {},
@@ -1562,8 +1563,9 @@ class CarLifeHuClient(
                             }
                             noteAudioPcm(channel)
                             onTtsPcm(payload, length)
-                        } else if (channel.controlLogged.add(type)) {
-                            log("CARLIFE: TTS 开停信号 0x${type.toString(16)}（长度 0，仅记录）")
+                        } else {
+                            if (type == CarLifeProtocol.TTS_PKG_STOP) onTtsStopped()
+                            if (channel.controlLogged.add(type)) log("CARLIFE: TTS 信号 0x${type.toString(16)}（长度 0）")
                         }
                         continue
                     }
@@ -1642,6 +1644,7 @@ class CarLifeHuClient(
             if (channel.generation == generation) {
                 channel.dead = true
                 if (!isTts) onMediaActivity(CarLifeMediaActivity.TRANSPORT_CLOSED)
+                else onTtsStopped()
             }
         }
     }
@@ -1708,7 +1711,7 @@ class CarLifeHuClient(
         // 画面还在出帧 = 引擎活着，问题只在这条音频流上。视频也停了说明整条链路有事，
         // 那是会话冻结/断链恢复的活，这里跟着重连只会把水搅浑。
         if (lastFrameAt == 0L || now - lastFrameAt > VIDEO_ALIVE_MS) return
-        // 「确实该有声音」：引擎刚发过 0x30002，或上层确认音乐会话正在播放。
+        // 「确实该有声音」由播放周期状态提供；0x30002 格式边界本身不授权起播。
         if (!expected) return
         if (now < channel.nextSilentAt) return
         if (channel.silentReopens >= SILENT_MAX_ATTEMPTS) {

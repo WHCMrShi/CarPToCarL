@@ -266,7 +266,7 @@ internal fun carLifeAudioTypeName(type: Int): String =
         CarLifeProtocol.MUSIC_PKG_RESUME -> "恢复"
         CarLifeProtocol.MUSIC_PKG_NORMAL -> "PCM"
         CarLifeProtocol.TTS_PKG_INIT -> "TTS-INIT"
-        0x40002 -> "TTS-开始"
-        0x40003 -> "TTS-PCM"
+        CarLifeProtocol.TTS_PKG_STOP -> "TTS-STOP"
+        CarLifeProtocol.TTS_PKG_NORMAL -> "TTS-PCM"
         else -> "0x%X".format(type)
     }

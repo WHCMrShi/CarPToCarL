@@ -218,6 +218,35 @@ object CarLifeHijack {
     private val playbackLock = Any()
     private var playback = CarLifeMediaPlayback()
     private val playbackListeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
+    @Volatile private var lastTtsPcmAt = Long.MIN_VALUE
+    /** Explicit end plus a bounded fallback when the engine omits STOP. Pending TTS drains before return. */
+    internal fun audioIntent(): io.github.shaonialife.carptocar.airplay.Q4AudioArbitrator.Input {
+        val ttsAt = lastTtsPcmAt
+        val navigation = (ttsAt != Long.MIN_VALUE && android.os.SystemClock.uptimeMillis() - ttsAt in 0..1500) ||
+            io.github.shaonialife.carptocar.SessionController.audioSender?.hasPendingSpeech == true
+        val track = MediaSessionsState.nowPlaying?.let { it.title to it.artist }
+            ?: latestMediaInfo?.let { it.song to it.artist }
+        return synchronized(playbackLock) {
+            io.github.shaonialife.carptocar.airplay.Q4AudioArbitrator.Input(playback.playing, navigation,
+                mediaUserActionVersion, playback to track)
+        }
+    }
+
+    private fun noteNavigationPcm() {
+        val now = android.os.SystemClock.uptimeMillis()
+        val fresh = lastTtsPcmAt == Long.MIN_VALUE || now - lastTtsPcmAt > 1500
+        lastTtsPcmAt = now
+        if (fresh) {
+            logSink?.invoke("AUDIO-RESOURCE: navigation=start source=tts-pcm")
+            playbackListeners.forEach { it() }
+        }
+    }
+
+    private fun endNavigation() {
+        if (lastTtsPcmAt != Long.MIN_VALUE) logSink?.invoke("AUDIO-RESOURCE: navigation=source-ended pending-tts=drain-before-return")
+        lastTtsPcmAt = Long.MIN_VALUE
+        playbackListeners.forEach { it() }
+    }
     @Volatile var mediaUserActionVersion = 0L
         private set
     val mediaPlaying: Boolean get() = synchronized(playbackLock) { playback.playing }
@@ -853,6 +882,7 @@ object CarLifeHijack {
             enginePlaybackAt = Long.MIN_VALUE
             val playbackOwner = CarLifeMediaPlayback()
             synchronized(playbackLock) { playback = playbackOwner }
+            lastTtsPcmAt = Long.MIN_VALUE
             mediaPlaybackListener()
             io.github.shaonialife.carptocar.SessionController.audioSender?.setMediaPaused(!mediaForwardingAllowed)
             sink.setPlaybackPaused(scopedPlaybackSnapshot()?.let { it.matchesTrack && it.playing == false } == true)
@@ -886,7 +916,11 @@ object CarLifeHijack {
                 } },
                 // 导航播报：TTS 通道独立格式、独立 sink，喂给同一个音频发送端
                 onTtsFormat = { rate, channels -> if (!scope.isClosed) naviSink.configure(rate, channels) },
-                onTtsPcm = { pcm, size -> if (!scope.isClosed) routeAudio(naviSink, pcm, size) },
+                onTtsPcm = { pcm, size -> if (!scope.isClosed && nowPlayingState === mediaState) {
+                    noteNavigationPcm()
+                    routeAudio(naviSink, pcm, size)
+                } },
+                onTtsStopped = { if (!scope.isClosed && nowPlayingState === mediaState) endNavigation() },
                 onAudioGate = { active -> if (!scope.isClosed && nowPlayingState === mediaState) {
                     mediaState.gate(active)
                     onEngineAudioGate(active)
@@ -970,7 +1004,9 @@ object CarLifeHijack {
                 sleep(500)
             }
             sourceEvidence.retire()
+            synchronized(playbackLock) { if (playback === playbackOwner) mediaUserActionVersion++ }
             updatePlayback("source-ended", playbackOwner) { it.reset() }
+            if (nowPlayingState === mediaState) endNavigation()
             hu.stop()
             if (nowPlayingState === mediaState) {
                 io.github.shaonialife.carptocar.media.NavigationNowPlaying.end(sourceIdentity)

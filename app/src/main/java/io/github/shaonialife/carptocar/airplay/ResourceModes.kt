@@ -4,6 +4,7 @@ package io.github.shaonialife.carptocar.airplay
  * Source: WirelessCarPlay AirPlayCommon.h at 51145ef; corroborated by Q4 PHONE/RVC event pairs.
  */
 internal class ResourceModes {
+    val audio = Q4AudioResources()
     private class Resource(var permanent: Long = 1) { val borrowers = linkedSetOf<String>(); var overflow = false }
     private val resources = linkedMapOf(1 to Resource(), 2 to Resource())
     private val apps = linkedMapOf<Int, Map<String, Any>>(
@@ -15,11 +16,14 @@ internal class ResourceModes {
     private var sourceStarted = false
     private var startupNativeTake = false
     data class Snapshot(val version: Long, val params: Map<String, Any>)
-    @Synchronized fun snapshot(): Snapshot = Snapshot(version, mapOf(
+    @Synchronized fun snapshot(): Snapshot {
+        val audioState = audio.snapshot()
+        return Snapshot(version + audioState.revision, mapOf(
         "appStates" to apps.values.toList(),
-        "resources" to resources.map { (id, r) -> mapOf("resourceID" to id.toLong(),
+        "resources" to resources.map { (id, r) -> if (id == 2) audioState.resource() else mapOf("resourceID" to id.toLong(),
             "entity" to if (r.borrowers.isEmpty() && !r.overflow) r.permanent else 2L, "permanentEntity" to r.permanent) },
     ))
+    }
     @Synchronized fun markSourceStarted() { sourceStarted = true }
     @Synchronized fun canRecoverScreen(): Boolean = resources.getValue(1).let {
         !it.overflow && it.borrowers.isEmpty() && (it.permanent == 1L || startupNativeTake)
@@ -40,6 +44,7 @@ internal class ResourceModes {
         for (raw in (params["resources"] as? List<*>)?.take(16).orEmpty()) {
             val item = raw as? Map<*, *> ?: continue
             val id = (item["resourceID"] as? Number)?.toInt() ?: continue
+            if (id == 2) { audio.change(item); continue }
             val resource = resources[id] ?: continue
             when ((item["transferType"] as? Number)?.toInt()) {
                 1 -> {

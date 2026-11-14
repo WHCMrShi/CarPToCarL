@@ -15,6 +15,8 @@ internal class AudioIngressQueue(
     private val queue = ArrayDeque<Block>()
     private var closed = false
     private var mediaPaused = false
+    private var outputMode = AudioOutputMode.ALLOW
+    private var inFlightSpeech = false
     private var inFlight = false
     private var bytes = 0
     private var duration = 0L
@@ -32,6 +34,7 @@ internal class AudioIngressQueue(
     fun offer(data: ByteArray, size: Int, rate: Int, channels: Int, speech: Boolean = false): Boolean = synchronized(lock) {
         if (closed || size <= 0 || size > data.size || size > 256 * 1024 || rate <= 0 || channels !in 1..2) return false
         if (mediaPaused && !speech) return false
+        if (outputMode == AudioOutputMode.DROP) return false
         val span = size.toLong() * 1_000_000_000L / (rate.toLong() * channels * 2)
         val byteBudget = if (speech) 512 * 1024 else maxBytes
         val timeBudget = if (speech) 10_000_000_000L else maxDurationNs
@@ -68,13 +71,14 @@ internal class AudioIngressQueue(
     private fun take(): Delivery? {
         synchronized(lock) {
             while (true) {
-                while (!closed && queue.isEmpty()) lock.wait()
+                while (!closed && (queue.isEmpty() || outputMode != AudioOutputMode.ALLOW)) lock.wait()
                 if (closed) return null
                 val age = clock() - queue.first().at
                 if (age > if (queue.first().speech) 10_000_000_000L else maxDurationNs) { drop(0); continue }
                 val block = remove(0)
                 maxAge = maxOf(maxAge, age)
                 inFlight = true
+                inFlightSpeech = block.speech
                 return Delivery(block, gap).also { gap = false }
             }
         }
@@ -92,6 +96,7 @@ internal class AudioIngressQueue(
                     val now = clock()
                     val report = synchronized(lock) {
                         inFlight = false
+                        inFlightSpeech = false
                         maxWork = maxOf(maxWork, now - started)
                         if (now - lastReport >= 30_000_000_000L ||
                             (now - lastReport >= 5_000_000_000L && (dropped > 0 || maxWork >= 50_000_000L))) {
@@ -112,6 +117,16 @@ internal class AudioIngressQueue(
     }
 
     fun pending(): Boolean = synchronized(lock) { queue.isNotEmpty() || inFlight }
+    fun pendingSpeech(): Boolean = synchronized(lock) { pendingBlocks[1] > 0 || inFlightSpeech }
+    fun setOutputMode(mode: AudioOutputMode) = synchronized(lock) {
+        if (outputMode == mode) return
+        outputMode = mode
+        if (mode == AudioOutputMode.DROP) {
+            while (queue.isNotEmpty()) drop(0)
+        }
+        gap = true
+        lock.notifyAll()
+    }
 
     /** Do not wait for an in-flight network send; remove only not-yet-consumed media, preserve TTS. */
     fun clearMedia(): Int = synchronized(lock) {
