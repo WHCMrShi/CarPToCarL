@@ -165,6 +165,10 @@ internal object CarLifeProtocol {
     const val TOUCH_CAR_HARD_KEY_CODE = 425992 // 0x00068008
 
     object HardKey {
+        const val SEEK_SUB = 0x0F
+        const val SEEK_ADD = 0x10
+        const val MEDIA_START = 0x1F
+        const val MEDIA_STOP = 0x20
         /** 起语音识别（小度）。 */
         const val VR_START = 0x21
 
@@ -185,14 +189,13 @@ internal object CarLifeProtocol {
     // 包类型来自 AudioUtil.EMusicPackageType：INIT=0x30001（负载是 CarlifeMusicInit
     // 原型，宣告采样率/声道/位深），NORMAL=0x30006（负载是裸 PCM）。
     //
-    // 0x30002 / 0x30003 是**长度 0 的开停信号**（2026-10-26 从真机日志反推，见 docs/audio-call-issues.md）：
-    //   0x30002 出现后立刻来首帧 PCM（10:03:16、10:24:19 两次）；
-    //   0x30003 出现后引擎音频归零（10:21:13、10:31:50 两次，均为来电期间）。
-    // 语义按「开始 / 停止」处理，再往上叠一层兜底（停止后仍收 PCM 照常转发，不靠它裁决）。
+    // Align with upstream 956307c: STOP is a format/cycle boundary, not a new play request.
+    // Keep raw packet type diagnostics: the earlier Q4 START inference used temporal correlation.
     const val AUDIO_HEAD_LEN = 12
     const val MUSIC_PKG_INIT = 0x30001
-    const val MUSIC_PKG_START = 0x30002
-    const val MUSIC_PKG_STOP = 0x30003
+    const val MUSIC_PKG_STOP = 0x30002
+    const val MUSIC_PKG_PAUSE = 0x30003
+    const val MUSIC_PKG_RESUME = 0x30004
     const val MUSIC_PKG_NORMAL = 0x30006
 
     // ---- TTS（9241 端口）：导航播报 / 语音提示 ----
@@ -206,6 +209,9 @@ internal object CarLifeProtocol {
     // 所以这里不照搬编号做枚举，只认两条铁律：**有负载就是 PCM，长度 0 就是开停信号**。
     // 旧实现把 0x4xxxx 全丢进「暂不处理」，症状正是「音乐有声、地图导航没声」。
     const val TTS_PKG_INIT = 0x40001
+    const val TTS_PKG_STOP = 0x40002
+    const val TTS_PKG_NORMAL = 0x40003
+    const val HU_PAUSE_MEDIA = 98318
 
     /** TTS 未宣告格式时的兜底采样率（导航播报常见 16k 单声道，AudioSender 会重采样到 48k）。 */
     const val TTS_DEFAULT_RATE = 16_000

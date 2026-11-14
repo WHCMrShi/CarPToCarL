@@ -261,8 +261,9 @@ internal class CarLifeAudioSink(
 internal fun carLifeAudioTypeName(type: Int): String =
     when (type) {
         CarLifeProtocol.MUSIC_PKG_INIT -> "INIT"
-        CarLifeProtocol.MUSIC_PKG_START -> "开始"
-        CarLifeProtocol.MUSIC_PKG_STOP -> "停止"
+        CarLifeProtocol.MUSIC_PKG_STOP -> "STOP边界"
+        CarLifeProtocol.MUSIC_PKG_PAUSE -> "暂停"
+        CarLifeProtocol.MUSIC_PKG_RESUME -> "恢复"
         CarLifeProtocol.MUSIC_PKG_NORMAL -> "PCM"
         CarLifeProtocol.TTS_PKG_INIT -> "TTS-INIT"
         0x40002 -> "TTS-开始"

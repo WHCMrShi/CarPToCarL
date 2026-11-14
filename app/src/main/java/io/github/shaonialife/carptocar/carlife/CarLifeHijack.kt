@@ -210,15 +210,75 @@ object CarLifeHijack {
      * → 联动 [CarLifeAudioSink.setPlaybackPaused] 截断/放行音频。prewarm 时注册一次，stop 时移除。
      */
     private val mediaPlaybackListener: () -> Unit = {
-        val sink = audioSink
-        if (sink != null) {
-            // 明确 PAUSED 才截断；读不到会话（null）不截断——避免误丢引擎 PCM（本地模拟无声的坑）
-            val paused = scopedPlaybackSnapshot()?.let { it.matchesTrack && it.playing == false && it.changedAt > enginePlaybackAt } == true
-            sink.setPlaybackPaused(paused)
-        }
+        val snapshot = scopedPlaybackSnapshot()
+        updatePlayback("session") { it.onSessionPlayback(snapshot?.takeIf { value -> value.matchesTrack }?.playing) }
     }
 
     @Volatile private var enginePlaybackAt = Long.MIN_VALUE
+    private val playbackLock = Any()
+    private var playback = CarLifeMediaPlayback()
+    private val playbackListeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
+    @Volatile var mediaUserActionVersion = 0L
+        private set
+    val mediaPlaying: Boolean get() = synchronized(playbackLock) { playback.playing }
+    val mediaForwardingAllowed: Boolean get() = synchronized(playbackLock) { playback.canForwardPcm }
+    fun addPlaybackListener(listener: () -> Unit) { playbackListeners.add(listener) }
+    fun removePlaybackListener(listener: () -> Unit) { playbackListeners.remove(listener) }
+
+    private fun updatePlayback(reason: String, owner: CarLifeMediaPlayback? = null, update: (CarLifeMediaPlayback) -> Unit) {
+        val change = synchronized(playbackLock) {
+            if (owner != null && playback !== owner) return
+            val before = playback.playing to playback.canForwardPcm
+            update(playback)
+            val after = playback.playing to playback.canForwardPcm
+            if (before == after) null else after
+        }
+        if (change != null) {
+            logSink?.invoke("MEDIA-CONTROL: source=$reason playing=${change.first} forwardPcm=${change.second}")
+            audioSink?.setPlaybackPaused(!change.second)
+            io.github.shaonialife.carptocar.SessionController.audioSender?.setMediaPaused(!change.second)
+            playbackListeners.forEach { it() }
+        }
+    }
+
+    fun handleMediaKey(key: Int): Boolean {
+        if (client?.isRunning != true) return false
+        val play = when (key) {
+            android.view.KeyEvent.KEYCODE_MEDIA_PLAY -> true
+            android.view.KeyEvent.KEYCODE_MEDIA_PAUSE, android.view.KeyEvent.KEYCODE_MEDIA_STOP -> false
+            android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> !mediaPlaying
+            else -> return false
+        }
+        synchronized(playbackLock) { mediaUserActionVersion++ }
+        if (play) resumeMediaFromCar("user-key") else pauseMediaFromCar("user-key")
+        return true
+    }
+
+    /** Explicit, idempotent commands: never send a toggle as a fallback. */
+    fun pauseMediaFromCar(reason: String): Boolean {
+        val wasPlaying = mediaPlaying
+        updatePlayback("pause:$reason") { it.onCarPause() }
+        audioSink?.setPlaybackPaused(true)
+        io.github.shaonialife.carptocar.SessionController.audioSender?.clearPendingMedia()
+        dispatchCarLifePlayback(false, reason)
+        return wasPlaying
+    }
+
+    fun resumeMediaFromCar(reason: String) {
+        updatePlayback("play:$reason") { it.onExplicitPlay() }
+        audioSink?.setPlaybackPaused(false)
+        dispatchCarLifePlayback(true, reason)
+    }
+
+    private fun dispatchCarLifePlayback(play: Boolean, reason: String) {
+        val hu = client
+        val action = MediaSessionsState.transportActionFor(if (play) android.view.KeyEvent.KEYCODE_MEDIA_PLAY else android.view.KeyEvent.KEYCODE_MEDIA_PAUSE)
+        val sessionSent = runCatching { action >= 0 && MediaSessionsState.dispatchTransport(action) }.getOrDefault(false)
+        val current = hu != null && client === hu && hu.isRunning
+        val hardKeySent = current && hu!!.sendHardKeyCode(if (play) CarLifeProtocol.HardKey.MEDIA_START else CarLifeProtocol.HardKey.MEDIA_STOP)
+        val pauseSent = !play && current && client === hu && hu!!.sendPauseMedia()
+        logSink?.invoke("MEDIA-CONTROL: command=${if (play) "play" else "pause"} reason=$reason session=$sessionSent hardKey=$hardKeySent pauseCommand=$pauseSent; delivery-not-playback-confirmation")
+    }
 
     private fun scopedPlaybackSnapshot(): CarLifePlaybackSnapshot? = runCatching {
         if (!MediaSessionsState.accessGranted || sender?.isRunning != true) return null
@@ -791,6 +851,10 @@ object CarLifeHijack {
             // 时**不能**当作「暂停」来截断——那会误丢引擎仍在推的 PCM，导致本地模拟无声。
             // 读不到状态 = 不确定，宁可不截断（放行），交由引擎侧 STOP/DATA 自行决定。
             enginePlaybackAt = Long.MIN_VALUE
+            val playbackOwner = CarLifeMediaPlayback()
+            synchronized(playbackLock) { playback = playbackOwner }
+            mediaPlaybackListener()
+            io.github.shaonialife.carptocar.SessionController.audioSender?.setMediaPaused(!mediaForwardingAllowed)
             sink.setPlaybackPaused(scopedPlaybackSnapshot()?.let { it.matchesTrack && it.playing == false } == true)
             val mediaState = CarLifeNowPlayingState()
             nowPlayingState = mediaState
@@ -816,7 +880,10 @@ object CarLifeHijack {
                 // SPS 是码流的真相：确认后立刻告诉上层（界面显示、落盘快照都跟着它）。
                 onStreamSize = { w, h -> if (!scope.isClosed) onActualStreamSize?.invoke(w, h) },
                 onAudioFormat = { rate, channels -> if (!scope.isClosed) sink.configure(rate, channels) },
-                onAudioPcm = { pcm, size -> if (!scope.isClosed) routeAudio(sink, pcm, size) },
+                onAudioPcm = { pcm, size -> if (!scope.isClosed && synchronized(playbackLock) { playback === playbackOwner && playback.canForwardPcm }) routeAudio(sink, pcm, size) },
+                onMediaActivity = { event -> if (!scope.isClosed) {
+                    updatePlayback(event.name, playbackOwner) { it.onActivity(event) }
+                } },
                 // 导航播报：TTS 通道独立格式、独立 sink，喂给同一个音频发送端
                 onTtsFormat = { rate, channels -> if (!scope.isClosed) naviSink.configure(rate, channels) },
                 onTtsPcm = { pcm, size -> if (!scope.isClosed) routeAudio(naviSink, pcm, size) },
@@ -827,6 +894,7 @@ object CarLifeHijack {
                 // 音频沉默看门狗判据：音乐会话确实在播 = 此刻「应该」有声，
                 // 9240 却连续零 PCM 才是异常。读不到会话（null）时按「不确定」放行不重连。
                 audioExpected = ::scopedPlaybackSnapshot,
+                mediaPlaybackExpected = { synchronized(playbackLock) { if (playback === playbackOwner) playback.playing else false } },
                 onMediaInfo = { info -> if (!scope.isClosed && nowPlayingState === mediaState) {
                     mediaState.media(info)
                     onMediaInfo(info)
@@ -902,6 +970,7 @@ object CarLifeHijack {
                 sleep(500)
             }
             sourceEvidence.retire()
+            updatePlayback("source-ended", playbackOwner) { it.reset() }
             hu.stop()
             if (nowPlayingState === mediaState) {
                 io.github.shaonialife.carptocar.media.NavigationNowPlaying.end(sourceIdentity)
@@ -948,14 +1017,7 @@ object CarLifeHijack {
         }.apply { isDaemon = true }.start()
     }
 
-    /**
-     * 引擎音频开停信号（0x30002 开始 / 0x30003 停止）。
-     *
-     * 真机时间线（2026-10-26）：来电时引擎发 0x30003，之后音频整段归零；挂断并恢复播放
-     * 才发 0x30002。停过一段再恢复时，车机手里的 RTP↔NTP 锚点已经超时，恢复瞬间开头
-     * 几百毫秒容易被丢——所以恢复时补发一轮同步包重新对齐。这里**不拦 PCM**：
-     * 万一信号语义判断有误，音频照常转发，不会因为猜错把声音弄没。
-     */
+    /** 显式 RESUME 刷新同步锚点；STOP 格式边界不再被当作开始播放。 */
     private fun onEngineAudioGate(active: Boolean) {
         enginePlaybackAt = android.os.SystemClock.uptimeMillis()
         if (!active) {

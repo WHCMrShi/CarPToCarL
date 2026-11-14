@@ -14,6 +14,7 @@ internal class AudioIngressQueue(
     private val lock = Object()
     private val queue = ArrayDeque<Block>()
     private var closed = false
+    private var mediaPaused = false
     private var inFlight = false
     private var bytes = 0
     private var duration = 0L
@@ -30,6 +31,7 @@ internal class AudioIngressQueue(
 
     fun offer(data: ByteArray, size: Int, rate: Int, channels: Int, speech: Boolean = false): Boolean = synchronized(lock) {
         if (closed || size <= 0 || size > data.size || size > 256 * 1024 || rate <= 0 || channels !in 1..2) return false
+        if (mediaPaused && !speech) return false
         val span = size.toLong() * 1_000_000_000L / (rate.toLong() * channels * 2)
         val byteBudget = if (speech) 512 * 1024 else maxBytes
         val timeBudget = if (speech) 10_000_000_000L else maxDurationNs
@@ -110,6 +112,19 @@ internal class AudioIngressQueue(
     }
 
     fun pending(): Boolean = synchronized(lock) { queue.isNotEmpty() || inFlight }
+
+    /** Do not wait for an in-flight network send; remove only not-yet-consumed media, preserve TTS. */
+    fun clearMedia(): Int = synchronized(lock) {
+        var count = 0
+        for (i in queue.indices.reversed()) if (!queue[i].speech) { drop(i); count++ }
+        gap = true // discard partial media framing when the next block enters the consumer
+        count
+    }
+
+    fun setMediaPaused(paused: Boolean): Int = synchronized(lock) {
+        mediaPaused = paused
+        if (paused) clearMedia() else 0
+    }
 
     override fun close() {
         synchronized(lock) {

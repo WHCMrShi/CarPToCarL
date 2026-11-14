@@ -401,6 +401,7 @@ object SessionController {
      * 直投失败再回退到 AudioManager 全局路由。
      */
     fun dispatchMediaKey(keyCode: Int) {
+        if (CarLifeHijack.handleMediaKey(keyCode)) return
         val action = MediaSessionsState.transportActionFor(keyCode)
         if (action >= 0 && MediaSessionsState.dispatchTransport(action)) {
             return
@@ -3158,6 +3159,7 @@ object SessionController {
 
     private fun installAudio(lease: SessionEpoch.Lease, candidate: AudioSender, state: () -> Unit): Boolean {
         if (!audioEpoch.isCurrent(lease) || !candidate.startPassthrough()) { candidate.stop(); return false }
+        candidate.setMediaPaused(!CarLifeHijack.mediaForwardingAllowed)
         var previous: AudioSender? = null
         val installed = audioEpoch.commit(lease) {
             previous = audioSender

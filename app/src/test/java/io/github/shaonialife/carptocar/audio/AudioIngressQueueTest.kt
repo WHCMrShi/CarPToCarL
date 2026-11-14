@@ -7,6 +7,30 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AudioIngressQueueTest {
+    @Test fun pauseClearsQueuedMediaAndRejectsLateMediaButPreservesNavigation() {
+        val entered = CountDownLatch(1); val release = CountDownLatch(1); val speech = CountDownLatch(1)
+        val values = java.util.concurrent.CopyOnWriteArrayList<Int>()
+        AudioIngressQueue(consume = { bytes, _, _, _ ->
+            val value = bytes[0].toInt()
+            if (value == 1) { entered.countDown(); release.await(3, TimeUnit.SECONDS) }
+            values.add(value)
+            if (value == 3) speech.countDown()
+        }, clock = { 0L }).use { queue ->
+            try {
+                queue.offer(ByteArray(4) { 1 }, 4, 48000, 2)
+                assertTrue(entered.await(3, TimeUnit.SECONDS))
+                queue.offer(ByteArray(4) { 2 }, 4, 48000, 2)
+                queue.offer(ByteArray(4) { 3 }, 4, 16000, 1, true)
+                assertEquals(1, queue.setMediaPaused(true))
+                assertFalse(queue.offer(ByteArray(4) { 4 }, 4, 48000, 2))
+                release.countDown()
+                assertTrue(speech.await(3, TimeUnit.SECONDS))
+                assertEquals(listOf(1, 3), values.toList())
+                queue.setMediaPaused(false)
+                assertTrue(queue.offer(ByteArray(4) { 5 }, 4, 48000, 2))
+            } finally { release.countDown() }
+        }
+    }
     @Test fun healthyLargeTtsBlocksPreserveEverySampleWithoutDiscontinuity() {
         for (size in listOf(8192, 65536)) {
         val done = CountDownLatch(1)
