@@ -1,0 +1,50 @@
+# 2026-11-14 Q4 startup-order evidence; local time Asia/Shanghai.
+# app = CarPToCarL-log-20261114-140612.txt; revision=a981fca7e52b-dirty.
+# wifi/network-stack/connectivity = read-only USB dumps under ignored .tools/q4-20261114-review/.
+# L numbers refer to original source lines, not this excerpt. App entries use the main log, excluding repeated early/recent sections and the appended 2026-11-13 failure snapshot.
+# Identities, SSIDs, addresses, credentials and full payloads are omitted/redacted. [...] marks omitted fields. Preserve ordering and message types; this is not byte-level replay material.
+# System dated history and later untimed snapshots are separate. UID 1010 is the Wi-Fi service; saved-config attribution to UID 1000 does not identify who originally selected an Internet preference.
+# network-stack:L1413 identifies the following probe-history section as Network 889 / "[CAR_SSID]". Wi-Fi saved configuration ID 193 and Connectivity Network 889 are different identifier namespaces.
+
+wifi:L3718 startTime=11-14 13:51:3.49, SSID="[CAR_SSID]", [...] connectionResult=1, [...] connectionNominator=NOMINATOR_SAVED, [...] networkCreator=CREATOR_USER, [...] interfaceName=wlan0 interfaceRole=ROLE_CLIENT_PRIMARY, [...] uid=1010
+wifi:L490 time=11-14 13:51:03.129 [...] what=CMD_START_CONNECT screen=off 193 1010 targetConfigKey="[CAR_SSID]"WPA_PSK [...] roam=false
+wifi:L6154 2026-11-14T13:51:23.556784 - addOrUpdateNetworkInternal: added/updated config. netId=193 configKey="[CAR_SSID]"WPA_PSK uid=1000 name=android.uid.system:1000
+wifi:L42180 2026-11-14T13:51:46.482167 - setNetworkSelectionStatus: configKey="[CAR_SSID]"WPA_PSK networkStatus=NETWORK_SELECTION_PERMANENTLY_DISABLED disableReason=NETWORK_SELECTION_DISABLED_NO_INTERNET_PERMANENT
+app:L3120 [13:53:03.523] WIFI: 状态心跳已启动（起点 wifi=[wlan0/[CAR_WIFI_IP_A]] car=- default=wlan0/[CAR_WIFI_IP_A] ssid=- processBound=- defaultInternet=true defaultValidated=false）
+app:L3238 [13:53:09.904] BT-RELEASE: action=3 source=guard before={通话(HFP)=DISCONNECTED, 音频(A2DP)=DISCONNECTED, 低功耗音频(LE)=UNKNOWN} requests={} after={通话(HFP)=DISCONNECTED, 音频(A2DP)=DISCONNECTED, 低功耗音频(LE)=UNKNOWN} deviceRequest=NOT_ATTEMPTED superseded=false [...]
+app:L3571 [13:53:13.581] BT-DISABLE: request generation=1 deviceIDSource=session-SETUP channel=control
+app:L3581 [13:53:13.599] BT-DISABLE: response generation=1 accepted=true status=[RTSP/1.0 200 OK]; profile/ACL disconnection unconfirmed
+app:L3587 [13:53:13.615] SESSION 保活结束（链路断开）
+app:L3592 [13:53:13.628] HANDOVER-DIAG: btClosed decision=KEEP_VIDEO [...] physicalNetwork=cached=true,request=false,observer=true,wifi=true,processBound=true [...] controlAlive=true setupPending=true videoRunning=true sourceStreaming=false workCurrent=true cancelled=false; snapshot is current state, not callback-origin proof
+app:L3593 [13:53:13.628] BT-C: expected handoff owner=1; disableBluetooth accepted and Wi-Fi control live, BT recovery paused
+app:L3610 [13:53:13.770] FLOW-DIAG: [...] event=SETUP_EXIT retired=false cancelled=false controlAlive=true controlReady=true videoRunning=true carLifeStreaming=false; transport-state-not-decoder-confirmation
+app:L3743 [13:53:33.639] STAGE: ⚠ 等首帧超时（20s 内车机未收到本会话任何视频帧，CarLife推流=false，累计送达=0 帧）[...]
+app:L4025 [13:54:52.938] CONNECT-DIAG: final-disconnect requested phase=等待 CarLife 画面…; will stop CarLife and retire network resources
+app:L4047 [13:54:56.629] WIFI: 状态心跳已启动（起点 wifi=[wlan0/[CAR_WIFI_IP_A]] car=- default=wlan0/[CAR_WIFI_IP_A] ssid=- processBound=- defaultInternet=true defaultValidated=false）
+app:L4062 [13:54:56.681] WIFI: fallback selected network=889 identity=ssid-visible bound=true; lease pinned; activeRequestRetained=false
+app:L4063 [13:54:56.682] WiFi: 目标身份已核对——绑定当前 WiFi（889 bindProcessToNetwork=true）
+app:L4113 [13:55:10.295] CARLIFE-DIAG: handshake=matched elapsedMs=102
+app:L4160 [13:55:12.893] CARLIFE: ✓ 收到 CarLife 首帧（4494B，keyFrame=true）
+app:L4459 [13:55:24.661] AIRPLAY: ✓ RECORD 完成——会话已激活
+app:L4552 [13:55:26.739] CARLIFE: ✓ 已开始向车机送帧（首帧 82670B）
+network-stack:L1414 2026-11-14T13:55:47.676722 - PROBE_DNS [PROBE_HOST] 10ms OK [PROBE_IP]
+network-stack:L1419 2026-11-14T13:55:57.694112 - PROBE_HTTPS [PROBE_URL] Probe failed with exception java.net.SocketTimeoutException: failed to connect to [PROBE_HOST]/[PROBE_IP] (port 443) from /[CAR_WIFI_IP_A] (port 42200) after 10000ms
+network-stack:L1420 2026-11-14T13:55:57.694829 - PROBE_HTTP [PROBE_URL] Probe failed with exception java.net.SocketTimeoutException: failed to connect to [PROBE_HOST]/[PROBE_IP] (port 80) from /[CAR_WIFI_IP_A] (port 39882) after 10000ms
+app:L4749 [13:55:59.116] CONNECT-DIAG: final-disconnect requested phase=等待 CarLife 画面…; will stop CarLife and retire network resources
+wifi:L122 time=11-14 13:56:00.772 [...] what=CMD_WIFI_TOGGLED [...] WorkSource{10231 com.android.systemui}
+wifi:L4601 11-14 13:56:01.502 WIFI_DISABLED [...] screenOn=true cellularData=true adaptiveConnectivity=true [...] interfaceName=wlan0 interfaceRole=ROLE_CLIENT_SCAN_ONLY
+wifi:L123 time=11-14 13:56:02.527 [...] what=CMD_WIFI_TOGGLED [...] WorkSource{10231 com.android.systemui}
+wifi:L4602 11-14 13:56:03.547 WIFI_ENABLED screenOn=true cellularData=true adaptiveConnectivity=true [...] interfaceName=wlan0 interfaceRole=ROLE_CLIENT_PRIMARY
+app:L4772 [13:56:03.884] WIFI: 状态心跳已启动（起点 wifi=[] car=- default=rmnet_data3/[CELLULAR_IP] ssid=- processBound=- defaultInternet=true defaultValidated=true）
+app:L4795 [13:56:05.761] WiFi: 系统请求网络已可用（890 bindProcessToNetwork=true）；其他应用路由由系统决定
+
+# Later dump-time snapshots (not timestamped evidence of the 13:51-13:56 preference values):
+connectivity:L686 Bad Wi-Fi avoidance: false
+connectivity:L688 Actively prefer bad wifi: true
+connectivity:L689 Avoid bad wifi setting: prompt
+connectivity:L690 Actively prefer bad wifi conf: force true
+wifi:L14064-14066 saved configuration ID=193 SSID="[CAR_SSID]": NETWORK_SELECTION_PERMANENTLY_DISABLED; NETWORK_SELECTION_DISABLED_NO_INTERNET_PERMANENT
+wifi:L14145 saved configuration ID=193: [...] cuid=1000 cname=android.uid.system:1000 luid=1000 lname=android.uid.system:1000 lcuid=1000 allowAutojoin=true noInternetAccessExpected=false mostRecentlyConnected=true
+
+# User feedback, not log inference: manual CarLife startup in round 1 could not connect vehicle Bluetooth; the Wi-Fi off/on between rounds 2 and 3 was manual; round 3 worked normally and ended when the user intentionally left the vehicle. Its ending is excluded from failure attribution.
+# Log wording such as "首帧已到达" or "车机未收到" is an application-side claim; this excerpt does not promote local writes/RTSP 200 into receiver decode/display confirmation.
