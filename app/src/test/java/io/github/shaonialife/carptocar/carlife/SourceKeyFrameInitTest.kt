@@ -21,8 +21,14 @@ class SourceKeyFrameInitTest {
             encoderInitClock = { now }, keyFrameWait = { now += it; onWait?.invoke() })
         init {
             (field("running") as AtomicBoolean).set(true)
+            // 这些用例验证首轮之后的恢复去重；握手交错由 FeatureDispatchTest 覆盖。
+            setField("versionMatched", true)
+            setField("featureConfigSent", true)
+            setField("firstInitReady", true)
             CarLifeHuClient::class.java.getDeclaredField("cmdOut").apply { isAccessible = true }.set(hu, output)
         }
+        fun setField(name: String, value: Any) = CarLifeHuClient::class.java.getDeclaredField(name)
+            .apply { isAccessible = true }.set(hu, value)
         private fun field(name: String): Any? = CarLifeHuClient::class.java.getDeclaredField(name).apply { isAccessible = true }.get(hu)
         fun initialize(force: Boolean = false): Boolean = CarLifeHuClient::class.java
             .getDeclaredMethod("sendEncoderInit", Boolean::class.javaPrimitiveType).apply { isAccessible = true }.invoke(hu, force) as Boolean
@@ -63,11 +69,14 @@ class SourceKeyFrameInitTest {
         assertTrue(h.request())
         assertEquals(listOf(100L, 1_100L, 6_100L), h.writes)
     }
-    @Test fun sourceRequestCannotPreemptOrderedStartup() {
-        val h = Harness()
-        h.onWait = { h.initialize(); h.current = false }
-        assertFalse(h.request())
-        assertEquals(listOf(200L), h.writes)
+    @Test fun sourceRequestCannotPreemptStartupInEitherMode() {
+        for (ordered in listOf(true, false)) {
+            val h = Harness(ordered)
+            h.setField("firstInitReady", false)
+            h.onWait = { assertFalse(h.initialize(force = true)); h.current = false }
+            assertFalse(h.request())
+            assertTrue(h.writes.isEmpty())
+        }
     }
     @Test fun stopDuringCooldownCannotWriteAnotherCommand() {
         val h = Harness(); h.initialize(); h.onWait = { h.stop() }
@@ -82,9 +91,10 @@ class SourceKeyFrameInitTest {
             assertEquals(listOf(100L), h.writes)
         } finally { Thread.interrupted() }
     }
-    @Test fun unorderedSourceWithoutPriorInitCanRequestImmediately() {
+    @Test fun unorderedSourceUsesTheSameRecoveryCooldownAfterFirstInit() {
         val h = Harness(ordered = false)
+        assertTrue(h.initialize())
         assertTrue(h.request())
-        assertEquals(listOf(100L), h.writes)
+        assertEquals(listOf(100L, 5_100L), h.writes)
     }
 }

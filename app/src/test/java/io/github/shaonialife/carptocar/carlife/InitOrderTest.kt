@@ -14,17 +14,12 @@ class InitOrderTest {
 
     @Test
     fun `有序模式下首条 98311 未发出时必须让位`() {
-        assertTrue(CarLifeHuClient.shouldDeferHotResend(orderedInit = true, firstInitSent = false))
+        assertTrue(CarLifeHuClient.shouldDeferHotResend(firstInitSent = false))
     }
 
     @Test
     fun `有序模式下首条已发出后可以直接重发`() {
-        assertFalse(CarLifeHuClient.shouldDeferHotResend(orderedInit = true, firstInitSent = true))
+        assertFalse(CarLifeHuClient.shouldDeferHotResend(firstInitSent = true))
     }
 
-    @Test
-    fun `关掉有序模式回到老行为（热更新立刻重发）`() {
-        assertFalse(CarLifeHuClient.shouldDeferHotResend(orderedInit = false, firstInitSent = false))
-        assertFalse(CarLifeHuClient.shouldDeferHotResend(orderedInit = false, firstInitSent = true))
-    }
 }

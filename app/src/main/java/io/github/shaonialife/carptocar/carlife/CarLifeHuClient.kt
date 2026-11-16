@@ -156,7 +156,7 @@ class CarLifeHuClient(
     /** 探测结论（每轮一行 + 最后一行汇总），供上层写盘/打日志。 */
     private val onProbeResult: (String) -> Unit = {},
     /**
-     * 首轮初始化顺序：先下发 98386，再经过有界本地间隔发首条 98311。
+     * 首轮始终先下发 98386 再发 98311；此开关只选择既有本地等待节奏。
      * 65570 是麦克风唤醒事件，不能作为特征 ACK；等待结束也不证明引擎已应用配置。
      * 保留原 2s 等待上限作为本地间隔，不引入新的完成消息或无限等待。
      */
@@ -351,13 +351,21 @@ class CarLifeHuClient(
     private var connectType = initialConnectType.coerceIn(1, 8)
 
     /**
-     * 本次会话的首条 98311 是否已经发出（[orderedInit] 的闸门）。
+     * 本次会话的首条 98311 是否已经发出（所有模式共用的闸门）。
      *
      * 未发出之前，[setRequestedResolution] **只更新申请值、不立刻重发**——否则那条
      * 300ms 热更新会绕过首轮的配置发送与本地间隔（见 [orderedInit] 注释）。
      */
     @Volatile
     private var firstInitSent = false
+
+    // 首轮状态由 this 保护；恢复入口不能越过配置发送和本地间隔。
+    private var deviceInfoReceived = false
+    private var featureConfigRequested = false
+    private var featureConfigSent = false
+    private var firstInitReady = false
+    private var firstInitTaskStarted = false
+    @Volatile private var initEpoch = Any()
 
     /** 二次初始化是否已经排过（每条会话只做一次）。 */
     private val settleReinitStarted = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -494,8 +502,18 @@ class CarLifeHuClient(
         videoSessionStartedAt = android.os.SystemClock.uptimeMillis()
         lastFrameAt = 0L
         lastVideoRetryAt = videoSessionStartedAt
-        // 首轮有序初始化的闸门：新会话尚未发送首条 98311。
-        firstInitSent = false
+        // 首轮初始化的闸门：新会话尚未发送首条 98311。
+        synchronized(this) {
+            initEpoch = Any()
+            firstInitSent = false
+            deviceInfoReceived = false
+            featureConfigRequested = false
+            featureConfigSent = false
+            firstInitReady = false
+            firstInitTaskStarted = false
+            lastEncInitSig = null
+            lastEncInitAt = 0L
+        }
         settleReinitStarted.set(false)
         // CONNECT_TYPE 探测：只在开启时复位成「待探测」，否则保持已完成态（不会被触发）。
         probeResults.clear()
@@ -529,6 +547,7 @@ class CarLifeHuClient(
     }
 
     fun stop() {
+        initEpoch = Any() // 同一个 HU 对象再 start 时，旧首轮等待者也必须退役。
         controlEndReason.compareAndSet(null, "local-stop-or-cancel")
         if (running.getAndSet(false)) log("CARLIFE-DIAG: stopped reason=${controlEndReason.get()}")
         touchForwarder?.stop()
@@ -680,6 +699,17 @@ class CarLifeHuClient(
                 versionMatched = true
                 send(CarLifeProtocol.HU_STATISTICS, CarLifeProtocol.statisticsInfo())
                 hudObserver.versionMatched()
+                synchronized(this) {
+                    if (featureConfigRequested) pushFeatureConfig(logIt = true)
+                    scheduleFirstEncoderInit()
+                }
+            }
+
+            CarLifeProtocol.MD_FEATURE_CONFIG -> synchronized(this) {
+                featureConfigRequested = true
+                // 65617 是请求，不是 ACK；接收线程写响应后立即继续读包。
+                if (versionMatched) pushFeatureConfig(logIt = true)
+                scheduleFirstEncoderInit()
             }
 
             CarLifeHudProtocol.SUBSCRIBE_DONE,
@@ -692,45 +722,15 @@ class CarLifeHuClient(
                 // 用 video 的坏处：引擎一旦把 1412×654 降档成 1280×720，回显值就变成 720p，
                 // 我们再把 720p 当「车机屏幕尺寸」告诉引擎，等于给它一个自我确认的错前提
                 // （而且这条 HU_INFO 比 AirPlay /info 更早到，首轮尤其关键）。
-                send(
+                val informed = send(
                     CarLifeProtocol.HU_INFO,
                     CarLifeProtocol.deviceInfo("${requestedWidth}x$requestedHeight"),
                 )
-                // 关键：车机必须主动推进，不能等手机下发鉴权
-                Thread {
-                    if (orderedInit) {
-                        // 等版本匹配 → 98386 → 有界本地间隔 → 首条 98311；没有特征 ACK。
-                        // 每一步都可能因为会话结束而放弃，所以处处检查 running。
-                        var waited = 0
-                        while (!versionMatched && running.get() && waited < ORDERED_VERSION_WAIT_MS) {
-                            Thread.sleep(50)
-                            waited += 50
-                        }
-                        if (!running.get()) return@Thread
-                        pushFeatureConfig(logIt = true)
-                        if (!waitAfterFeatureConfig()) return@Thread
-                        if (firstInitSent) {
-                            // 视频通道看门狗在冷启动期常常先一步重连并下发（它自己也是
-                            // 98386→98311 的顺序），这里就别再补一发——重复的 98311
-                            // 在小米参考引擎只回显当前状态，不会重新配置编码器。
-                            log("CARLIFE: 首条 98311 已由看门狗路径发出——本次不重复下发")
-                            return@Thread
-                        }
-                        log("CARLIFE: 主动推送首轮 98311 视频编码初始化 ${requestedWidth}x$requestedHeight@$videoFps")
-                        sendEncoderInit(force = true)
-                        return@Thread
-                    }
-                    Thread.sleep(1200)
-                    log(
-                        "CARLIFE: 主动推送 98386 特征配置（CONNECT_TYPE=$connectType，" +
-                            "I 帧间隔=${CarLifeProtocol.I_FRAME_INTERVAL_DEFAULT} 帧，" +
-                            "DISABLE_RESOLUTION_OPTION=1 分辨率直通，MEDIA_LYRIC_SUPPORT=1 歌词）",
-                    )
-                    send(CarLifeProtocol.HU_FEATURE_CONFIG, CarLifeProtocol.featureConfig(connectType))
-                    Thread.sleep(1200)
-                    log("CARLIFE: 主动推送 98311 视频编码初始化 ${requestedWidth}x$requestedHeight@$videoFps")
-                    sendEncoderInit()
-                }.apply { isDaemon = true }.start()
+                synchronized(this) {
+                    if (informed) deviceInfoReceived = true
+                    // 主动起播不依赖 CarPlay 或 65617，保留已有预连接路径。
+                    scheduleFirstEncoderInit()
+                }
             }
 
             CarLifeProtocol.MD_MODULE_STATUS -> {
@@ -929,7 +929,7 @@ class CarLifeHuClient(
         if (reason != "命中" && connectType != PROBE_DEFAULT_TYPE) {
             connectType = PROBE_DEFAULT_TYPE
             runCatching {
-                send(CarLifeProtocol.HU_FEATURE_CONFIG, CarLifeProtocol.featureConfig(connectType))
+                pushFeatureConfig()
             }
             log("CARLIFE: [探测] 已复位 CONNECT_TYPE=$connectType")
         }
@@ -1184,7 +1184,7 @@ class CarLifeHuClient(
                 val cooldown = if (sig == lastEncInitSig)
                     (ENCODER_INIT_DEDUPE_MS - (encoderInitClock() - lastEncInitAt)).coerceAtLeast(0) else 0
                 when {
-                    orderedInit && !firstInitSent -> 100L // never preempt the ordered first 98311
+                    !firstInitSent -> 100L // every mode shares the first-init gate
                     cooldown > 0 -> cooldown
                     else -> return sendEncoderInit() // same monitor: recheck and write cannot race another init
                 }
@@ -1212,6 +1212,7 @@ class CarLifeHuClient(
      *
      * 幂等：宽高未变时跳过（避免车机 1s 轮询重复触发重发 98311 打断推流）。
      */
+    @Synchronized
     fun setRequestedResolution(width: Int, height: Int) {
         val w = width.coerceAtLeast(320)
         val h = height.coerceAtLeast(180)
@@ -1220,9 +1221,9 @@ class CarLifeHuClient(
         requestedWidth = w
         requestedHeight = h
         if (!running.get()) return
-        if (shouldDeferHotResend(orderedInit, firstInitSent)) {
+        if (shouldDeferHotResend(firstInitSent)) {
             // 这条热更新原本在 300ms 内发送，可能绕过首轮特征发送与本地间隔。
-            // 有序模式下只改申请值，
+            // 所有模式都只改申请值，
             // 由握手线程在配置发送及本地间隔后带着新值发首条 98311。
             log("CARLIFE: 首条 98311 尚未发出——本次申请随它一起下发（不抢先定档）")
             return
@@ -1311,8 +1312,10 @@ class CarLifeHuClient(
         }.apply { isDaemon = true }.start()
     }
 
-    /** 下发 98386 特征配置；本地写成功不等于引擎应用成功。 */
-    private fun pushFeatureConfig(logIt: Boolean = false) {
+    /** 所有入口共用；配置写失败或尚未版本匹配时不得推进编码。 */
+    @Synchronized
+    private fun pushFeatureConfig(logIt: Boolean = false): Boolean {
+        if (!running.get() || !versionMatched) return false
         if (logIt) {
             log(
                 "CARLIFE: 主动推送 98386 特征配置（CONNECT_TYPE=$connectType，" +
@@ -1320,14 +1323,51 @@ class CarLifeHuClient(
                     "DISABLE_RESOLUTION_OPTION=1 分辨率直通，MEDIA_LYRIC_SUPPORT=1 歌词）",
             )
         }
-        send(CarLifeProtocol.HU_FEATURE_CONFIG, CarLifeProtocol.featureConfig(connectType))
+        val sent = send(CarLifeProtocol.HU_FEATURE_CONFIG, CarLifeProtocol.featureConfig(connectType))
+        if (sent) featureConfigSent = true
+        return sent
+    }
+
+    /** 唯一首轮推进器；必须在 this 下调用，接收线程不等待工作线程。 */
+    private fun scheduleFirstEncoderInit() {
+        if (!running.get() || !versionMatched || (!deviceInfoReceived && !featureConfigRequested) ||
+            firstInitSent || firstInitTaskStarted) return
+        val epoch = initEpoch
+        firstInitTaskStarted = true
+        Thread {
+            fun current() = running.get() && initEpoch === epoch
+            try {
+                // 保留原非有序模式的 1.2s + 1.2s 节奏；门禁本身对所有模式生效。
+                if (!orderedInit && !waitLocalInterval(1_200L, ::current)) return@Thread
+                synchronized(this) {
+                    if (!current()) return@Thread
+                    if (!featureConfigSent && !pushFeatureConfig(logIt = true)) return@Thread
+                }
+                val delay = if (orderedInit) FEATURE_CONFIG_DISPATCH_DELAY_MS else 1_200L
+                if (!waitLocalInterval(delay, ::current)) return@Thread
+                synchronized(this) {
+                    if (!current()) return@Thread
+                    firstInitReady = true
+                    log("CARLIFE: 首轮配置本地间隔结束（非 ACK），统一下发 98311")
+                    sendEncoderInit(force = true)
+                }
+            } finally {
+                synchronized(this) {
+                    if (initEpoch === epoch) firstInitTaskStarted = false
+                }
+            }
+        }.apply { isDaemon = true; name = "carlife-first-init" }.start()
     }
 
     /** 保留原有 2s 等待预算；任何收到的消息都不能提前结束或延长它。 */
     private fun waitAfterFeatureConfig(): Boolean {
-        var remaining = FEATURE_CONFIG_DISPATCH_DELAY_MS
+        return waitLocalInterval(FEATURE_CONFIG_DISPATCH_DELAY_MS) { running.get() }
+    }
+
+    private fun waitLocalInterval(delayMs: Long, current: () -> Boolean): Boolean {
+        var remaining = delayMs
         try {
-            while (running.get() && remaining > 0) {
+            while (current() && remaining > 0) {
                 val slice = minOf(remaining, 50L)
                 featureDispatchWait(slice)
                 remaining -= slice
@@ -1336,9 +1376,7 @@ class CarLifeHuClient(
             Thread.currentThread().interrupt()
             return false
         }
-        if (!running.get()) return false
-        log("CARLIFE: 98386 后本地间隔 ${FEATURE_CONFIG_DISPATCH_DELAY_MS}ms 已结束（无协议 ACK，未确认引擎已应用）")
-        return true
+        return current()
     }
 
     /**
@@ -1385,31 +1423,34 @@ class CarLifeHuClient(
     /**
      * 发送 98311 视频编码初始化，**同一组 (宽,高,帧率) 在 [ENCODER_INIT_DEDUPE_MS] 内只发一次**。
      *
-     * 为什么必须去重：引擎收到**尺寸未变的重复 98311** 时，会把 65544 的确认值降成
-     * 1280×720@20（2026-11-04 实测 4/4：08:26、11:20、13:09 三次会话都是「首条回
-     * 60fps、紧随其后的第二条回 20fps」）。而握手期天然有两条路径各发一次——
-     * AirPlay SETUP 的 [setRequestedResolution]（此刻引擎还热着，几十毫秒内就发出）
-     * 与 MD_INFO 的延迟推送（握手后 2.4s）。两条都发，第二条必然把帧率打下来。
-     *
-     * 用时间窗而不是纯签名判重，是为了不拦住真正需要重建的两处：无帧看门狗
-     * （间隔 ≥ [NO_FRAME_REINIT_MS] = 10s）和视频口重连后的 [restartEncoding]。
+     * 所有入口先过首轮配置门禁，force 只绕过去重。重复申请在小米参考引擎只回当前
+     * 参数，不证明实际帧率变化或编码器重建；保留既有去重窗及后续恢复发送策略。
      */
     @Synchronized
     private fun sendEncoderInit(force: Boolean = false): Boolean {
-        val sig = "${requestedWidth}x${requestedHeight}@$videoFps"
+        if (!running.get() || !versionMatched) return false
+        if (!firstInitSent && !(featureConfigSent && firstInitReady)) {
+            scheduleFirstEncoderInit()
+            return false // force 也不能绕过首轮门禁；由唯一推进器续发。
+        }
+        val width = requestedWidth
+        val height = requestedHeight
+        val fps = videoFps
+        val sig = "${width}x${height}@$fps"
         val now = encoderInitClock()
         if (!force && sig == lastEncInitSig && now - lastEncInitAt < ENCODER_INIT_DEDUPE_MS) {
             runCatching { log("PATH-DIAG: encoderInit hu=${System.identityHashCode(this)} decision=DEDUPE force=$force previousAttemptAgeMs=${now - lastEncInitAt}") }
-            log("CARLIFE: 98311 跳过重复下发（$sig 刚发过）——重复会让引擎确认值降到 20fps")
+            log("CARLIFE: 98311 跳过重复下发（$sig 刚发过）")
             return false
         }
         val previousAttemptAt = lastEncInitAt
-        lastEncInitSig = sig
-        lastEncInitAt = now
-        val sent = send(CarLifeProtocol.HU_VIDEO_ENC_INIT, buildEncoderInfo())
+        val sent = send(CarLifeProtocol.HU_VIDEO_ENC_INIT, buildEncoderInfo(width, height, fps))
         runCatching { log("PATH-DIAG: encoderInit hu=${System.identityHashCode(this)} decision=ATTEMPT force=$force previousAttemptAgeMs=${if (previousAttemptAt > 0) now - previousAttemptAt else null} durationMs=${encoderInitClock() - now} sent=$sent; not source-IDR confirmation") }
-        // 首条一旦发出，引擎的档位就定了；此后分辨率热更新可以直接重发（见 setRequestedResolution）。
-        if (sent) firstInitSent = true
+        if (sent) {
+            lastEncInitSig = sig
+            lastEncInitAt = now
+            firstInitSent = true
+        }
         return sent
     }
 
@@ -1419,11 +1460,11 @@ class CarLifeHuClient(
      * 集中在一处，保证首次申请、重建、看门狗重发三条路径的字段完全一致——
      * 之前四处各自拼 `videoEncoderInfo(w,h,fps)`，新增字段时极易漏改其中一两条。
      */
-    private fun buildEncoderInfo(): ByteArray =
+    private fun buildEncoderInfo(width: Int, height: Int, fps: Int): ByteArray =
         CarLifeProtocol.videoEncoderInfo(
-            requestedWidth,
-            requestedHeight,
-            videoFps,
+            width,
+            height,
+            fps,
             needAdapterScreen = needAdapterScreen,
             saveArea = saveArea,
             drawUIOutsideSafeArea = drawUIOutsideSafeArea,
@@ -1926,9 +1967,6 @@ class CarLifeHuClient(
         /** 车机 GPS 最小下发间隔：NMEA 是 1Hz，900ms 既不漏样本也不重复。 */
         private const val CAR_GPS_MIN_INTERVAL_MS = 900L
 
-        /** 有序初始化：最多等版本匹配这么久（MD_INFO 通常比版本匹配早到约 100ms）。 */
-        private const val ORDERED_VERSION_WAIT_MS = 3_000L
-
         /** 配置发送后的本地间隔，沿用旧等待上限；不是协议完成凭据。 */
         private const val FEATURE_CONFIG_DISPATCH_DELAY_MS = 2_000L
 
@@ -1971,17 +2009,10 @@ class CarLifeHuClient(
             return out.toIntArray()
         }
 
-        /**
-         * 分辨率热更新要不要「让位」给首轮有序初始化。
-         *
-         * 为 true 时只更新申请值、不立刻重发 98311——那条 300ms 抢跑的热更新会赶在
-         * 98386 确认前把引擎档位定死（13:09 / 11:20 / 13:35 三次会话都是这么丢的
-         * 1412×654）。纯函数，便于单测把这条规则钉住。
-         */
+        /** 所有模式的热更新都让位于唯一首轮推进器。 */
         internal fun shouldDeferHotResend(
-            orderedInit: Boolean,
             firstInitSent: Boolean,
-        ): Boolean = orderedInit && !firstInitSent
+        ): Boolean = !firstInitSent
 
         /**
          * 连续重发时的最大间隔（毫秒）。
