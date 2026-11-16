@@ -156,36 +156,22 @@ class CarLifeHuClient(
     /** 探测结论（每轮一行 + 最后一行汇总），供上层写盘/打日志。 */
     private val onProbeResult: (String) -> Unit = {},
     /**
-     * 首轮初始化顺序：**先 98386、等引擎确认，再发第一条 98311**。
-     *
-     * 2026-11-04 日志实证这是「能不能拿到 1412×654」的唯一分水岭：
-     * - 13:18:52.8 引擎先接受 98386（DISABLE_RESOLUTION_OPTION=1 分辨率直通），
-     *   1.2s 后第一条 98311 才带 1412×654 → **引擎原样接受 1412x654@60**，
-     *   码流真实分辨率 1412x654，出帧正常；
-     * - 13:09 / 11:20 / 13:35 三次会话，第一条 98311 都抢在 98386 **之前**
-     *   （热更新路径 300ms 就发）→ 引擎当场按白名单定档 1280×720，
-     *   之后不管再补几次 98386 + 98311，65544 一律回 1280×720（会话内已定档）。
-     *
-     * 也就是说：`DISABLE_RESOLUTION_OPTION` 必须**赶在引擎第一次建编码器之前**生效，
-     * 否则就是个摆设。这条开关默认开着，出问题可在偏好 `carlife_ordered_init` 关掉复原。
+     * 首轮初始化顺序：先下发 98386，再经过有界本地间隔发首条 98311。
+     * 65570 是麦克风唤醒事件，不能作为特征 ACK；等待结束也不证明引擎已应用配置。
+     * 保留原 2s 等待上限作为本地间隔，不引入新的完成消息或无限等待。
      */
     private val orderedInit: Boolean = true,
     /**
-     * 会话稳定后的「二次初始化」（默认开）。
-     *
-     * 2026-11-04 13:48 实测：有序初始化让 65544 **原样回了 1412x656@60**，可 SPS 仍是
-     * `1280x720`——因为那条 98311 到得比引擎建编码器还早，引擎只把参数记成了「申请值」，
-     * 真正编出来的还是它自己的默认档。而 13:18 那次（引擎已经在跑、编码器存在）发同样
-     * 一条 98311，SPS 就真的变成 1412x654 了。
-     *
-     * 所以这里在首帧之后补一次：等会话稳定 → 98386 → 等确认 → 98311 强制重发，
-     * 让引擎在「已有编码器」的状态下重建一次。只做一次，避免把引擎打进反复重建。
+     * 会话稳定后补发一次配置与编码申请（默认开）。
+     * 这是现有兼容策略，不保证目标编码器重建；小米参考引擎 mInited=true 时只回已有状态。
+     * 配置发送后仅经过本地间隔，没有特征完成 ACK。
      */
     private val settleReinit: Boolean = true,
     /** true 时 PCM 数组仅在回调内有效，消费者必须同步消费/复制；默认保留独立数组 API。 */
     private val borrowPcmInput: Boolean = false,
     private val encoderInitClock: () -> Long = { android.os.SystemClock.uptimeMillis() },
     private val keyFrameWait: (Long) -> Unit = { Thread.sleep(it) },
+    private val featureDispatchWait: (Long) -> Unit = { Thread.sleep(it) },
 ) {
 
     private val running = AtomicBoolean(false)
@@ -368,14 +354,10 @@ class CarLifeHuClient(
      * 本次会话的首条 98311 是否已经发出（[orderedInit] 的闸门）。
      *
      * 未发出之前，[setRequestedResolution] **只更新申请值、不立刻重发**——否则那条
-     * 300ms 抢跑的热更新会赶在 98386 确认前把引擎的档位定死（见 [orderedInit] 注释）。
+     * 300ms 热更新会绕过首轮的配置发送与本地间隔（见 [orderedInit] 注释）。
      */
     @Volatile
     private var firstInitSent = false
-
-    /** 引擎是否已确认 98386（MD_FEATURE_CONFIG_DONE）。有序初始化要等它。 */
-    @Volatile
-    private var featureConfigAcked = false
 
     /** 二次初始化是否已经排过（每条会话只做一次）。 */
     private val settleReinitStarted = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -512,9 +494,8 @@ class CarLifeHuClient(
         videoSessionStartedAt = android.os.SystemClock.uptimeMillis()
         lastFrameAt = 0L
         lastVideoRetryAt = videoSessionStartedAt
-        // 首轮有序初始化的闸门：每条新会话都要从「98386 还没确认、首条 98311 还没发」开始。
+        // 首轮有序初始化的闸门：新会话尚未发送首条 98311。
         firstInitSent = false
-        featureConfigAcked = false
         settleReinitStarted.set(false)
         // CONNECT_TYPE 探测：只在开启时复位成「待探测」，否则保持已完成态（不会被触发）。
         probeResults.clear()
@@ -718,7 +699,7 @@ class CarLifeHuClient(
                 // 关键：车机必须主动推进，不能等手机下发鉴权
                 Thread {
                     if (orderedInit) {
-                        // 有条序：等版本匹配 → 98386 → 等确认 → 首条 98311。
+                        // 等版本匹配 → 98386 → 有界本地间隔 → 首条 98311；没有特征 ACK。
                         // 每一步都可能因为会话结束而放弃，所以处处检查 running。
                         var waited = 0
                         while (!versionMatched && running.get() && waited < ORDERED_VERSION_WAIT_MS) {
@@ -727,24 +708,11 @@ class CarLifeHuClient(
                         }
                         if (!running.get()) return@Thread
                         pushFeatureConfig(logIt = true)
-                        var ackWaited = 0
-                        while (!featureConfigAcked && running.get() && ackWaited < ORDERED_ACK_WAIT_MS) {
-                            Thread.sleep(50)
-                            ackWaited += 50
-                        }
-                        if (!running.get()) return@Thread
-                        if (!featureConfigAcked) {
-                            log(
-                                "CARLIFE: 98386 在 ${ORDERED_ACK_WAIT_MS}ms 内未确认——" +
-                                    "照常发首轮 98311（引擎可能仍按白名单定档）",
-                            )
-                        } else {
-                            log("CARLIFE: 98386 已确认 ${ackWaited}ms —— 现在发首轮 98311（分辨率为直通档）")
-                        }
+                        if (!waitAfterFeatureConfig()) return@Thread
                         if (firstInitSent) {
                             // 视频通道看门狗在冷启动期常常先一步重连并下发（它自己也是
                             // 98386→98311 的顺序），这里就别再补一发——重复的 98311
-                            // 会把引擎确认帧率打到 20fps（实测 4/4）。
+                            // 在小米参考引擎只回显当前状态，不会重新配置编码器。
                             log("CARLIFE: 首条 98311 已由看门狗路径发出——本次不重复下发")
                             return@Thread
                         }
@@ -802,9 +770,10 @@ class CarLifeHuClient(
                 log("CARLIFE: 引擎已接受帧率变更（回包 ${payload.size}B）")
             }
 
-            CarLifeProtocol.MD_FEATURE_CONFIG_DONE -> {
-                featureConfigAcked = true
-                log("CARLIFE: 引擎已接受特征配置（CONNECT_TYPE=$connectType）")
+            CarLifeProtocol.MD_MIC_RECORD_WAKEUP_START -> {
+                if (unknownLogged.add(serviceType)) {
+                    log("CARLIFE: 麦克风唤醒开始（65570）；仅记录引擎事件，不作为特征配置确认")
+                }
             }
 
             CarLifeProtocol.MD_MEDIA_INFO -> {
@@ -907,7 +876,7 @@ class CarLifeHuClient(
                 connectType = next
                 log("CARLIFE: [探测] 换 CONNECT_TYPE=$next 重问（已试 ${probeResults.size} 档）")
                 pushFeatureConfig()
-                // 等引擎消化特征配置再问尺寸：实测 98386 → 65570 约 0.7s，留足余量。
+                // 本地固定间隔，不以麦克风事件推断配置完成。
                 Thread.sleep(PROBE_AFTER_FEATURE_MS)
                 if (!running.get() || probeFinished) return@Thread
                 // **必须在 forceEncoderInit 之前放开 pending**：65544 可能几十毫秒就回来，
@@ -1252,9 +1221,9 @@ class CarLifeHuClient(
         requestedHeight = h
         if (!running.get()) return
         if (shouldDeferHotResend(orderedInit, firstInitSent)) {
-            // 这条热更新以前会在 300ms 内抢跑（车机 /info 一到就触发），从而**赶在 98386
-            // 确认之前**把引擎的档位定死成 1280×720。有序模式下只改申请值，
-            // 由握手线程在 98386 确认后带着新值发首条 98311。
+            // 这条热更新原本在 300ms 内发送，可能绕过首轮特征发送与本地间隔。
+            // 有序模式下只改申请值，
+            // 由握手线程在配置发送及本地间隔后带着新值发首条 98311。
             log("CARLIFE: 首条 98311 尚未发出——本次申请随它一起下发（不抢先定档）")
             return
         }
@@ -1342,15 +1311,8 @@ class CarLifeHuClient(
         }.apply { isDaemon = true }.start()
     }
 
-    /**
-     * 下发 98386 特征配置（唯一出口）。
-     *
-     * 集中一处是为了顺手重置 [featureConfigAcked]：有序初始化靠这个标志判断「引擎到底
-     * 收没收到 DISABLE_RESOLUTION_OPTION」，忘了重置就会把上一轮的确认当成这一轮的，
-     * 于是 98311 照样抢跑，整条改动白做。
-     */
+    /** 下发 98386 特征配置；本地写成功不等于引擎应用成功。 */
     private fun pushFeatureConfig(logIt: Boolean = false) {
-        featureConfigAcked = false
         if (logIt) {
             log(
                 "CARLIFE: 主动推送 98386 特征配置（CONNECT_TYPE=$connectType，" +
@@ -1361,10 +1323,28 @@ class CarLifeHuClient(
         send(CarLifeProtocol.HU_FEATURE_CONFIG, CarLifeProtocol.featureConfig(connectType))
     }
 
+    /** 保留原有 2s 等待预算；任何收到的消息都不能提前结束或延长它。 */
+    private fun waitAfterFeatureConfig(): Boolean {
+        var remaining = FEATURE_CONFIG_DISPATCH_DELAY_MS
+        try {
+            while (running.get() && remaining > 0) {
+                val slice = minOf(remaining, 50L)
+                featureDispatchWait(slice)
+                remaining -= slice
+            }
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return false
+        }
+        if (!running.get()) return false
+        log("CARLIFE: 98386 后本地间隔 ${FEATURE_CONFIG_DISPATCH_DELAY_MS}ms 已结束（无协议 ACK，未确认引擎已应用）")
+        return true
+    }
+
     /**
      * 首帧之后补一次编码初始化（见 [settleReinit]）。
      *
-     * 只排一次；引擎若已按申请尺寸编码，这一步等价于一次无痛重建（帧不断）。
+     * 只排一次；是否重建取决于目标引擎，回包本身不能证明重建。
      */
     private fun scheduleSettleReinit() {
         if (!settleReinit || !settleReinitStarted.compareAndSet(false, true)) return
@@ -1373,16 +1353,10 @@ class CarLifeHuClient(
                 Thread.sleep(SETTLE_REINIT_DELAY_MS)
                 if (!running.get()) return@Thread
                 log(
-                    "CARLIFE: 会话稳定——二次初始化（首条 98311 可能早于编码器创建，" +
-                        "引擎只记参数不重建；这次让它在已有编码器上重建）",
+                    "CARLIFE: 会话稳定——补发特征配置及编码申请（不代表目标编码器会重建）",
                 )
                 pushFeatureConfig()
-                var waited = 0
-                while (!featureConfigAcked && running.get() && waited < ORDERED_ACK_WAIT_MS) {
-                    Thread.sleep(50)
-                    waited += 50
-                }
-                if (!running.get()) return@Thread
+                if (!waitAfterFeatureConfig()) return@Thread
                 log("CARLIFE: 二次初始化下发 98311 ${requestedWidth}x$requestedHeight@$videoFps（等引擎回 65544）")
                 sendEncoderInit(force = true)
             } catch (_: InterruptedException) {
@@ -1393,7 +1367,7 @@ class CarLifeHuClient(
         }.start()
     }
 
-    /** 重发 98386 特征配置 + 98311 编码初始化，让引擎重建编码器（异步，避免阻塞看门狗）。 */
+    /** 异步重发 98386 + 98311；目标引擎可能只回已有参数，不保证重建。 */
     private fun restartEncoding() {
         Thread {
             try {
@@ -1955,13 +1929,8 @@ class CarLifeHuClient(
         /** 有序初始化：最多等版本匹配这么久（MD_INFO 通常比版本匹配早到约 100ms）。 */
         private const val ORDERED_VERSION_WAIT_MS = 3_000L
 
-        /**
-         * 有序初始化：发完 98386 最多等多久确认。
-         *
-         * 实测确认回包 550~750ms（11:20 / 13:09 / 13:18 / 13:35 四次 0.55~0.73s），
-         * 留 2s 足够；超时就照常发 98311——宁可定档失败，也不能让握手卡死在这儿。
-         */
-        private const val ORDERED_ACK_WAIT_MS = 2_000L
+        /** 配置发送后的本地间隔，沿用旧等待上限；不是协议完成凭据。 */
+        private const val FEATURE_CONFIG_DISPATCH_DELAY_MS = 2_000L
 
         /**
          * 收到 65544 后等多久做二次初始化。
@@ -1974,7 +1943,7 @@ class CarLifeHuClient(
         /** CONNECT_TYPE 探测：换档前等多久（必须 > 去重窗，且给本轮推流一点稳定时间）。 */
         private const val PROBE_SETTLE_MS = 6_000L
 
-        /** 探测：发完 98386 等多久再发 98311（实测 65570 约 0.7s 回，留余量）。 */
+        /** 探测：发完 98386 后的固定本地间隔，不代表配置完成。 */
         private const val PROBE_AFTER_FEATURE_MS = 1_500L
 
         /**

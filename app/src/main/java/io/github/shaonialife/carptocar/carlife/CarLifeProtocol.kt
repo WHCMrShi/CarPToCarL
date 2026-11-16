@@ -64,13 +64,8 @@ internal object CarLifeProtocol {
     const val MD_MODULE_STATUS = 65574
     const val HU_MODULE_CONTROL = 98344
 
-    /**
-     * 98386 的确认（0 字节，引擎收到特征配置后回）。
-     *
-     * 实测时序：发 98386 → 约 0.7s 后收到 65570 → 再发 98311。所以它可以当
-     * 「特征配置已被接受」的凭据，比盲发有用。
-     */
-    const val MD_FEATURE_CONFIG_DONE = 65570
+    /** 手机通知车机开始语音唤醒录音（0x10022），不是 98386 的确认。 */
+    const val MD_MIC_RECORD_WAKEUP_START = 65570
 
     /**
      * 手机端主动推送的媒体信息（歌名/歌手/专辑/封面/时长）。

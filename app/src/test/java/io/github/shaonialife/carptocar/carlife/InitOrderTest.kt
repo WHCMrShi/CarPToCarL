@@ -7,12 +7,8 @@ import org.junit.Test
 /**
  * 首轮初始化顺序的闸门（[CarLifeHuClient.shouldDeferHotResend]）。
  *
- * 规则只有一条，但它决定了这台车有没有画面：
- * **98386（DISABLE_RESOLUTION_OPTION=1 分辨率直通）必须先于第一条 98311 被引擎确认**，
- * 否则引擎按白名单定档 1280×720，之后整轮会话再怎么重发都回 720p。
- *
- * 而车机 `/info` 一到就会调 `setRequestedResolution`，它原来 300ms 就抢跑发 98311
- * ——正好卡在「98386 已发、还没确认」的窗口里。这个测试把「不许抢跑」钉死。
+ * 车机 /info 更新申请值时，不得绕过首轮的配置发送及本地间隔。
+ * 间隔结束不代表引擎应用成功，65570 也不是特征 ACK。
  */
 class InitOrderTest {
 
