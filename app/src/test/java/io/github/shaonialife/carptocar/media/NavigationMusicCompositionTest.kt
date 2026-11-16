@@ -20,7 +20,7 @@ class NavigationMusicCompositionTest {
         for (song in listOf(music, music.copy(status = Iap2NowPlaying.STATUS_PAUSED),
             music.copy(elapsedMs = 10000), music.copy(title = "歌曲B", durationMs = 300000, elapsedMs = 0))) {
             val mixed = view.nowPlaying(music = song)
-            assertEquals("500米 右转", mixed.title)
+            assertEquals("500m 右转", mixed.title)
             assertEquals("道路A", mixed.artist)
             assertEquals(song.title, mixed.album)
             assertEquals(song.durationMs, mixed.durationMs)
@@ -67,7 +67,7 @@ class NavigationMusicCompositionTest {
         val groups = Iap2Csm.parseParams(Iap2NowPlaying.body(mixed))
         val media = Iap2Csm.parseParams(groups.single { it.id == 0 }.value)
         fun text(id: Int) = media.single { it.id == id }.value.decodeToString().trimEnd('\u0000')
-        assertEquals("500米 右转", text(1))
+        assertEquals("500m 右转", text(1))
         assertEquals("道路A", text(12))
         assertEquals("歌曲A", text(6))
         fun u32(bytes: ByteArray) = bytes.fold(0L) { value, byte -> (value shl 8) or (byte.toLong() and 255) }
