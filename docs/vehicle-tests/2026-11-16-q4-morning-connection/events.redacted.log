@@ -1,0 +1,91 @@
+# 2026-11-16 morning connection excerpts; sorted and deduplicated.
+# Identity/address fields and full payloads omitted; not byte-replay material.
+# Historical 2026-11-14 failure snapshot excluded. Bounded export may omit events.
+[06:47:02.752] CONNECT-DIAG: schema=20261108-v9 revision=3dbd1298a742 version=1.2.31-q4-debug sdk=36
+[06:47:03.584] PATH-DIAG: round=1 event=BEGIN
+[06:47:03.603] WIFI: 状态心跳已启动（起点 wifi=[] car=- default=rmnet_data3/[CELL-IP] ssid=- processBound=- defaultInternet=true defaultValidated=true）
+[06:47:04.901] BT-ACTION: id=2 source=outbound phase=DIALING
+[06:47:06.077] BT-ACTION: id=2 dial-end durationMs=1175 current=true connected=true
+[06:47:06.778] WIFI-MEMORY: current target present; admitting cached hotspot request
+[06:47:06.779] PATH-DIAG: round=1 active=true stage=WIFI_REUSE attempt=1 event=BEGIN elapsedMs=3196
+[06:47:06.786] PATH-DIAG: round=1 active=true stage=WIFI_REUSE attempt=1 event=END durationMs=7 elapsedMs=3203 outcome=NULL
+[06:47:06.787] PATH-DIAG: round=1 active=true stage=WIFI_SPECIFIER attempt=1 event=BEGIN elapsedMs=3203
+[06:47:08.116] CARLIFE: 控制端口已连接，直接用于版本握手（无探测连接）
+[06:47:08.334] CARLIFE: 版本匹配成功（协议 3.0）
+[06:47:09.311] iap2 rx=0x5703 ssid=[CAR-SSID] channel=149 security=2 psk=[REDACTED]
+[06:47:09.315] WIFI: [CAR-SSID] 已有一次入网请求在跑——等它的结果，不重复请求
+[06:47:09.323] STAGE: 本轮开始（主动连车机）
+[06:47:10.934] CARLIFE: ✓ 收到 CarLife 首帧（4238B，keyFrame=true）
+[06:47:16.168] CONNECT-DIAG: specifier available request=204248875 bound=true
+[06:47:16.176] PATH-DIAG: round=1 active=true stage=WIFI_SPECIFIER attempt=1 event=END durationMs=9389 elapsedMs=12592 outcome=RETURNED
+[06:47:16.203] WIFI: 系统事件 onAvailable → car=wlan0/[LOCAL-IP] default=rmnet_data3/[CELL-IP] processBound=wlan0/[LOCAL-IP] defaultInternet=true defaultValidated=true
+[06:47:16.218] CONNECT-DIAG: connection=f41a15b setup=64912c4 inviteGeneration=1 network-bound result=true source=主动连车机 network=933
+[06:47:16.250] WIFI: 系统事件地址变化 → car=wlan0/[LOCAL-IP] default=rmnet_data3/[CELL-IP] processBound=wlan0/[LOCAL-IP] defaultInternet=true defaultValidated=true
+[06:47:16.478] NSD: OK CarPlay -> [CAR-IP]:7000
+[06:47:16.604] CONNECT-DIAG: client=210939286 pairing-start budgetMs=120000 addressCount=1 port=7000 portSource=MDNS connection=f41a15b setup=64912c4 inviteGeneration=1
+[06:47:16.896] AIRPLAY: 重试 #1 connection=f41a15b setup=64912c4 inviteGeneration=1; 车机邀请=0 次，mDNS _airplay._tcp=[CAR-IP]:7000
+[06:47:17.547] pair-setup: M4 SRP 互验通过
+[06:47:17.565] CTRL: ✓ 车机 ctrl 邀请（第 1 次，receiver=[RECEIVER-ID]）
+[06:47:17.580] CONNECT-DIAG: fresh ctrl invite delivered to live attempt; not cached for a later retry
+[06:47:17.788] pair-verify: ✓ 完成，派生控制通道密钥
+[06:47:18.073] CONNECT-DIAG: client=210939286 pairing-result keysPresent=true unsupported=false connection=f41a15b setup=64912c4 inviteGeneration=1
+[06:47:20.812] AIRPLAY: ✓ SETUP 完成 eventPort=5001 timingPort=6020 keepAlive=5020 features=[] display=1412x654@60fps displayUuid=[REDACTED]
+[06:47:22.031] AIRPLAY: ✓ 主屏流协商成功 dataPort=6030 connId=[SCREEN-ID] 加密=ChaCha20
+[06:47:22.244] AIRPLAY: ✓ RECORD 完成——会话已激活
+[06:47:23.544] IAPLINK: 链路状态 → NORMAL
+[06:47:25.308] AIRPLAY: ✓ RECORD 完成——会话已激活
+[06:47:25.369] BT-DISABLE: deferred reason=session-retired generation=1
+[06:47:25.480] PATH-DIAG: videoAttach cachedFrames=23 cachedBytes=128766 lateFrames=0 replay=true firstKey=true firstSps=true lastSourceAgeMs=12 cachedGopAgeMs=1575
+[06:47:25.908] CARLIFE: ✓ 已开始向车机送帧（首帧 65006B）
+[06:47:26.182] CARLIFE: 同源新鲜 GOP 已完整写出——保留编码器，首帧看门狗仍有效
+[06:47:26.188] PATH-DIAG: videoAttach event=END durationMs=709 senderRunning=true; write success is not display confirmation
+[06:47:26.338] BT-DISABLE: queued generation=1; source lease captured
+[06:47:26.424] BT-DISABLE: request generation=1 deviceIDSource=session-SETUP channel=control
+[06:47:26.468] AIRPLAY: 音频 SETUP 往返 192ms [RTSP/1.0 200 OK]
+[06:47:26.480] BT-DISABLE: response generation=1 accepted=true status=[RTSP/1.0 200 OK]; profile/ACL disconnection unconfirmed
+[06:47:26.487] LINK closed: bt socket closed, read return: -1
+[06:47:26.492] BT-LIFECYCLE: closed direction=outbound owner=1 ageMs=20414 ready=true
+[06:47:26.500] HANDOVER-DIAG: btClosed decision=KEEP_VIDEO inviteGeneration=1 policyWifiReady=true physicalNetwork=cached=true,request=true,observer=true,wifi=true,processBound=true client=210939286 controlAlive=true setupPending=true videoRunning=true sourceStreaming=true workCurrent=true cancelled=false
+[06:47:26.501] BT-C: expected handoff owner=1; disableBluetooth accepted and Wi-Fi control live, BT recovery paused
+[06:47:26.660] AIRPLAY: ✓ RECORD 完成——会话已激活
+[06:47:40.033] STAGE: 车机接管屏幕有回落信号（首帧后 12s 内 13 条事件命令；车机未回报收帧统计）
+[06:47:45.796] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=5048 count=132 slow=3 discontinuities=0 workInclusiveMaxUs=317814 sealMaxUs=143291 sendMaxUs=75088 final=false
+[06:47:54.478] AUDIO-DIAG: ingress queuedBytes=0 queuedMs=0 droppedBlocks=9 queueAgeMaxMs=179 workerMaxUs=202981
+[06:48:18.508] MEDIA-STAGE: video scope=frame-config-keepalive windowMs=22658 count=483 slow=1 discontinuities=0 workInclusiveMaxUs=388801 sealMaxUs=352958 sendMaxUs=57596 final=false
+[06:48:26.204] VIDEO-PATH: wireFrames=1381 sourceSeen=true queue=[pending=0,bytes=0,oldestMs=0,dropped=207,waitingIdr=false,epoch=5] write=[idle]
+[06:49:31.507] VIDEO-PATH: wireFrames=2866 sourceSeen=true queue=[pending=0,bytes=0,oldestMs=0,dropped=207,waitingIdr=false,epoch=5] write=[idle]
+[07:29:05.289] EVENT-DIAG: changeModes reasonStr=RVC resourceID=1 transferType=3 borrowID=backupCamera [payload omitted]
+[07:29:05.290] RESOURCE-DIAG: change version=1 screenRecoveryAllowed=false
+[07:29:41.748] VIDEO-PATH: wireFrames=51543 sourceSeen=true queue=[pending=0,bytes=0,oldestMs=0,dropped=253,waitingIdr=false,epoch=6] write=[idle]
+[07:29:46.258] EVENT-DIAG: changeModes reasonStr=RVC_END resourceID=1 transferType=4 borrowID=backupCamera [payload omitted]
+[07:29:46.259] RESOURCE-DIAG: change version=2 screenRecoveryAllowed=true
+[07:29:46.288] EVENT-DIAG: changeModes reasonStr=POPUP resourceID=1 transferType=3 borrowID=uiNotification [payload omitted]
+[07:29:46.289] RESOURCE-DIAG: change version=3 screenRecoveryAllowed=false
+[07:29:46.771] VIDEO-PATH: wireFrames=51597 sourceSeen=true queue=[pending=0,bytes=0,oldestMs=0,dropped=295,waitingIdr=true,epoch=7] write=[idle]
+[07:29:46.870] VIDEO: 帧 #51598 66750B (key) 已发送
+[07:29:48.406] AUDIO: UDP 发送失败 - sendto failed: ECONNREFUSED (Connection refused)
+[07:29:48.410] VIDEO: 直通送帧失败 - Connection reset
+[07:29:48.417] VIDEO: 视频通道重连失败（第 1 次）- [CAR-IP]:6030 ECONNREFUSED
+[07:29:48.436] EVENT: 读取结束 - Connection reset
+[07:29:48.456] CONNECT-DIAG: control-reader ended reason=EOF generation=2 pending=0 connection=f41a15b setup=64912c4 inviteGeneration=1
+[07:29:48.581] NSD: 服务消失 CarPlay
+[07:29:48.742] BT-C: 控制链路 180 秒内没连回来——停止补连（CarPlay 画面/声音不受影响，下次整轮连接再试）
+[07:29:48.954] VIDEO: 视频通道重连失败（第 2 次）- [CAR-IP]:6030 ECONNREFUSED
+[07:29:49.474] VIDEO: 视频通道重连失败（第 3 次）- [CAR-IP]:6030 ECONNREFUSED
+[07:29:49.976] CONNECT-DIAG: video terminal reason=frame-write-recovery-exhausted after bounded data-port recovery
+[07:29:49.978] CONNECT-DIAG: CarPlay owner ended; stopping attached CarLife session
+[07:29:49.981] CARLIFE-DIAG: stopped reason=local-stop-or-cancel
+[07:29:50.787] BT-ACTION: id=5 source=outbound phase=DIALING
+[07:30:01.490] BT-C: 连接 [CAR-NAME] 失败（A Bluetooth Socket failure occurred）; 16 秒后重试
+[07:30:17.551] BT-ACTION: id=6 source=outbound phase=DIALING
+[07:30:36.461] IDLE: long observer gap; defer final close for bounded event settling, deadline unchanged
+[07:30:36.509] PROC: 主线程心跳迟到 13 秒（心跳中断 14s）；可能为休眠、冻结或主线程阻塞
+[07:30:36.510] CONNECT-DIAG: specifier network lost request=204248875 network=933; request remains registered
+[07:30:36.531] WIFI: 系统事件网卡能力变化 → car=- default=rmnet_data3/[CELL-IP] processBound=- defaultInternet=true defaultValidated=true
+[07:30:36.554] WIFI: 系统事件 onLost → wifi=[] car=- default=rmnet_data3/[CELL-IP] processBound=- defaultInternet=true defaultValidated=true
+[07:30:36.556] CONNECT-DIAG: observer network lost network=933 bindingLost=false activeRequestRetained=true
+[07:30:36.613] PATH-DIAG: round=1 active=true stage=WIFI_REUSE attempt=2 event=END durationMs=40 elapsedMs=2613029 outcome=NULL
+[07:30:36.615] PATH-DIAG: round=1 active=true stage=WIFI_SPECIFIER attempt=2 event=BEGIN elapsedMs=2613031
+[07:30:39.513] IDLE: 无目标蓝牙、无画面且等待预算已到期——结束会话、停止保活服务
+[07:30:39.516] PATH-DIAG: round=1 event=END elapsedMs=2615932
+[07:30:39.662] CONNECT-DIAG: retired WiFi join completion after cancellation
