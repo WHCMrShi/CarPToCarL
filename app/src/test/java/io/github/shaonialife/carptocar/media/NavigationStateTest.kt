@@ -46,7 +46,7 @@ class NavigationStateTest {
         assertEquals("导航结束", state.display(600).title)
         assertEquals("等待导航", state.display(10300).title)
         state.receive(owner, event(2), 10400)
-        assertEquals("100米 左转", state.display(11000).title)
+        assertEquals("100m 左转", state.display(11000).title)
     }
 
     @Test fun missingStartAndStaleHuNeverReusePreviousDurationOrGuide() {
@@ -74,7 +74,7 @@ class NavigationStateTest {
         val state = started()
         state.receive(owner, event(1, distance = 1000), 0)
         state.receive(owner, event(distance = 500), 100)
-        assertEquals("500米 左转", state.display(300).title)
+        assertEquals("500m 左转", state.display(300).title)
         val version = state.display(300).iconVersion
         state.receive(owner, event(distance = 400, icon = null), 1000)
         assertEquals(version, state.display(1300).iconVersion)
@@ -94,7 +94,7 @@ class NavigationStateTest {
     @Test fun durationFormattingAndBlankRoadAreSafe() {
         assertEquals("59:59", NavigationState.formatDrivingDuration(3599999))
         assertEquals("1:00:00", NavigationState.formatDrivingDuration(3600000))
-        assertEquals("1千米", NavigationState.formatDistance(1000))
+        assertEquals("1km", NavigationState.formatDistance(1000))
         val state = started()
         state.receive(owner, event(1, road = " \t"), 0)
         assertEquals("   ", state.display(300).artist)
@@ -103,12 +103,12 @@ class NavigationStateTest {
         for (code in listOf(0, 25, 26, 27, 28) + (45..68) + listOf(-1, 77, 999)) {
             val state = NavigationState().apply { begin(owner) }
             state.receive(owner, event(1, code, "隧道道路", 1000, byteArrayOf(1)), 0)
-            assertEquals("1千米 途径", state.display(300).nowPlaying().title)
+            assertEquals("1km 途径", state.display(300).nowPlaying().title)
             val updatedIcon = byteArrayOf(2, 3)
             state.receive(owner, event(2, code, "下一道路", 500, updatedIcon), 1000)
             val view = state.display(1300)
             val media = view.nowPlaying()
-            assertEquals("500米 途径", media.title)
+            assertEquals("500m 途径", media.title)
             assertEquals("暂无音乐", media.album)
             assertEquals("下一道路", media.artist)
             assertEquals(0, media.durationMs)
@@ -121,7 +121,7 @@ class NavigationStateTest {
         for (road in listOf("无名道路", "", "   ", "  原始道路  ")) {
             val state = NavigationState().apply { begin(owner) }
             state.receive(owner, event(2, 25, road, 26), 0)
-            assertEquals("26米 途径", state.display(300).nowPlaying().title)
+            assertEquals("26m 途径", state.display(300).nowPlaying().title)
         }
     }
 
@@ -138,12 +138,12 @@ class NavigationStateTest {
         for ((code, text) in actions) {
             val state = NavigationState().apply { begin(owner) }
             state.receive(owner, event(1, code, "原始道路", 1000), 0)
-            assertEquals("code=$code", "1千米 $text", state.display(300).nowPlaying().title)
+            assertEquals("code=$code", "1km $text", state.display(300).nowPlaying().title)
             val icon = byteArrayOf(8, 9)
             state.receive(owner, event(2, code, "下一道路", 500, icon), 1000)
             val view = state.display(1300)
             val media = view.nowPlaying()
-            assertEquals("code=$code", "500米 $text", media.title)
+            assertEquals("code=$code", "500m $text", media.title)
             assertEquals("暂无音乐", media.album)
             assertEquals("下一道路", media.artist)
             assertEquals(0, media.durationMs)

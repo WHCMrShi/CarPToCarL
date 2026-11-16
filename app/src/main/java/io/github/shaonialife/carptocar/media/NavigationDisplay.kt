@@ -129,8 +129,8 @@ internal class NavigationState {
             return if (seconds < 3_600) String.format(Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60)
             else String.format(Locale.ROOT, "%d:%02d:%02d", seconds / 3_600, seconds / 60 % 60, seconds % 60)
         }
-        fun formatDistance(meters: Int): String = if (meters < 1000) "${meters}米"
-        else String.format(Locale.ROOT, "%.1f", meters / 1000.0).removeSuffix(".0") + "千米"
+        fun formatDistance(meters: Int): String = if (meters < 1000) "${meters}m"
+        else String.format(Locale.ROOT, "%.1f", meters / 1000.0).removeSuffix(".0") + "km"
         /*
          * Previous mapping (9768a2a), retained for comparison.
          * Unmapped codes use the original road name, including 25..28 and Base 45..68.
