@@ -7,7 +7,7 @@
 1. **确认应用存在错误的“特征确认”判据。** 65570（0x10022）在公开车机 SDK 与指南中是麦克风唤醒开始。当前分支及上游均用它设置 `featureConfigAcked`；不能据日志“引擎已接受特征配置”证明分辨率特征已经生效。此前将 13:37:03 当作真正确认后的降档反例，现撤回该解释。
 2. **确认同版本 CarWith 存在独立于 98311 的持久分辨率覆盖。** 厂商 `carlife_encode_format` 回调会优先选保存的当前分辨率，写回返回 Bundle 的 width/height；只有没有保存值才使用此次传入的 real_width/real_height。这是本轮找到的最具体源端候选，足以解释“新申请未成为最终编码尺寸”的一种机制，尚不能证明车友这台手机实际保存了 1280×720。
 3. **确认虚拟屏创建消费引擎回传的 CastConfig 尺寸及 Surface。** 已跟到普通投屏分支的 VirtualDisplayConfig.Builder(width,height).setSurface(surface)。未发现这条普通分支把 1412×654 强制改为 720p 的逻辑；其他显示分支不能据此一并排除。
-4. **尚未完整取得实际引擎端。** CarWith 主包绑定独立的 `com.baidu.carlife.xiaomi` / `CarlifeConnectService`。主包版本不等于该引擎版本；本次 APK 不包含此前荣耀版笔记中的 Recorder、FeatureConfigManager 或 MediaFormatUtils 实现。因而 98386 到引擎特征赋值、98311 到 MediaCodec.configure 的最后一段，不能假称已在目标引擎追通。SPS=1280×720 是实际终点证据，不给出中间哪个节点首先改变尺寸。
+4. **本轮主包分析时尚未取得独立引擎。** 后续已取得 `com.baidu.carlife.xiaomi` 8.8.4（273），追到特征赋值及 MediaCodec.configure，见[引擎尺寸链路](engine-size-chain.md)。主包版本仍不等于车友实际引擎版本。新增证据显示重复98311可只回已有档位，以及直通标志true时厂商覆盖会造成65544与实际编码格式不同；因此“确认和SPS都为720p”的实车样本应优先核对旧初始化状态及首次分档，不能只凭主包覆盖逻辑宣布已找到唯一原因。
 
 ## 材料与复核方式
 
@@ -66,7 +66,7 @@
 
 这是“引擎把已准备的 Surface 交给 CarWith 创建虚拟屏”的方向；不能误写成我方 `VirtualLauncher` 创建该屏后决定源端编码尺寸。也不能拿主包另一套 MediaCodec 编码器（其他连接方式）代替独立 CarLife 引擎的 configure 调用证据。
 
-主包会查询独立引擎的版本并对部分参数走兼容分支，但本次日志没有返回版本。DISABLE_RESOLUTION_OPTION 的实际解析、Recorder.useVehicleResolution、编码器创建/重建与输入 Surface 的配置，仍需该引擎同版本 APK 或对应运行日志。用户难以提供时保留这项证据边界，不继续要求上传，也不虚构已读到它的实现。
+主包会查询独立引擎的版本并对部分参数走兼容分支，但本次日志没有返回版本。后续取得的8.8.4引擎已补足静态处理链；仍不能冒充为实车同版或运行时赋值。用户难以提供时保留这项边界，不继续要求上传。
 
 ## 上游线索及采纳边界
 
