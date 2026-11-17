@@ -960,11 +960,6 @@ class MainActivity : AppCompatActivity() {
             refreshMacGate()
         }
 
-        // 「画质增强」（写 CarLife 官方调试配置）入口已按用户要求从首页移除：
-        // 实测这条 MediaFormat 通道对码率/帧率无效，而 /sdcard/BaiduCarlife/vehicle
-        // 一存在就会让 CarLife 进入调试模式，白担开销。CarLifeDevConfig 保留备用
-        // （需要时可在代码里直接调用 provision()），界面不再暴露。
-
         findViewById<TextView>(R.id.btnClearWifiMemory).setOnClickListener {
             if (SessionController.clearRememberedWifi(this)) snack("已清除车机热点记忆")
             else snack("请先断开连接再清除车机热点记忆")

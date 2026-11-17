@@ -1877,7 +1877,6 @@ object SessionController {
         setupWork.end()
         wifiJoinGate.reset()
         appendLog("CONNECT-DIAG: final-disconnect requested phase=$phaseHint; will stop CarLife and retire network resources")
-        val hadProjection = CarPlayService.mediaProjection != null
         // 用户终态：解冻恢复不得再自动把会话拉起来
         sessionWanted = false
         wifiConnector?.clearReceiverEvidence()
@@ -1923,13 +1922,7 @@ object SessionController {
         wifiWatchdog?.stop()
         boundCarSsid = null
         sessionStarting.set(false)
-        if (hadProjection) {
-            // Android 14+：MediaProjection 与保活服务（mediaProjection FGS 类型）绑定，
-            // 停服务会连带失效授权——下次连接需重新点「申请投屏权限」
-            appendLog("已断开并停止保活服务（常亮已恢复）；投屏授权已随服务停止失效，下次连接如需声音请重新申请")
-        } else {
-            appendLog("已断开并停止保活服务（常亮已恢复）")
-        }
+        appendLog("已断开并停止保活服务（常亮已恢复）")
     }
 
     /** 上次打出审计汇总时的条目数（-1 = 本轮还没打过；用于「只在有新问题时补一行」）。 */
