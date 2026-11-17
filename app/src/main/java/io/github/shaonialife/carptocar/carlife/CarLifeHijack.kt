@@ -434,11 +434,11 @@ object CarLifeHijack {
     fun sendCarGps(fix: CarGpsFix): Boolean = client?.sendCarGps(fix) ?: false
 
     /** Capture the receiving HU now: old queued samples must not cross a reconnect. */
-    internal fun carMotionTask(sample: PascdMotion, receivedAt: Long, sourceCurrent: () -> Boolean): Runnable? {
+    internal fun carMotionTask(sample: PascdMotion, sourceCurrent: () -> Boolean): Runnable? {
         val target = client ?: return null
         val generation = CarGpsOption.generation
         return Runnable {
-            target.sendCarMotion(sample, receivedAt, generation) { client === target && sourceCurrent() }
+            target.sendCarMotion(sample, generation) { client === target && sourceCurrent() }
         }
     }
 

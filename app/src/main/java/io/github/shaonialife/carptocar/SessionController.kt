@@ -35,7 +35,6 @@ import io.github.shaonialife.carptocar.iap2.Iap2SenderSession
 import io.github.shaonialife.carptocar.iap2.NmeaAssembler
 import io.github.shaonialife.carptocar.iap2.NmeaLocation
 import io.github.shaonialife.carptocar.iap2.PascdMotion
-import io.github.shaonialife.carptocar.iap2.PascdMotionTracker
 import io.github.shaonialife.carptocar.iap2.ReceiverProfile
 import io.github.shaonialife.carptocar.input.ConsumerKeys
 import io.github.shaonialife.carptocar.input.HidReportProfiles
@@ -477,15 +476,12 @@ object SessionController {
      * 没有经纬度的样本（奥迪就是 `$PASCD,…,C,D,0,…`，fix=0）。把这种样本发给引擎
      * 会让地图飘到 (0,0)，比不给更糟。
      */
-    private fun onCarLocation(sentences: List<String>, tracker: PascdMotionTracker, sourceCurrent: () -> Boolean) {
+    private fun onCarLocation(sentences: List<String>, sourceCurrent: () -> Boolean) {
         if (!sourceCurrent()) return
         if (!CarGpsOption.enabled) return
-        val receivedAt = android.os.SystemClock.elapsedRealtime()
         for (sentence in sentences) {
             val motion = PascdMotion.parse(sentence) ?: continue
-            if (tracker.accept(motion, receivedAt)) {
-                CarLifeHijack.carMotionTask(motion, receivedAt, sourceCurrent)?.let(carLifeCommandSender::execute)
-            }
+            CarLifeHijack.carMotionTask(motion, sourceCurrent)?.let(carLifeCommandSender::execute)
         }
         // Motion must not cause an earlier GPS fix to be re-sent with a new timestamp.
         val gpsSentences = sentences.filterNot { it.startsWith("\$PASCD,", ignoreCase = true) }
@@ -510,8 +506,7 @@ object SessionController {
         val carFix = toCarGpsFix(merged)
         val generation = CarGpsOption.generation
         carLifeCommandSender.execute {
-            if (sourceCurrent() && CarGpsOption.enabled && CarGpsOption.generation === generation &&
-                PascdMotionTracker.isFresh(receivedAt, android.os.SystemClock.elapsedRealtime())) {
+            if (sourceCurrent() && CarGpsOption.enabled && CarGpsOption.generation === generation) {
                 CarLifeHijack.sendCarGps(carFix)
             }
         }
@@ -4443,10 +4438,9 @@ object SessionController {
                                     voiceKey.onHidUp("iAP2 0x6802 0xCF")
                                 }
                             }
-                            // Each CarPlay source owns its motion timebase; no cached replay.
-                            val motionTracker = PascdMotionTracker()
+                            // Forward incoming motion only to the current source session.
                             created.onLocationSamples = { sentences ->
-                                onCarLocation(sentences, motionTracker) {
+                                onCarLocation(sentences) {
                                     currentClient === created && created.controlSessionReady
                                 }
                             }

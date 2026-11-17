@@ -1,7 +1,6 @@
 package io.github.shaonialife.carptocar.carlife
 
 import io.github.shaonialife.carptocar.iap2.PascdMotion
-import io.github.shaonialife.carptocar.iap2.PascdMotionTracker
 import io.github.shaonialife.carptocar.iap2.PascdGear
 
 import java.io.DataInputStream
@@ -176,7 +175,6 @@ class CarLifeHuClient(
     private val encoderInitClock: () -> Long = { android.os.SystemClock.uptimeMillis() },
     private val keyFrameWait: (Long) -> Unit = { Thread.sleep(it) },
     private val featureDispatchWait: (Long) -> Unit = { Thread.sleep(it) },
-    private val vehicleClock: () -> Long = { android.os.SystemClock.elapsedRealtime() },
 ) {
 
     private val running = AtomicBoolean(false)
@@ -208,7 +206,7 @@ class CarLifeHuClient(
     private var carGpsSent = 0
 
     private val vehicleLock = Any()
-    private var vehicleDelivery = CarLifeVehicleDelivery()
+    private val stoppedVehicleModules = mutableSetOf<Int>()
     private val vehicleModules = mutableSetOf<Int>()
     private var vehicleSubscriptionRequested = false
     private var advertisedVehicleModules: Set<Int>? = null
@@ -482,7 +480,7 @@ class CarLifeHuClient(
         controlEndReason.set(null)
         versionMatched = false
         synchronized(vehicleLock) {
-            vehicleDelivery = CarLifeVehicleDelivery()
+            stoppedVehicleModules.clear()
             vehicleModules.clear()
             vehicleSubscriptionRequested = false
             advertisedVehicleModules = null
@@ -724,13 +722,14 @@ class CarLifeHuClient(
             }
 
             CarLifeVehicleData.START, CarLifeVehicleData.STOP -> synchronized(vehicleLock) {
-                val controls = CarLifeVehicleData.controls(payload)
-                if (controls == null) {
+                val control = CarLifeVehicleData.control(payload)
+                if (control == null) {
                     log("VEHICLE: 忽略无效的车辆订阅控制 id=$serviceType")
-                } else for (control in controls) {
+                } else {
                     if (control.module == CarLifeVehicleData.VELOCITY || control.module == CarLifeVehicleData.GEAR_MODULE) {
-                        vehicleDelivery.control(control.module, serviceType == CarLifeVehicleData.START)
-                        log("VEHICLE: module=${control.module} start=${serviceType == CarLifeVehicleData.START} requestedHz=${control.frequency}；仅转发新样本，最高约1Hz")
+                        if (serviceType == CarLifeVehicleData.START) stoppedVehicleModules.remove(control.module)
+                        else stoppedVehicleModules.add(control.module)
+                        log("VEHICLE: module=${control.module} start=${serviceType == CarLifeVehicleData.START} requestedHz=${control.frequency}；按车辆来报转发，不补采样")
                     }
                 }
             }
@@ -1896,20 +1895,17 @@ class CarLifeHuClient(
     }
 
     /** Called on the command worker, never on the iAP2 receive thread. */
-    internal fun sendCarMotion(sample: PascdMotion, receivedAt: Long, generation: Any, sourceCurrent: () -> Boolean) {
+    internal fun sendCarMotion(sample: PascdMotion, generation: Any, sourceCurrent: () -> Boolean) {
         fun permitted(): Boolean = running.get() && versionMatched && CarGpsOption.enabled &&
-            CarGpsOption.generation === generation && sourceCurrent() &&
-            PascdMotionTracker.isFresh(receivedAt, vehicleClock())
+            CarGpsOption.generation === generation && sourceCurrent()
         if (!permitted()) return
         synchronized(vehicleLock) {
             if (!permitted()) return
             vehicleModules.add(CarLifeVehicleData.VELOCITY)
             if (sample.gear != null) vehicleModules.add(CarLifeVehicleData.GEAR_MODULE)
             publishVehicleCapabilities()
-            val now = vehicleClock()
-            if (vehicleDelivery.allowed(CarLifeVehicleData.VELOCITY, now) &&
+            if (CarLifeVehicleData.VELOCITY !in stoppedVehicleModules &&
                 sendChecked(CarLifeVehicleData.SPEED, CarLifeVehicleData.speed(sample.speedKmh), ::permitted)) {
-                vehicleDelivery.sent(CarLifeVehicleData.VELOCITY, now)
                 vehicleSamplesSent++
                 if (vehicleSamplesSent <= 3 || vehicleSamplesSent % 30 == 0) {
                     log("VEHICLE: PASCD 车速 ${sample.speedKmh}km/h → 0x1800F 本地写入 #$vehicleSamplesSent（不代表地图已采用）")
@@ -1917,9 +1913,8 @@ class CarLifeHuClient(
             }
             sample.gear?.let { gear ->
                 val changed = gear != lastVehicleGear
-                if (vehicleDelivery.allowed(CarLifeVehicleData.GEAR_MODULE, now, changed) &&
+                if (CarLifeVehicleData.GEAR_MODULE !in stoppedVehicleModules &&
                     sendChecked(CarLifeVehicleData.GEAR, CarLifeVehicleData.gear(gear), ::permitted)) {
-                    vehicleDelivery.sent(CarLifeVehicleData.GEAR_MODULE, now)
                     lastVehicleGear = gear
                     vehicleGearsSent++
                     if (changed || vehicleGearsSent <= 3 || vehicleGearsSent % 30 == 0) {
