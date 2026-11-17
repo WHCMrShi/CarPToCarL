@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Flow C: day/night C and theme-red transfer arrow, inset within the adaptive safe zone with balanced visual whitespace. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="128"
+    android:viewportHeight="128">
+    <group android:pivotX="64" android:pivotY="64"
+        android:scaleX="0.70" android:scaleY="0.70">
+        <path
+            android:pathData="M91,39 C63,15 28,33 28,64 C28,95 62,112 88,91"
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#000000"
+            android:strokeWidth="9"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M65,43 L91,64 L65,85 M46,64 L91,64"
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#000000"
+            android:strokeWidth="8"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>

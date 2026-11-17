@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Flow C: white C and theme-red transfer arrow, inset within the adaptive safe zone with balanced visual whitespace. -->
+<!-- Flow C: day/night C and theme-red transfer arrow, inset within the adaptive safe zone with balanced visual whitespace. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -10,7 +10,7 @@
         <path
             android:pathData="M91,39 C63,15 28,33 28,64 C28,95 62,112 88,91"
             android:fillColor="@android:color/transparent"
-            android:strokeColor="#FFFFFF"
+            android:strokeColor="@color/ic_launcher_mark"
             android:strokeWidth="9"
             android:strokeLineCap="round"
             android:strokeLineJoin="round" />
