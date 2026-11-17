@@ -385,6 +385,13 @@
                                             android:textColor="@color/m3_on_surface"
                                             android:textSize="16sp" />
                                         <TextView
+                                            android:layout_width="match_parent"
+                                            android:layout_height="wrap_content"
+                                            android:layout_marginTop="4dp"
+                                            android:text="@string/car_wifi_auto_connect_hint"
+                                            android:textColor="@color/m3_on_var"
+                                            android:textSize="14sp" />
+                                        <TextView
                                             android:id="@+id/ssidInput"
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
