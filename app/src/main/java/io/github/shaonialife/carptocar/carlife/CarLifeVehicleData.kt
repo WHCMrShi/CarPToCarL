@@ -1,5 +1,7 @@
 package io.github.shaonialife.carptocar.carlife
 
+import io.github.shaonialife.carptocar.iap2.PascdGear
+
 /**
  * Guide chapter 12: integer km/h, optional timestamp, module VELOCITY=1.
  * OPPO 8.6.8 CarDataSubscribeManager + generated protobuf bytecode confirm the command
@@ -13,6 +15,16 @@ internal object CarLifeVehicleData {
     const val START = 0x10033
     const val STOP = 0x10034
     const val VELOCITY = 1
+    const val GEAR = 0x18029
+    const val GEAR_MODULE = 4
+
+    /** OPPO GearInfo field1/int32; guide 12.1.1.6 defines N/P/D/L/R=1/2/3/4/5. */
+    fun gear(gear: PascdGear): ByteArray = CarLifeProtocol.pbVarint(1, when (gear) {
+        PascdGear.N -> 1
+        PascdGear.P -> 2
+        PascdGear.D -> 3
+        PascdGear.R -> 5
+    })
 
     fun speed(kmh: Int): ByteArray {
         require(kmh in 0..360)
@@ -64,7 +76,7 @@ internal class CarLifeVehicleDelivery {
     fun control(module: Int, start: Boolean) {
         if (start) stopped.remove(module) else stopped.add(module)
     }
-    fun allowed(module: Int, now: Long): Boolean =
-        module !in stopped && (lastSent[module]?.let { now - it >= 900 } ?: true)
+    fun allowed(module: Int, now: Long, changed: Boolean = false): Boolean =
+        module !in stopped && (changed || (lastSent[module]?.let { now - it >= 900 } ?: true))
     fun sent(module: Int, now: Long) { lastSent[module] = now }
 }

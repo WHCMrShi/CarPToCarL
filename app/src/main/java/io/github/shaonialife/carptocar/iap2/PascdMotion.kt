@@ -3,7 +3,7 @@ package io.github.shaonialife.carptocar.iap2
 import kotlin.math.roundToInt
 
 /** PASCD is vehicle motion, not a GPS fix. Unknown fields C/0 are not interpreted. */
-internal data class PascdMotion(val sampleSeconds: Double, val speedKmh: Int) {
+internal data class PascdMotion(val sampleSeconds: Double, val speedKmh: Int, val gear: PascdGear? = null) {
     companion object {
         /** Production-HU layout: time,C,gear,unknown,count,(offset seconds,speed m/s)... */
         fun parse(sentence: String): PascdMotion? {
@@ -16,6 +16,8 @@ internal data class PascdMotion(val sampleSeconds: Double, val speedKmh: Int) {
             if (body.fold(0) { sum, c -> sum xor c.code } != checksum) return null
             val fields = body.split(',')
             if (fields.size < 8) return null
+            // Only the evidenced C/.../0 layout is supported; other variants are not inferred.
+            if (fields[2] != "C" || fields[4] != "0") return null
             val start = fields[1].toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 } ?: return null
             val count = fields[5].toIntOrNull()?.takeIf { it in 1..32 } ?: return null
             if (fields.size != 6 + count * 2) return null
@@ -31,10 +33,13 @@ internal data class PascdMotion(val sampleSeconds: Double, val speedKmh: Int) {
             }
             val sampleTime = start + previousOffset
             if (!sampleTime.isFinite()) return null
-            return PascdMotion(sampleTime, (speed * 3.6).roundToInt())
+            return PascdMotion(sampleTime, (speed * 3.6).roundToInt(), PascdGear.entries.firstOrNull { it.name == fields[3] })
         }
     }
 }
+
+/** Only source symbols evidenced by the PASCD sender implementation; no M/S/L guesses. */
+internal enum class PascdGear { P, R, N, D }
 
 /** One instance per CarPlay source session. No cached sample is replayed on connection. */
 internal class PascdMotionTracker {

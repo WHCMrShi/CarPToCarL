@@ -42,4 +42,17 @@ class PascdMotionTest {
         assertFalse(PascdMotionTracker.isFresh(1000, 2501))
         assertFalse(PascdMotionTracker.isFresh(1000, 999))
     }
+
+    @Test fun gearIsIndependentOfSpeedAndUnknownSymbolsAreNeverMappedToDriveOrPark() {
+        for (gear in PascdGear.entries) {
+            assertEquals(gear, PascdMotion.parse(sentence("PASCD,100,C,${gear.name},0,1,0,0"))!!.gear)
+        }
+        for (unknown in listOf("S", "M", "L", "", "4", "d")) {
+            val sample = PascdMotion.parse(sentence("PASCD,100,C,$unknown,0,1,0,10"))!!
+            assertNull(sample.gear)
+            assertEquals(36, sample.speedKmh)
+        }
+        assertNull(PascdMotion.parse(sentence("PASCD,100,X,D,0,1,0,10")))
+        assertNull(PascdMotion.parse(sentence("PASCD,100,C,D,9,1,0,10")))
+    }
 }
