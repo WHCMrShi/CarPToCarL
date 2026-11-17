@@ -39,17 +39,34 @@ class CarLifeVehicleDataTest {
             val hu = client(output)
             val speed = CarLifeProtocol.packCommand(0x1800F, byteArrayOf(8, 0))
             val gear = CarLifeProtocol.packCommand(0x18029, byteArrayOf(8, 3))
-            repeat(2) { hu.sendCarMotion(PascdMotion(0, PascdGear.D), CarGpsOption.generation) { true } }
-            hu.sendCarMotion(PascdMotion(0), CarGpsOption.generation) { true }
+            repeat(2) { hu.sendCarMotion(PascdMotion(listOf(0), PascdGear.D), CarGpsOption.generation) { true } }
+            hu.sendCarMotion(PascdMotion(listOf(0)), CarGpsOption.generation) { true }
             assertArrayEquals(speed + gear + speed + gear + speed, output.toByteArray())
             output.reset()
             receive(hu, CarLifeVehicleData.STOP, byteArrayOf(8, 4))
-            hu.sendCarMotion(PascdMotion(0, PascdGear.D), CarGpsOption.generation) { true }
+            hu.sendCarMotion(PascdMotion(listOf(0), PascdGear.D), CarGpsOption.generation) { true }
             assertArrayEquals(speed, output.toByteArray())
             output.reset()
             receive(hu, CarLifeVehicleData.START, byteArrayOf(8, 4, 24, 0))
-            hu.sendCarMotion(PascdMotion(0, PascdGear.D), CarGpsOption.generation) { true }
+            hu.sendCarMotion(PascdMotion(listOf(0), PascdGear.D), CarGpsOption.generation) { true }
             assertArrayEquals(speed + gear, output.toByteArray())
+        } finally { CarGpsOption.save(null, previous) }
+    }
+
+    @Test fun batchWritesEverySpeedInOrderAndGearOncePerSentence() {
+        val previous = CarGpsOption.enabled
+        try {
+            CarGpsOption.save(null, true)
+            val output = ByteArrayOutputStream()
+            val hu = client(output)
+            val body = "PASCD,100,C,D,0,4,0,10,0.25,1,0.5,1,0.75,0"
+            val sentence = "\$$body*%02X".format(body.fold(0) { n, c -> n xor c.code })
+            val motion = PascdMotion.parse(sentence)!!
+            val expected = listOf(36, 4, 4, 0).fold(byteArrayOf()) { bytes, speed ->
+                bytes + CarLifeProtocol.packCommand(0x1800F, byteArrayOf(8, speed.toByte()))
+            } + CarLifeProtocol.packCommand(0x18029, byteArrayOf(8, 3))
+            repeat(2) { hu.sendCarMotion(motion, CarGpsOption.generation) { true } }
+            assertArrayEquals(expected + expected, output.toByteArray())
         } finally { CarGpsOption.save(null, previous) }
     }
 
@@ -61,7 +78,7 @@ class CarLifeVehicleDataTest {
                 val output = ByteArrayOutputStream()
                 val hu = client(output)
                 receive(hu, CarLifeVehicleData.STOP, byteArrayOf(8, stopped.toByte()))
-                hu.sendCarMotion(PascdMotion(36, PascdGear.D), CarGpsOption.generation) { true }
+                hu.sendCarMotion(PascdMotion(listOf(36), PascdGear.D), CarGpsOption.generation) { true }
                 assertArrayEquals(CarLifeProtocol.packCommand(expectedId, byteArrayOf(8, expectedValue.toByte())), output.toByteArray())
             }
         } finally { CarGpsOption.save(null, previous) }
@@ -88,7 +105,7 @@ class CarLifeVehicleDataTest {
             val output = ByteArrayOutputStream()
             val hu = client(output)
             val generation = CarGpsOption.generation
-            val motion = PascdMotion(36)
+            val motion = PascdMotion(listOf(36))
             hu.sendCarMotion(motion, generation) { false }
             assertEquals(0, output.size())
             CarGpsOption.save(null, false)
@@ -111,11 +128,11 @@ class CarLifeVehicleDataTest {
             assertArrayEquals(CarLifeProtocol.packCommand(0x18032, byteArrayOf(8, 0)), output.toByteArray())
             output.reset()
             receive(hu, CarLifeVehicleData.STOP, byteArrayOf(8, 1))
-            hu.sendCarMotion(PascdMotion(36), CarGpsOption.generation) { true }
+            hu.sendCarMotion(PascdMotion(listOf(36)), CarGpsOption.generation) { true }
             assertArrayEquals(CarLifeProtocol.packCommand(0x18032, CarLifeVehicleData.capabilities(setOf(1))), output.toByteArray())
             output.reset()
             receive(hu, CarLifeVehicleData.START, byteArrayOf(8, 1, 24, 10))
-            hu.sendCarMotion(PascdMotion(36), CarGpsOption.generation) { true }
+            hu.sendCarMotion(PascdMotion(listOf(36)), CarGpsOption.generation) { true }
             assertArrayEquals(CarLifeProtocol.packCommand(0x1800F, byteArrayOf(8, 36)), output.toByteArray())
             output.reset()
             CarGpsOption.save(null, false)

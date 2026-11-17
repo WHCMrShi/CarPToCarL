@@ -1904,11 +1904,13 @@ class CarLifeHuClient(
             vehicleModules.add(CarLifeVehicleData.VELOCITY)
             if (sample.gear != null) vehicleModules.add(CarLifeVehicleData.GEAR_MODULE)
             publishVehicleCapabilities()
-            if (CarLifeVehicleData.VELOCITY !in stoppedVehicleModules &&
-                sendChecked(CarLifeVehicleData.SPEED, CarLifeVehicleData.speed(sample.speedKmh), ::permitted)) {
-                vehicleSamplesSent++
-                if (vehicleSamplesSent <= 3 || vehicleSamplesSent % 30 == 0) {
-                    log("VEHICLE: PASCD 车速 ${sample.speedKmh}km/h → 0x1800F 本地写入 #$vehicleSamplesSent（不代表地图已采用）")
+            for (speedKmh in sample.speedsKmh) {
+                if (CarLifeVehicleData.VELOCITY !in stoppedVehicleModules &&
+                    sendChecked(CarLifeVehicleData.SPEED, CarLifeVehicleData.speed(speedKmh), ::permitted)) {
+                    vehicleSamplesSent++
+                    if (vehicleSamplesSent <= 3 || vehicleSamplesSent % 30 == 0) {
+                        log("VEHICLE: PASCD 车速 ${speedKmh}km/h → 0x1800F 本地写入 #$vehicleSamplesSent（不代表地图已采用）")
+                    }
                 }
             }
             sample.gear?.let { gear ->

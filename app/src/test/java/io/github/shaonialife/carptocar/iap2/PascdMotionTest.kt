@@ -6,10 +6,10 @@ import org.junit.Test
 class PascdMotionTest {
     private fun sentence(body: String): String = "\$$body*%02X".format(body.fold(0) { n, c -> n xor c.code })
 
-    @Test fun speedUsesLatestBatchSampleAndConvertsMetersPerSecond() {
+    @Test fun speedPreservesEveryBatchSampleInWireOrderAndConvertsMetersPerSecond() {
         val sample = PascdMotion.parse(sentence("PASCD,100.5,C,D,0,2,0.00,1.0,0.25,10.0"))!!
-        assertEquals(36, sample.speedKmh)
-        assertEquals(65, PascdMotion.parse(sentence("PASCD,101,C,D,0,1,0.00,17.992"))!!.speedKmh)
+        assertEquals(listOf(4, 36), sample.speedsKmh)
+        assertEquals(65, PascdMotion.parse(sentence("PASCD,101,C,D,0,1,0.00,17.992"))!!.speedsKmh.single())
         assertFalse(NmeaLocation.parseSentence(sentence("PASCD,101,C,D,0,1,0.00,17.992"))!!.hasPosition)
         assertEquals(0, NmeaLocation.parseSentence(sentence("PASCD,101,C,D,9,1,0.00,17.992"))!!.satellitesUsed)
     }
@@ -25,17 +25,17 @@ class PascdMotionTest {
         assertNull(PascdMotion.parse("\$PASCD,100,C,D,0,1,0,10*XX"))
         assertNull(PascdMotion.parse(sentence("PASCD,100,C,D,0,1,0,10").dropLast(1)))
         assertNull(PascdMotion.parse(sentence("PASCD,100,C,D,0,1,0,10").replace(",10*", ",11*")))
-        assertEquals(0, PascdMotion.parse(sentence("PASCD,100,C,D,0,1,0,0"))!!.speedKmh)
+        assertEquals(0, PascdMotion.parse(sentence("PASCD,100,C,D,0,1,0,0"))!!.speedsKmh.single())
     }
 
     @Test fun conversionHasNoInventedSpeedCountOrUnusedFieldLimits() {
-        assertEquals(-4, PascdMotion.parse(sentence("PASCD,unused,X,D,9,1,unused,-1"))!!.speedKmh)
-        assertEquals(364, PascdMotion.parse(sentence("PASCD,unused,X,D,9,1,11,101"))!!.speedKmh)
+        assertEquals(-4, PascdMotion.parse(sentence("PASCD,unused,X,D,9,1,unused,-1"))!!.speedsKmh.single())
+        assertEquals(364, PascdMotion.parse(sentence("PASCD,unused,X,D,9,1,11,101"))!!.speedsKmh.single())
         val batch = List(33) { "11,10" }.joinToString(",")
-        assertEquals(36, PascdMotion.parse(sentence("PASCD,unused,X,D,9,33,$batch"))!!.speedKmh)
+        assertEquals(List(33) { 36 }, PascdMotion.parse(sentence("PASCD,unused,X,D,9,33,$batch"))!!.speedsKmh)
         for (speed in listOf(-12.34, 0.0, 0.14, 17.992, 101.0)) {
             val result = PascdMotion.parse(sentence("PASCD,100,C,D,0,1,0,$speed"))!!
-            assertTrue(kotlin.math.abs(result.speedKmh - speed * 3.6) <= 0.5)
+            assertTrue(kotlin.math.abs(result.speedsKmh.single() - speed * 3.6) <= 0.5)
         }
     }
 
@@ -46,9 +46,9 @@ class PascdMotionTest {
         for (unknown in listOf("S", "M", "L", "", "4", "d")) {
             val sample = PascdMotion.parse(sentence("PASCD,100,C,$unknown,0,1,0,10"))!!
             assertNull(sample.gear)
-            assertEquals(36, sample.speedKmh)
+            assertEquals(36, sample.speedsKmh.single())
         }
-        assertEquals(36, PascdMotion.parse(sentence("PASCD,100,X,D,0,1,0,10"))!!.speedKmh)
-        assertEquals(36, PascdMotion.parse(sentence("PASCD,100,C,D,9,1,0,10"))!!.speedKmh)
+        assertEquals(36, PascdMotion.parse(sentence("PASCD,100,X,D,0,1,0,10"))!!.speedsKmh.single())
+        assertEquals(36, PascdMotion.parse(sentence("PASCD,100,C,D,9,1,0,10"))!!.speedsKmh.single())
     }
 }
