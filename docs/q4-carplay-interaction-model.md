@@ -603,3 +603,14 @@ IdleGuard在长于10秒的观察间断后，仅给仍有连接意图的工作2�
 用户要求按报文顺序即时发送全部车速，挡位每条报文发送一次。删除只取批内末项的选择，保持报文内原始顺序及重复值；不按采样偏移人为延时。单位和枚举转换、开关与订阅控制保持原实现。两种启动顺序均未改变连接时序，无新增实车材料。详见[接入记录](carlife-pascd-integration-20261117.md)。
 
 逐样本转发提交080fd96：build-local.ps1默认单测、lint、Debug APK任务通过（沿用隔离输出）；1105项单测，0失败/错误/跳过，lint按既有baseline报告0 errors/106 warnings。未安装、未路测。
+
+
+## 音频数据口非阻塞发送（2026-11-17）
+
+用户仅授权参考上游c467de9，对现有音频数据口作最小非阻塞适配。数据口由DatagramSocket改为已连接的非阻塞DatagramChannel，每包只write一次；返回0则丢当前包，继续处理下一包，原RTP序号、时间戳、nonce推进保持不变。只有实际写出的包计入发送统计；IOException沿原失败路径处理。初始化时先把通道交给现有生命周期管理，再配置和连接，使初始化失败也由原stop关闭。
+
+依据：[JDK17 DatagramChannel.write契约](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/nio/channels/DatagramChannel.html#write(java.nio.ByteBuffer))规定非阻塞写入发送完整数据报或返回0。本分支原sendPayload在同步方法内调用阻塞send，确有被发送等待拖住的可能；上游日志归因和修复不等于本车已复现、也不证明本次实车效果。不新增重试、队列、超时、通道重建或socket缓冲/QoS设置；同步口、重采样、48K PCM协商、编码、静音和入口队列保持原样。用户明确本轮不做44.1K重采样研究或修改，也不据此宣称其现有实现已经验证无误。
+
+回归使用真实非阻塞UDP回环核对连续PCM数据报的完整密文，并以可控通道模拟write返回0、下一包成功和IOException，核对无重试、RTP/nonce跨丢包推进及成功统计。未提供新实车日志，CarLife先起与CarPlay先连两条路径的连接时序均未调整；本机验证不等于安装或路测。
+
+业务提交85a6456。本机build-local.ps1默认三项任务通过（使用既有隔离输出目录）：1106项单测，0失败/错误/跳过；lint按既有baseline报告0 errors/106 warnings；Debug APK通过。未安装、未路测。
