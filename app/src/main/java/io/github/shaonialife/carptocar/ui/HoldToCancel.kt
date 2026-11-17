@@ -53,7 +53,11 @@ internal class HoldToCancel(
                         cornerRadius = view.resources.getDimension(io.github.shaonialife.carptocar.R.dimen.q4_corner_action)
                     }
                     progress = ClipDrawable(fill, Gravity.LEFT, ClipDrawable.HORIZONTAL)
-                    view.background = LayerDrawable(arrayOf(original!!, progress!!))
+                    val layers = LayerDrawable(arrayOf(original!!, progress!!))
+                    view.background = layers
+                    // setBackground clears the old background's callback after the layer takes it.
+                    // Restore the chain so nested textures/ripples still invalidate during a hold.
+                    original!!.callback = layers
                     startedAt = SystemClock.uptimeMillis()
                     view.isPressed = true
                     view.postOnAnimation(tick)

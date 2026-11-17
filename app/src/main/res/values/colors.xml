@@ -34,6 +34,8 @@
     <color name="m3_mono_key">#333333</color>
     <color name="m3_ripple">#1F000000</color>
     <color name="m3_hold_overlay">#33FFFFFF</color>
+    <color name="q4_cta_texture">#1FFFFFFF</color>
+    <color name="q4_cta_texture_connected">#1F000000</color>
     <color name="q4_action_accent">#F50537</color>
     <color name="q4_dialog_action">#FFFFFF</color>
     <color name="ic_launcher_mark">#FFFFFF</color>

@@ -38,6 +38,7 @@ import io.github.shaonialife.carptocar.input.TouchRouter
 import io.github.shaonialife.carptocar.launcher.VirtualLauncher
 import io.github.shaonialife.carptocar.launcher.settings.AppOrientationCompat
 import io.github.shaonialife.carptocar.launcher.settings.AutoConnectPrefs
+import io.github.shaonialife.carptocar.ui.ConnectionButtonTexture
 import io.github.shaonialife.carptocar.ui.DarkMessageDialog
 import io.github.shaonialife.carptocar.ui.PanelWindow
 import io.github.shaonialife.carptocar.ui.ScreenDimmer
@@ -87,6 +88,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var heroSubline: TextView
     /** 「显示」卡片里的分辨率行（车机通告值 + 本次码流尺寸）。 */
     private lateinit var ctaButton: LinearLayout
+    private lateinit var ctaTexture: ConnectionButtonTexture
     private lateinit var ctaIcon: ImageView
     private lateinit var ctaLabel: TextView
     private lateinit var ssidInput: TextView
@@ -449,6 +451,7 @@ class MainActivity : AppCompatActivity() {
         }
         heroSubline = findViewById(R.id.heroSubline)
         ctaButton = findViewById(R.id.ctaButton)
+        ctaTexture = ConnectionButtonTexture(ctaButton)
         ctaIcon = findViewById(R.id.ctaIcon)
         ctaLabel = findViewById(R.id.ctaLabel)
         ssidInput = findViewById(R.id.ssidInput)
@@ -896,7 +899,12 @@ class MainActivity : AppCompatActivity() {
         blocked: Boolean = false,
     ) {
         cancelHold?.cancel()
-        ctaButton.setBackgroundResource(bgRes)
+        ctaTexture.apply(
+            requireNotNull(ContextCompat.getDrawable(this, bgRes)),
+            showTexture = heroState != HeroState.IDLE && heroState != null,
+            animate = heroState == HeroState.CONNECTING,
+            color = getColor(if (heroState == HeroState.CONNECTED) R.color.q4_cta_texture_connected else R.color.q4_cta_texture),
+        )
         ctaLabel.setTextColor(getColor(colorRes))
         ctaIcon.imageTintList =
             android.content.res.ColorStateList
@@ -1876,6 +1884,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (::ctaTexture.isInitialized) ctaTexture.resume()
         // 界面在前台 = 用户正看着：车机远离 30 秒后的收摊要让路（别把正在看的界面掐掉）
         AppUiPresence.markResumed()
         mainHandler.post(heroTick)
@@ -2018,6 +2027,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         cancelHold?.cancel()
+        if (::ctaTexture.isInitialized) ctaTexture.pause()
         super.onPause()
         AppUiPresence.markPaused()
         mainHandler.removeCallbacks(heroTick)
