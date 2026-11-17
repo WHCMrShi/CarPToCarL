@@ -287,6 +287,8 @@ class AudioSender(
     /** 直通模式下的帧对齐累积缓冲（把任意大小的注入 PCM 切成固定帧长）。 */
     private val passthroughBuffer = java.io.ByteArrayOutputStream() // AAC 回退路径
     private val pcmFrames = PcmFrameBuffer(PACKET_BYTES)
+    private val pcm441To480 = Pcm441To480()
+    private var resampleChannels = 0
     private val pcmPackets by lazy { PcmPacketSealer(streamKey, streamType) }
     private val forwardPcmFrame = PcmFrameConsumer { source, offset ->
         running.get() && dispatchPcm(source, offset, PACKET_BYTES)
@@ -452,6 +454,9 @@ class AudioSender(
 
     private fun processPcmLocked(srcPcm: ByteArray, size: Int, srcRate: Int, srcChannels: Int, gap: Boolean) {
         if (!running.get()) return
+        // Never interpolate across a dropped block or a source format change.
+        if (gap || srcRate != 44_100 || srcChannels != resampleChannels) pcm441To480.reset()
+        resampleChannels = srcChannels
         if (gap) {
             pcmFrames.clear(); passthroughBuffer.reset(); markerPending = true
             // Count discontinuities in the bounded stage summary, preserving reset semantics.
@@ -482,9 +487,8 @@ class AudioSender(
     /**
      * 把一段 PCM 重采样到 [sampleRate] 立体声，返回新数组；无需处理时返回原输入。
      *
-     * 只做两种常见比值的线性重采样（44.1k↔48k）+ 声道扩展，避免引入第三方重采样库：
-     * CarLife 引擎实际只会输出 44.1k 或 48k。其它任意比值退化为按 [sampleRate] 直接
-     * 截断/复读，保证不出错（宁可有轻微音高偏移，也不中断推流）。
+     * PCM 44.1k -> 48k uses continuous linear interpolation; native 48k bypasses it.
+     * Other rate/codec combinations retain their existing per-block sample selection.
      */
     private fun alignPcm(
         src: ByteArray,
@@ -522,7 +526,11 @@ class AudioSender(
         // 采样率一致直接返回
         if (inRate == sampleRate) return rateAligned
 
-        // 线性重采样（frame = 所有声道的一组采样）
+        if (codec == AudioCodec.PCM && inRate == 44_100 && sampleRate == 48_000) {
+            return pcm441To480.convert(rateAligned)
+        }
+
+        // Existing sample selection for other rate/codec combinations.
         val inFrames = rateAligned.size / (rateChannels * 2)
         val outFrames = (inFrames.toLong() * sampleRate / inRate).toInt()
         val out = ByteArray(outFrames * CHANNELS * 2)
@@ -581,6 +589,8 @@ class AudioSender(
         keepAliveThread = null
         synchronized(this) {
             pcmFrames.clear()
+            pcm441To480.reset()
+            resampleChannels = 0
             passthroughBuffer.reset()
         }
         continuity.summary(System.nanoTime())?.let { log("$it final=true codec=$codec") }
