@@ -61,13 +61,14 @@ class PcmPacketSealerTest {
         assertFalse(first.contentEquals(second))
     }
     @Test
-    fun senderReusedUdpPacketCarriesCorrectBytesAcrossSequentialSends() {
+    fun senderNonBlockingUdpCarriesCorrectBytesAcrossSequentialSends() {
         val sender = reference()
         val source = ByteArray(AudioSender.PACKET_BYTES + 9)
         java.net.DatagramSocket(0, java.net.InetAddress.getLoopbackAddress()).use { receiver ->
             receiver.soTimeout = 2_000
-            java.net.DatagramSocket().use { client ->
-                client.connect(receiver.localAddress, receiver.localPort)
+            java.nio.channels.DatagramChannel.open().use { client ->
+                client.configureBlocking(false)
+                client.connect(java.net.InetSocketAddress(receiver.localAddress, receiver.localPort))
                 val type = AudioSender::class.java
                 val running = type.getDeclaredField("running").apply { isAccessible = true }
                     .get(sender) as java.util.concurrent.atomic.AtomicBoolean

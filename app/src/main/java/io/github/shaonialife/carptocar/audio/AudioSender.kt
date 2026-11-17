@@ -5,6 +5,9 @@ import io.github.shaonialife.carptocar.airplay.TimingServer
 import java.io.IOException
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.InetSocketAddress
+import java.nio.ByteBuffer
+import java.nio.channels.DatagramChannel
 import java.net.InetAddress
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -129,7 +132,7 @@ class AudioSender(
 
     /** stop() 幂等闸门（多条收尾路径都会调 stop）。 */
     private val stopped = AtomicBoolean(false)
-    private var socket: DatagramSocket? = null
+    private var socket: DatagramChannel? = null
     private var syncSocket: DatagramSocket? = null
     private var syncThread: Thread? = null
 
@@ -244,9 +247,10 @@ class AudioSender(
         if (running.get()) return true
         stopped.set(false)
         return try {
-            val client = DatagramSocket()
-            client.connect(InetAddress.getByName(host), dataPort)
+            val client = DatagramChannel.open()
             socket = client
+            client.configureBlocking(false)
+            client.connect(InetSocketAddress(InetAddress.getByName(host), dataPort))
 
             if (codec == AudioCodec.AAC_LC) {
                 val encoder = AacLcEncoder(sampleRate, CHANNELS, wrapAdts = adtsFrames, log = log)
@@ -284,7 +288,6 @@ class AudioSender(
     private val passthroughBuffer = java.io.ByteArrayOutputStream() // AAC 回退路径
     private val pcmFrames = PcmFrameBuffer(PACKET_BYTES)
     private val pcmPackets by lazy { PcmPacketSealer(streamKey, streamType) }
-    private val pcmDatagram = DatagramPacket(ByteArray(0), 0)
     private val forwardPcmFrame = PcmFrameConsumer { source, offset ->
         running.get() && dispatchPcm(source, offset, PACKET_BYTES)
     }
@@ -742,16 +745,14 @@ class AudioSender(
         nonceCounter++
         return try {
             val sendStarted = System.nanoTime()
-            if (codec == AudioCodec.PCM) {
-                pcmDatagram.setData(wire, 0, wire.size)
-                client.send(pcmDatagram)
-            } else {
-                client.send(DatagramPacket(wire, wire.size))
-            }
-            packetsSent++
-            bytesSent += wire.size
+            val written = client.write(ByteBuffer.wrap(wire))
             val sentAt = System.nanoTime()
             if (sampled) sampledSendNs = sentAt - sendStarted
+            // Non-blocking UDP writes one whole datagram or zero. Zero drops this packet;
+            // the RTP/nonce cursors above remain advanced. No retry and no link teardown.
+            if (written == 0) return true
+            packetsSent++
+            bytesSent += written
             continuity.output(sentAt, sentAt - sendStarted)?.let {
                 log("$it codec=$codec nextSeq=$sequence nextSample=$timestamp")
             }
