@@ -109,7 +109,7 @@ class MediaListenerService : NotificationListenerService() {
     private var lastArtworkDiagnostic: String? = null
     private val artworkEncodingCache = ArtworkEncodingCache()
     private var artworkRevision = 0L
-    private var artworkTrack = ""
+    private var artworkTrack: MediaArtworkIdentity? = null
     private var artworkUri: String? = null
     private var artworkIncarnation = 0L
 
@@ -143,9 +143,8 @@ class MediaListenerService : NotificationListenerService() {
                 // 后会给同一批会话再注册一个，之后每次播放状态变化触发 N 次 refresh()，
                 // 且旧回调强引用旧 Service 实例与封面位图。
                 watched[token] = callback
-                runCatching {
-                    controller.registerCallback(callback, mainHandler)
-                }.onFailure { watched.remove(token) }
+                runCatching { controller.registerCallback(callback, mainHandler) }
+                    .onFailure { watched.remove(token) }
             }
         }
         refresh()
@@ -193,14 +192,15 @@ class MediaListenerService : NotificationListenerService() {
                 val album = meta?.getString(MediaMetadata.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() }
                 val artist = meta?.getString(MediaMetadata.METADATA_KEY_ARTIST)
                     ?: meta?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
-                val stableTrack = listOf(controller.sessionToken.toString(), controller.packageName,
-                    mediaId ?: listOf(title.orEmpty(), artist.orEmpty(), album.orEmpty(),
-                        (meta?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0).toString()).joinToString("/")).joinToString("\u0001")
+                // 标题可为歌词，不能据此撤销封面归属。相同归属的元数据回调仍通过
+                // artworkRevision 读取新图片，Repository 在读取期间保留原图并按内容去重。
+                val stableTrack = MediaArtworkIdentity.of(controller.sessionToken.toString(), controller.packageName,
+                    mediaId, artist, album, meta?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0)
                 val uri = meta?.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI)
                     ?: meta?.getString(MediaMetadata.METADATA_KEY_ART_URI)
                 if (stableTrack != artworkTrack) { artworkIncarnation++; artworkTrack = stableTrack; artworkRevision++ }
                 if (uri != artworkUri) { artworkUri = uri; artworkRevision++ }
-                val trackId = "$artworkIncarnation:$stableTrack"
+                val trackId = "media:$artworkIncarnation"
                 val diagnostic = "track=$artworkIncarnation revision=$artworkRevision pkg=${controller.packageName} " +
                     "albumArt=${meta?.containsKey(MediaMetadata.METADATA_KEY_ALBUM_ART)} art=${meta?.containsKey(MediaMetadata.METADATA_KEY_ART)} uriPresent=${!uri.isNullOrBlank()}"
                 if (diagnostic != lastArtworkDiagnostic) {
