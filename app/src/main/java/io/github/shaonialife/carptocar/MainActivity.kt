@@ -283,7 +283,7 @@ class MainActivity : AppCompatActivity() {
         val missing = requiredConnectionPermissions()
         if (permissionGuide.active) return
         if (missing.isNotEmpty()) {
-            snack("连接需要附近设备和精确位置权限，请点「权限设置」补充", 3_600L)
+            snack("连接需要附近设备和精确位置权限，请在系统设置中补充", 3_600L)
             return
         }
         if (!locationServiceEnabled()) {
@@ -626,8 +626,6 @@ class MainActivity : AppCompatActivity() {
             },
         )
 
-        findViewById<TextView>(R.id.btnPermissionGuide).setOnClickListener { permissionGuide.open() }
-
         // ---- 连接准备 ----
         // 启动后自动连接：默认开启。打开 App 即发起连接，不必每次点英雄卡；
         // 需要手动控制连接启动时关掉它。
@@ -749,7 +747,7 @@ class MainActivity : AppCompatActivity() {
             true
         }
 
-        // 首次启动由统一引导申请；以后只在用户主动打开「权限设置」时补充。
+        // 首次启动由统一引导申请；未授权项由用户在系统设置中补充。
 
         // 通知使用权（媒体会话枚举，音乐卡数据源）：Shizuku 移除后没有静默授予通道，
         // 需要用户自己在系统设置里打开；这里不再阻塞启动。
@@ -1167,7 +1165,7 @@ class MainActivity : AppCompatActivity() {
                 PackageManager.PERMISSION_GRANTED
         if (!granted) {
             if (permissionGuide.attempted(Manifest.permission.BLUETOOTH_SCAN)) {
-                updatePickerStatus("扫描权限未开启，请在首页「权限设置」补充", warn = true)
+                updatePickerStatus("扫描权限未开启，请在系统设置中补充", warn = true)
                 return
             }
             permissionGuide.markAttempted(listOf(Manifest.permission.BLUETOOTH_SCAN))

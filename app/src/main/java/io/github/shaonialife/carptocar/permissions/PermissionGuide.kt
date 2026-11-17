@@ -31,7 +31,7 @@ internal class PermissionGuide(
 
     private val runtime = activity.registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         waiting = false
-        report("权限引导：运行时申请结束，未授权项可在「权限设置」补充")
+        report("权限引导：运行时申请结束，未授权项可在系统设置中补充")
         advance()
     }
     private val settings = activity.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -130,7 +130,7 @@ internal class PermissionGuide(
                 try { settings.launch(fallback); return } catch (_: Exception) { /* Continue below. */ }
             }
             waiting = false
-            report("无法打开系统授权页，可稍后在「权限设置」重试")
+            report("无法打开系统授权页，可稍后在系统设置中授权")
             advance()
         }
     }
@@ -143,7 +143,7 @@ internal class PermissionGuide(
     private fun finish() {
         completed = true
         prefs.edit().putInt("step", PermissionGuidePlan.DONE).commit()
-        report("权限引导已结束；未授权项可在首页「权限设置」补充")
+        report("权限引导已结束；未授权项可在系统设置中补充")
         onFinished()
     }
 
