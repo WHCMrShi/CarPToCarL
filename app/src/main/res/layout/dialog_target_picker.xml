@@ -108,7 +108,7 @@
                 android:paddingTop="6dp"
                 android:paddingEnd="4dp"
                 android:paddingBottom="4dp"
-                android:text="正在扫描附近的蓝牙设备…"
+                android:text="正在扫描附近的蓝牙设备"
                 android:textColor="@color/m3_mono_dim"
                 android:textSize="14sp" />
             <LinearLayout

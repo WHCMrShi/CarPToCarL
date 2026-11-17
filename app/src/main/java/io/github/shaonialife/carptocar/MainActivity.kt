@@ -67,7 +67,7 @@ class MainActivity : AppCompatActivity() {
 
     /** 连接中的默认副标题（无阶段提示时）。 */
     private companion object {
-        const val DEFAULT_CONNECTING_HINT = "正在准备连接…"
+        const val DEFAULT_CONNECTING_HINT = "正在准备连接"
 
         /** 本机蓝牙地址未填写：英雄卡副标题与输入框下方提示共用同一句。 */
         const val HINT_MAC_MISSING = "请先保存本机蓝牙地址"
@@ -837,7 +837,7 @@ class MainActivity : AppCompatActivity() {
         // 启动残留屏检查进行中：状态与副标题临时切换为检查提示
         if (s == HeroState.IDLE && startupCheckRunning) {
             heroStateText.text = "检查中"
-            heroSubline.text = "正在检查残留屏…"
+            heroSubline.text = "正在检查残留屏"
         }
         updateConnectedSubline()
         updateReadyRow()
@@ -1170,7 +1170,7 @@ class MainActivity : AppCompatActivity() {
             }
             permissionGuide.markAttempted(listOf(Manifest.permission.BLUETOOTH_SCAN))
             pendingTargetScan = true
-            updatePickerStatus("需要「附近的设备」权限才能扫描…", warn = true)
+            updatePickerStatus("需要「附近的设备」权限才能扫描", warn = true)
             targetScanPermissionLauncher.launch(Manifest.permission.BLUETOOTH_SCAN)
             return
         }
@@ -1182,7 +1182,7 @@ class MainActivity : AppCompatActivity() {
                 .toSet()
         scannedTargets.clear()
         scannedList.removeAllViews()
-        updatePickerStatus("正在扫描附近的蓝牙设备…")
+        updatePickerStatus("正在扫描附近的蓝牙设备")
         stopTargetScan()
         val receiver =
             object : BroadcastReceiver() {
@@ -1251,7 +1251,7 @@ class MainActivity : AppCompatActivity() {
         // 扫描仍在继续：状态行保留并计数，用户知道还可以继续等其它设备。
         // 发现新设备只更新计数，保持当前列表位置。
         dialog.findViewById<TextView>(R.id.scanStatus)?.apply {
-            text = "继续扫描中…已发现 ${scannedTargets.size} 台未配对设备"
+            text = "继续扫描中，已发现 ${scannedTargets.size} 台未配对设备"
             setTextColor(getColor(R.color.m3_mono_dim))
             visibility = View.VISIBLE
         }
@@ -1476,7 +1476,7 @@ class MainActivity : AppCompatActivity() {
      * 导出日志到「下载/CarPToCarL/」并弹窗告知位置。
      */
     private fun exportLogFile(scope: LogExporter.Scope = LogExporter.Scope.CURRENT_SESSION) {
-        snack(if (scope == LogExporter.Scope.ALL) "正在导出全部日志…" else "正在导出本次启动的日志…")
+        snack(if (scope == LogExporter.Scope.ALL) "正在导出全部日志" else "正在导出本次启动的日志")
         val fallback = SessionController.logText()
         Bg.run("export-log") {
             val result = LogExporter.export(applicationContext, fallback, scope)
