@@ -13,9 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.PowerManager
 import android.os.SystemClock
-import android.provider.Settings
 import android.text.method.ScrollingMovementMethod
 import android.view.View
 import android.widget.EditText
@@ -211,66 +209,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 单权限申请入口。**只用于「通知」这类不属于连接前提的权限。**
-     *
-     * 连接前提的权限不能走这里：Android 12+ 的 `BLUETOOTH_CONNECT`、
-     * `NEARBY_WIFI_DEVICES` 和用于 SSID 身份核对的定位权限是独立条目，逐个申请就会
-     * 连续弹出好几个内容几乎一样的系统框（框里都带应用名），用户看到的是
-     * 「怎么一直要我点」。连接前统一走 [connectionPermissionLauncher]——
-     * 一次请求、一个框。
-     */
-    private val permissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            log("权限申请结果: $granted")
-        }
-
-    /**
-     * 连接车机的运行时权限，**一次性打包申请**。
-     *
-     * 系统对同一权限组（Android 13+ 的「附近的设备」组）只显示一个授权框，
-     * 所以把 `BLUETOOTH_CONNECT` 与 `NEARBY_WIFI_DEVICES` 放进同一次请求里，
-     * 用户点一次「允许」就够；分成两次请求则会连弹两个框，正是「一直提示」的根源。
-     */
-    private val connectionPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
-            log(
-                "权限申请结果: " +
-                    result.entries.joinToString { "${it.key.substringAfterLast('.')}=${it.value}" },
-            )
-            val resumeConnection = pendingStartAfterPermission.getAndSet(false)
-            val missing = requiredConnectionPermissions()
-            when {
-                missing.isNotEmpty() -> {
-                    connectionPermissionDenied.set(true)
-                    promptConnectionPermissionDenied(missing)
-                }
-
-                resumeConnection -> {
-                    proceedToConnect { ensureBluetoothReady { startConnectionNow() } }
-                }
-            }
-        }
-
-    /** 权限授权后自动继续启动连接（「只想开个开关」的路径上不要置位）。 */
-    private val pendingStartAfterPermission =
-        java.util.concurrent.atomic
-            .AtomicBoolean(false)
-
-    /**
-     * 本进程内已被拒绝过：**不再重复弹系统框**。
-     *
-     * 重复弹没有意义——系统从第三次起自己就不显示了，调用只会立刻返回「未授权」，
-     * 白白让用户以为程序在反复索要权限。改为记日志 + 一次自家提示（带「去设置」）。
-     */
-    private val connectionPermissionDenied =
-        java.util.concurrent.atomic
-            .AtomicBoolean(false)
-
-    /** 「缺权限，请去设置」这条自家提示每个进程只弹一次，之后只记日志。 */
-    private val permissionHintShown =
-        java.util.concurrent.atomic
-            .AtomicBoolean(false)
+    private val permissionGuide = io.github.shaonialife.carptocar.permissions.PermissionGuide(
+        this,
+        onFinished = { mainHandler.post { maybeAutoConnect() } },
+        report = { log(it) },
+    )
 
     private fun isGranted(permission: String): Boolean =
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
@@ -298,44 +241,6 @@ class MainActivity : AppCompatActivity() {
         return missing
     }
 
-    /**
-     * 权限被拒后的唯一提示：说明缺哪一项、为什么必须给，并给一个「去设置」按钮。
-     *
-     * 提示只弹一次（[permissionHintShown]），避免每次点「启动连接」都被自己的框挡住。
-     */
-    private fun promptConnectionPermissionDenied(missing: Collection<String>) {
-        if (!permissionHintShown.compareAndSet(false, true)) return
-        val names =
-            missing.distinctBy { if (it == Manifest.permission.ACCESS_COARSE_LOCATION) Manifest.permission.ACCESS_FINE_LOCATION else it }.joinToString("、") { permission ->
-                when (permission.substringAfterLast('.')) {
-                    "BLUETOOTH_CONNECT" -> "附近的蓝牙设备"
-                    "NEARBY_WIFI_DEVICES" -> "附近的 WLAN 设备"
-                    "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION" -> "精确位置"
-                    else -> permission.substringAfterLast('.')
-                }
-            }
-        DarkMessageDialog.show(
-            activity = this,
-            title = "缺少「$names」权限",
-            message =
-                "请允许所缺权限以连接蓝牙、识别车机热点（不读取手机坐标）",
-            actions =
-                listOf(
-                    DarkMessageDialog.Action("知道了") {},
-                    DarkMessageDialog.Action("去设置", DarkMessageDialog.Emphasis.PRIMARY) {
-                        runCatching {
-                            startActivity(
-                                android.content.Intent(
-                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                    android.net.Uri.fromParts("package", packageName, null),
-                                ),
-                            )
-                        }.onFailure { log("权限: 无法打开应用详情页，请手动到设置里授予") }
-                    },
-                ),
-        )
-    }
-
     private var cancelHold: io.github.shaonialife.carptocar.ui.HoldToCancel? = null
 
     private fun cancelConnectingFromButton() {
@@ -343,7 +248,6 @@ class MainActivity : AppCompatActivity() {
         wifiJoinDialog?.cancel()
         wifiJoinDialog = null
         CarApproachPrefs.setSuppressed(this, true)
-        pendingStartAfterPermission.set(false)
         SessionController.cancelConnecting(this)
     }
 
@@ -359,7 +263,7 @@ class MainActivity : AppCompatActivity() {
      * [SessionController.startConnection] 本身幂等，不会双开。
      */
     private fun maybeAutoConnect() {
-        if (!autoConnectRequested || isFinishing || isDestroyed) return
+        if (!autoConnectRequested || isFinishing || isDestroyed || permissionGuide.active) return
         if (!AutoConnectPrefs.enabled(this)) {
             autoConnectRequested = false
             log("AUTOCONNECT: 已关闭——等待手动点「启动连接」")
@@ -374,118 +278,12 @@ class MainActivity : AppCompatActivity() {
         proceedToConnect { ensureBluetoothReady { startConnectionNow() } }
     }
 
-    /**
-     * 电池优化豁免：只在「还没豁免 + 本次会话没提示过」时弹一次。
-     *
-     * 「靠近车机自动启动」依赖系统把蓝牙 ACL 广播投递给**不在前台**的进程；
-     * 一旦被列入电池优化（MagicOS 的「应用启动管理」是同一类限制），系统会冻结进程
-     * 或直接丢弃广播，表现就是「有时候能自动连、有时候毫无反应」。
-     */
-    private fun ensureBatteryExempt(force: Boolean = false) {
-        val power = getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (power.isIgnoringBatteryOptimizations(packageName)) return
-        if (!force && !CarApproachPrefs.batteryPromptDue(this)) return
-        CarApproachPrefs.markBatteryPrompt(this)
-        DarkMessageDialog.show(
-            this,
-            "允许后台运行",
-            "请将后台运行设为「不限制 / 允许」，以便靠近车机时自动启动",
-            listOf(
-                DarkMessageDialog.Action("稍后", DarkMessageDialog.Emphasis.TEXT) {
-                    log("APPROACH: 未豁免电池优化——后台自动启动可能被系统限流")
-                },
-                DarkMessageDialog.Action("去设置", DarkMessageDialog.Emphasis.PRIMARY) {
-                    requestBatteryExemption()
-                },
-            ),
-        )
-    }
-
-    /**
-     * 「显示在其他应用上层」（2026-10-30）。
-     *
-     * 这条权限在这个项目里有第二重身份：Android 10+ 的后台启动界面限制，**豁免条件之一
-     * 就是持有它**。没有它，车机靠近时 `startActivity` 会被系统静默拦下——日志写着
-     * 「已拉起」，屏幕上什么都没有，接收端也因此连不上（实测拒绝时刻与触发时刻完全吻合）。
-     *
-     * 所以它和电池优化是同一件事的两半：一个保「收得到广播」，一个保「起得来界面」。
-     */
-    private fun ensureOverlayPermission(force: Boolean = false) {
-        if (Settings.canDrawOverlays(this)) return
-        if (!force && !CarApproachPrefs.overlayPromptDue(this)) return
-        CarApproachPrefs.markOverlayPrompt(this)
-        DarkMessageDialog.show(
-            this,
-            "允许后台打开界面",
-            "请允许「显示在其他应用上层」，以便靠近车机时从后台打开界面",
-            listOf(
-                DarkMessageDialog.Action("稍后", DarkMessageDialog.Emphasis.TEXT) {
-                    log("APPROACH: 未授予「显示在其他应用上层」——后台拉起界面可能被系统拦下")
-                },
-                DarkMessageDialog.Action("去授权", DarkMessageDialog.Emphasis.PRIMARY) {
-                    val opened =
-                        runCatching {
-                            startActivity(
-                                Intent(
-                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                    Uri.parse("package:$packageName"),
-                                ),
-                            )
-                        }.isSuccess
-                    log(
-                        if (opened) {
-                            "APPROACH: 已打开「显示在其他应用上层」设置——请允许本应用"
-                        } else {
-                            "APPROACH: 无法打开悬浮窗设置，请到 特殊访问权限 → 显示在其他应用上层 里允许"
-                        },
-                    )
-                },
-            ),
-        )
-    }
-
-    /** 拉起系统的「忽略电池优化」授权页；部分 ROM 不认包名直连，退回列表页。 */
-    private fun requestBatteryExemption() {
-        val direct =
-            Intent(
-                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                Uri.parse("package:$packageName"),
-            )
-        val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-        val opened =
-            runCatching { startActivity(direct) }.isSuccess ||
-                runCatching { startActivity(fallback) }.isSuccess
-        log(
-            if (opened) {
-                "APPROACH: 已打开电池优化设置——请把本应用设为「不限制」"
-            } else {
-                "APPROACH: 无法打开电池优化设置，请手动在系统设置里允许本应用后台运行"
-            },
-        )
-    }
-
-    /**
-     * 启动连接的前置检查：**权限（一次申请完）** → 位置服务（仅 Android 12/12L）
-     * → 蓝牙开关。任一不满足都引导（蓝牙关闭可一键跳系统设置），通过后回调继续。
-     *
-     * 权限这里只调用一次 [connectionPermissionLauncher]：以前是「先申请蓝牙权限、
-     * 授权后再申请 WLAN 权限」两段接力，于是用户会连着看到两个内容几乎一样的系统框
-     * （都带应用名），看起来就像「一直提示要与 CarPToCarL 配合的设备」。
-     */
+    /** 引导不再自动重试拒绝项；连接前仍核实必需权限和系统开关。 */
     private fun ensureBluetoothReady(onReady: () -> Unit) {
         val missing = requiredConnectionPermissions()
+        if (permissionGuide.active) return
         if (missing.isNotEmpty()) {
-            if (connectionPermissionDenied.get()) {
-                log(
-                    "权限: 仍缺 " +
-                        missing.joinToString { it.substringAfterLast('.') } +
-                        "——本次不再弹系统授权框（重复弹没有用，只能去设置里给）",
-                )
-                promptConnectionPermissionDenied(missing)
-                return
-            }
-            pendingStartAfterPermission.set(true)
-            connectionPermissionLauncher.launch(missing.toTypedArray())
+            snack("连接需要附近设备和精确位置权限，请点「权限设置」补充", 3_600L)
             return
         }
         if (!locationServiceEnabled()) {
@@ -548,18 +346,6 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
             true
         }
-
-    /*
-     * 这里原本还有 ensureWifiLocationReady()：权限检查（13+ 的 NEARBY_WIFI_DEVICES /
-     * 12/12L 的 ACCESS_FINE_LOCATION）+ 位置服务检查，各自配一个 launcher，授权后
-     * 再接力回连接流程。
-     *
-     * 2026-11-08 合并：权限部分收进 requiredConnectionPermissions() +
-     * connectionPermissionLauncher（一次请求，系统只弹一个「附近的设备」框），
-     * 位置服务检查上移进 ensureBluetoothReady()。原因是旧结构在首次连接时会
-     * 依次弹「蓝牙」「附近的 WLAN 设备」「通知」三个系统框，用户体感就是
-     * 「一直提示要与 CarPToCarL 配合的设备」。
-     */
 
     /** 长按确认后沿用原断开行为，抑制停车期间自动重连。 */
     private fun disconnectFromButton() {
@@ -640,27 +426,12 @@ class MainActivity : AppCompatActivity() {
 
     /** 「启动连接」主体（权限已在 [ensureBluetoothReady] 里一次申请完；会话启动交给 [SessionController]，幂等不双开）。 */
     private fun startConnectionNow() {
-        runOnUiThread {
-            // 通知权限（API 33+）：前台服务通知可见；拒绝也不影响保活。
-            // **每个进程只问一次**——以前每点一次「启动连接」就问一遍，用户会以为
-            // App 在反复索要权限（这个框同样带应用名）。拒绝后不再纠缠。
-            if (Build.VERSION.SDK_INT >= 33 &&
-                notificationPermissionAsked.compareAndSet(false, true) &&
-                !isGranted("android.permission.POST_NOTIFICATIONS")
-            ) {
-                permissionLauncher.launch("android.permission.POST_NOTIFICATIONS")
-            }
-            SessionController.startConnection(this)
-        }
+        runOnUiThread { SessionController.startConnection(this) }
     }
-
-    /** 通知权限是否已经问过（只问一次，拒绝也不再打扰）。 */
-    private val notificationPermissionAsked =
-        java.util.concurrent.atomic
-            .AtomicBoolean(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        permissionGuide.restore(savedInstanceState)
         setContentView(R.layout.activity_main)
         configureSystemBars()
         // 告诉「靠近车机」那边：界面确实起来了（它据此判断后台启动有没有被系统拦下）
@@ -855,6 +626,8 @@ class MainActivity : AppCompatActivity() {
             },
         )
 
+        findViewById<TextView>(R.id.btnPermissionGuide).setOnClickListener { permissionGuide.open() }
+
         // ---- 连接准备 ----
         // 启动后自动连接：默认开启。打开 App 即发起连接，不必每次点英雄卡；
         // 需要手动控制连接启动时关掉它。
@@ -872,20 +645,6 @@ class MainActivity : AppCompatActivity() {
         switchCarApproach.isChecked = CarApproachPrefs.enabled(this)
 
 
-        // 用户已开启时，进界面按 7 天节流提醒一次。
-        // 延后 3 秒提示，避免打断首页首次展示。
-        if (switchCarApproach.isChecked && TargetDevicePrefs.get(this) != null) {
-            mainHandler.postDelayed(
-                {
-                    if (!isFinishing && !isDestroyed) {
-                        ensureBatteryExempt()
-                        // 两半缺一不可：电池优化保「收得到广播」，悬浮窗保「起得来界面」
-                        ensureOverlayPermission()
-                    }
-                },
-                3_000L,
-            )
-        }
         switchCarApproach.setOnCheckedChangeListener { _, checked ->
             CarApproachPrefs.setEnabled(this, checked)
 
@@ -897,8 +656,7 @@ class MainActivity : AppCompatActivity() {
             // 电池优化一开，后台进程被冻结/限流，ACL 广播就送不到，功能表现为时好时坏。
             // 用户刚拨开开关 = 明确要用这个功能，此时不受 7 天节流限制。
             if (checked) {
-                ensureBatteryExempt(force = true)
-                ensureOverlayPermission(force = true)
+                permissionGuide.open()
             }
         }
 
@@ -991,10 +749,7 @@ class MainActivity : AppCompatActivity() {
             true
         }
 
-        // 这里原本「启动即申请 BLUETOOTH_CONNECT」：结果是**每打开一次 App 就弹一次
-        // 系统「附近的设备」框**（框里带应用名），用户会以为程序在反复索要权限。
-        // 权限改到真正要用的时候（点「启动连接」/ 打开自动连接）一次性申请，
-        // 见 ensureBluetoothReady()。
+        // 首次启动由统一引导申请；以后只在用户主动打开「权限设置」时补充。
 
         // 通知使用权（媒体会话枚举，音乐卡数据源）：Shizuku 移除后没有静默授予通道，
         // 需要用户自己在系统设置里打开；这里不再阻塞启动。
@@ -1411,6 +1166,11 @@ class MainActivity : AppCompatActivity() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) ==
                 PackageManager.PERMISSION_GRANTED
         if (!granted) {
+            if (permissionGuide.attempted(Manifest.permission.BLUETOOTH_SCAN)) {
+                updatePickerStatus("扫描权限未开启，请在首页「权限设置」补充", warn = true)
+                return
+            }
+            permissionGuide.markAttempted(listOf(Manifest.permission.BLUETOOTH_SCAN))
             pendingTargetScan = true
             updatePickerStatus("需要「附近的设备」权限才能扫描…", warn = true)
             targetScanPermissionLauncher.launch(Manifest.permission.BLUETOOTH_SCAN)
@@ -1988,7 +1748,7 @@ class MainActivity : AppCompatActivity() {
                     pendingResidualDisplays = residual
                     updateResidualChip()
                     if (heroState == HeroState.IDLE) applyHeroState(HeroState.IDLE)
-                    promptResidualDisplays(residual)
+                    if (!permissionGuide.active) promptResidualDisplays(residual)
                     // 自动展开日志卡：启动清理的两条记录直接可见（卡片默认折叠）
                     findViewById<View>(R.id.logBody).visibility = View.VISIBLE
                     findViewById<ImageView>(R.id.logChevron)
@@ -2003,6 +1763,7 @@ class MainActivity : AppCompatActivity() {
 
                 // 启动自动连接在这里续最后一次：扫描期间英雄卡显示「检查中」，
                 // 且若有残留待确认，连接流程的热点/网络弹窗会和清理弹窗抢焦点，故推迟到这里。
+                permissionGuide.advance()
                 maybeAutoConnect()
             }
 
@@ -2121,11 +1882,13 @@ class MainActivity : AppCompatActivity() {
         mainHandler.post(heroTick)
         // 从系统设置/别的界面回来：门禁提示与按钮状态重新对一次（地址可能已补填）
         refreshMacGate()
+        mainHandler.post { if (!startupCheckRunning) permissionGuide.advance() }
 
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        permissionGuide.save(outState)
         outState.putBoolean("macEditing", macEditing)
         if (macEditing && ::macInput.isInitialized) outState.putString("macDraft", macInput.text.toString())
     }
@@ -2267,6 +2030,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        permissionGuide.close()
         cancelHold?.cancel()
         super.onDestroy()
         // 蓝牙扫描/配对监听随界面销毁收尾：Activity 退出后不再需要（也避免广播泄漏）
