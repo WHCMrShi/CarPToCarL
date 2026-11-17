@@ -385,13 +385,6 @@
                                             android:textColor="@color/m3_on_surface"
                                             android:textSize="16sp" />
                                         <TextView
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:layout_marginTop="4dp"
-                                            android:text="@string/car_wifi_auto_connect_hint"
-                                            android:textColor="@color/m3_on_var"
-                                            android:textSize="14sp" />
-                                        <TextView
                                             android:id="@+id/ssidInput"
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
@@ -413,7 +406,15 @@
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
                                             android:orientation="horizontal"
-                                            android:gravity="end">
+                                            android:gravity="center_vertical">
+                                            <TextView
+                                                android:layout_width="0dp"
+                                                android:layout_height="wrap_content"
+                                                android:layout_weight="1"
+                                                android:layout_marginEnd="8dp"
+                                                android:text="@string/car_wifi_auto_connect_hint"
+                                                android:textColor="@color/m3_on_var"
+                                                android:textSize="14sp" />
                                             <TextView
                                                 android:id="@+id/btnClearWifiMemory"
                                                 android:layout_width="wrap_content"
