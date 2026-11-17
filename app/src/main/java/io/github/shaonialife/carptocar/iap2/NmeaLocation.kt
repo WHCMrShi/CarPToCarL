@@ -120,7 +120,7 @@ object NmeaLocation {
                 "GGA" -> parseGga(fields)
                 "RMC" -> parseRmc(fields)
                 "GSA" -> parseGsa(fields)
-                else -> parsePascd(fields)
+                else -> parsePascd()
             }
         } catch (_: RuntimeException) {
             // 截断 / 畸形句：绝不把异常抛给链路线程（会拆掉整条 iAP2 控制会话）
@@ -190,19 +190,12 @@ object NmeaLocation {
     }
 
     /**
-     * `$PASCD`：Apple 私有语句，公开资料没有字段表。
-     *
-     * 实测（奥迪 4580，43B）：`$PASCD,1583.410,C,D,0,1,0.00,0.000*4B`
-     * —— 第一个字段每秒 +1.00（单调秒计数），其余恒定，**没有任何 ddmm.mmmm 形态的
-     * 坐标**。所以这里只认「它是一条定位样本」，fix 记为 0（无效），不编造坐标。
-     *
-     * 若将来某台车的 PASCD 真带了坐标，字段数会明显多于 7，那时再按抓包补解析；
-     * 现在的实现至少保证「不会把垃圾当坐标用」。
+     * PASCD motion is handled separately by [PascdMotion]. This GPS view has no position;
+     * fix=0 is our sentinel, not a vehicle-reported GPS status. Unknown fields are not satellites.
      */
-    private fun parsePascd(f: List<String>): Fix =
+    private fun parsePascd(): Fix =
         Fix(
             fixQuality = 0,
-            satellitesUsed = f.getOrNull(4)?.toIntOrNull() ?: 0,
             source = "PASCD",
         )
 

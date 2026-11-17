@@ -34,6 +34,8 @@ import io.github.shaonialife.carptocar.iap2.Iap2NowPlaying
 import io.github.shaonialife.carptocar.iap2.Iap2SenderSession
 import io.github.shaonialife.carptocar.iap2.NmeaAssembler
 import io.github.shaonialife.carptocar.iap2.NmeaLocation
+import io.github.shaonialife.carptocar.iap2.PascdMotion
+import io.github.shaonialife.carptocar.iap2.PascdMotionTracker
 import io.github.shaonialife.carptocar.iap2.ReceiverProfile
 import io.github.shaonialife.carptocar.input.ConsumerKeys
 import io.github.shaonialife.carptocar.input.HidReportProfiles
@@ -468,16 +470,27 @@ object SessionController {
     /**
      * 车机定位 → CarLife（0x18010 `CarlifeCarGps`）。
      *
-     * 开关见 [CarGpsOption]（设置里「使用车机 GPS」，默认开）。关掉后**一个字节都不发**，
+     * 开关见 [CarGpsOption]（设置里「使用车机 GPS」，默认关闭）。关闭后不转发车辆数据，
      * CarLife 继续用手机自己的定位——这是默认行为，也是开关要能回去的状态。
      *
      * 只有 [NmeaLocation.Fix.hasPosition] 为真才发：车机在地库/隧道里会持续推一条
      * 没有经纬度的样本（奥迪就是 `$PASCD,…,C,D,0,…`，fix=0）。把这种样本发给引擎
      * 会让地图飘到 (0,0)，比不给更糟。
      */
-    private fun onCarLocation(sentences: List<String>) {
+    private fun onCarLocation(sentences: List<String>, tracker: PascdMotionTracker, sourceCurrent: () -> Boolean) {
+        if (!sourceCurrent()) return
         if (!CarGpsOption.enabled) return
-        for (sentence in sentences) carNmea.feed(sentence)
+        val receivedAt = android.os.SystemClock.elapsedRealtime()
+        for (sentence in sentences) {
+            val motion = PascdMotion.parse(sentence) ?: continue
+            if (tracker.accept(motion, receivedAt)) {
+                CarLifeHijack.carMotionTask(motion, receivedAt, sourceCurrent)?.let(carLifeCommandSender::execute)
+            }
+        }
+        // Motion must not cause an earlier GPS fix to be re-sent with a new timestamp.
+        val gpsSentences = sentences.filterNot { it.startsWith("\$PASCD,", ignoreCase = true) }
+        if (gpsSentences.isEmpty()) return
+        for (sentence in gpsSentences) carNmea.feed(sentence)
         val merged = carNmea.snapshot() ?: return
         if (!merged.hasPosition) {
             carGpsNoFixFrames++
@@ -495,7 +508,17 @@ object SessionController {
             return
         }
         val carFix = toCarGpsFix(merged)
-        carLifeCommandSender.execute { CarLifeHijack.sendCarGps(carFix) }
+        val generation = CarGpsOption.generation
+        carLifeCommandSender.execute {
+            if (sourceCurrent() && CarGpsOption.enabled && CarGpsOption.generation === generation &&
+                PascdMotionTracker.isFresh(receivedAt, android.os.SystemClock.elapsedRealtime())) {
+                CarLifeHijack.sendCarGps(carFix)
+            }
+        }
+    }
+
+    fun onCarGpsOptionChanged() {
+        carLifeCommandSender.execute { CarLifeHijack.carGpsOptionChanged() }
     }
 
     /** NMEA 快照 → CarLife 的单位约定；UTC 日期缺失时用当前 UTC 补（CarLife 只用来标记时刻）。 */
@@ -4420,9 +4443,13 @@ object SessionController {
                                     voiceKey.onHidUp("iAP2 0x6802 0xCF")
                                 }
                             }
-                            // 车机定位（0xFFFB）→ CarLife 0x18010。只在开关打开且
-                            // 车机真的给了经纬度时才发（见 onCarLocation）。
-                            created.onLocationSamples = { sentences -> onCarLocation(sentences) }
+                            // Each CarPlay source owns its motion timebase; no cached replay.
+                            val motionTracker = PascdMotionTracker()
+                            created.onLocationSamples = { sentences ->
+                                onCarLocation(sentences, motionTracker) {
+                                    currentClient === created && created.controlSessionReady
+                                }
+                            }
                             // 新一轮会话：清掉上一轮的定位，别把停车前的位置当成本次定位；
                             // 语音键的按下状态也别跨会话带过来。
                             carNmea.reset()

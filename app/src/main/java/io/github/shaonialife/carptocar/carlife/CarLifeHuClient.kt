@@ -1,5 +1,8 @@
 package io.github.shaonialife.carptocar.carlife
 
+import io.github.shaonialife.carptocar.iap2.PascdMotion
+import io.github.shaonialife.carptocar.iap2.PascdMotionTracker
+
 import java.io.DataInputStream
 import java.io.InputStream
 import java.io.OutputStream
@@ -172,6 +175,7 @@ class CarLifeHuClient(
     private val encoderInitClock: () -> Long = { android.os.SystemClock.uptimeMillis() },
     private val keyFrameWait: (Long) -> Unit = { Thread.sleep(it) },
     private val featureDispatchWait: (Long) -> Unit = { Thread.sleep(it) },
+    private val vehicleClock: () -> Long = { android.os.SystemClock.elapsedRealtime() },
 ) {
 
     private val running = AtomicBoolean(false)
@@ -201,6 +205,13 @@ class CarLifeHuClient(
 
     /** 车机 GPS 已下发条数（首几条与周期性日志用）。 */
     private var carGpsSent = 0
+
+    private val vehicleLock = Any()
+    private var vehicleDelivery = CarLifeVehicleDelivery()
+    private val vehicleModules = mutableSetOf<Int>()
+    private var vehicleSubscriptionRequested = false
+    private var advertisedVehicleModules: Set<Int>? = null
+    private var vehicleSamplesSent = 0
 
     @Volatile
     private var versionMatched = false
@@ -467,6 +478,13 @@ class CarLifeHuClient(
         controlConnected = false
         controlEndReason.set(null)
         versionMatched = false
+        synchronized(vehicleLock) {
+            vehicleDelivery = CarLifeVehicleDelivery()
+            vehicleModules.clear()
+            vehicleSubscriptionRequested = false
+            advertisedVehicleModules = null
+            vehicleSamplesSent = 0
+        }
         for (port in PORTS) {
             if (!keepStarting()) { closeAll(); return false }
             val socket = Socket()
@@ -695,6 +713,23 @@ class CarLifeHuClient(
 
     private fun handleMessage(serviceType: Int, payload: ByteArray) {
         when (serviceType) {
+            CarLifeVehicleData.SUBSCRIBE -> synchronized(vehicleLock) {
+                vehicleSubscriptionRequested = true
+                publishVehicleCapabilities(force = true)
+            }
+
+            CarLifeVehicleData.START, CarLifeVehicleData.STOP -> synchronized(vehicleLock) {
+                val controls = CarLifeVehicleData.controls(payload)
+                if (controls == null) {
+                    log("VEHICLE: 忽略无效的车辆订阅控制 id=$serviceType")
+                } else for (control in controls) {
+                    if (control.module == CarLifeVehicleData.VELOCITY) {
+                        vehicleDelivery.control(control.module, serviceType == CarLifeVehicleData.START)
+                        log("VEHICLE: module=${control.module} start=${serviceType == CarLifeVehicleData.START} requestedHz=${control.frequency}；仅转发新样本，最高约1Hz")
+                    }
+                }
+            }
+
             CarLifeProtocol.MD_VERSION_MATCH -> {
                 versionMatched = true
                 send(CarLifeProtocol.HU_STATISTICS, CarLifeProtocol.statisticsInfo())
@@ -1855,13 +1890,54 @@ class CarLifeHuClient(
         }
     }
 
+    /** Called on the command worker, never on the iAP2 receive thread. */
+    internal fun sendCarMotion(sample: PascdMotion, receivedAt: Long, generation: Any, sourceCurrent: () -> Boolean) {
+        fun permitted(): Boolean = running.get() && versionMatched && CarGpsOption.enabled &&
+            CarGpsOption.generation === generation && sourceCurrent() &&
+            PascdMotionTracker.isFresh(receivedAt, vehicleClock())
+        if (!permitted()) return
+        synchronized(vehicleLock) {
+            if (!permitted()) return
+            vehicleModules.add(CarLifeVehicleData.VELOCITY)
+            publishVehicleCapabilities()
+            val now = vehicleClock()
+            if (vehicleDelivery.allowed(CarLifeVehicleData.VELOCITY, now) &&
+                sendChecked(CarLifeVehicleData.SPEED, CarLifeVehicleData.speed(sample.speedKmh), ::permitted)) {
+                vehicleDelivery.sent(CarLifeVehicleData.VELOCITY, now)
+                vehicleSamplesSent++
+                if (vehicleSamplesSent <= 3 || vehicleSamplesSent % 30 == 0) {
+                    log("VEHICLE: PASCD 车速 ${sample.speedKmh}km/h → 0x1800F 本地写入 #$vehicleSamplesSent（不代表地图已采用）")
+                }
+            }
+        }
+    }
+
+    internal fun carGpsOptionChanged() = synchronized(vehicleLock) {
+        vehicleModules.clear()
+        publishVehicleCapabilities()
+    }
+
+    /** Only advertise observed motion modules, never infer GPS/gyro support from PASCD. */
+    private fun publishVehicleCapabilities(force: Boolean = false) {
+        if (!vehicleSubscriptionRequested || !versionMatched) return
+        val modules = if (CarGpsOption.enabled) vehicleModules.toSet() else emptySet()
+        if (!force && modules == advertisedVehicleModules) return
+        if (send(CarLifeVehicleData.SUBSCRIBE_DONE, CarLifeVehicleData.capabilities(modules))) {
+            advertisedVehicleModules = modules
+            log("VEHICLE: 车辆能力答复 modules=$modules；未观察到的能力不声明")
+        }
+    }
+
     // ---- 底层写入 ----
 
-    private fun send(serviceType: Int, payload: ByteArray): Boolean {
+    private fun send(serviceType: Int, payload: ByteArray): Boolean = sendChecked(serviceType, payload) { true }
+
+    private fun sendChecked(serviceType: Int, payload: ByteArray, permitted: () -> Boolean): Boolean {
         if (!running.get()) return false
         val out = cmdOut ?: return false
         return try {
             synchronized(writeLock) {
+                if (!running.get() || cmdOut !== out || !permitted()) return false
                 out.write(CarLifeProtocol.packCommand(serviceType, payload))
                 out.flush()
             }

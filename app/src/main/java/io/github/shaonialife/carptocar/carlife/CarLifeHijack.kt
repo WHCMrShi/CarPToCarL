@@ -1,5 +1,7 @@
 package io.github.shaonialife.carptocar.carlife
 
+import io.github.shaonialife.carptocar.iap2.PascdMotion
+
 import io.github.shaonialife.carptocar.util.ConnectionResources
 
 import android.content.Context
@@ -430,6 +432,17 @@ object CarLifeHijack {
      * 未接管 / 引擎未连上时返回 false，调用方按「本轮没有车机定位」处理即可。
      */
     fun sendCarGps(fix: CarGpsFix): Boolean = client?.sendCarGps(fix) ?: false
+
+    /** Capture the receiving HU now: old queued samples must not cross a reconnect. */
+    internal fun carMotionTask(sample: PascdMotion, receivedAt: Long, sourceCurrent: () -> Boolean): Runnable? {
+        val target = client ?: return null
+        val generation = CarGpsOption.generation
+        return Runnable {
+            target.sendCarMotion(sample, receivedAt, generation) { client === target && sourceCurrent() }
+        }
+    }
+
+    internal fun carGpsOptionChanged() { client?.carGpsOptionChanged() }
 
     /**
      * 车机语音键 → CarLife 硬键（0x68008）。

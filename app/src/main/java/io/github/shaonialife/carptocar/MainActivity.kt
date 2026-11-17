@@ -934,13 +934,14 @@ class MainActivity : AppCompatActivity() {
         }
         val ctx = this
 
-        // 「使用车机 GPS」（默认关闭）：只控制要不要把车机 0xFFFB 定位转成 CarLife 0x18010。
+        // 「使用车机 GPS」（默认关闭）：同时控制有效坐标与 PASCD 独立车速。
         // 关掉即回到「完全用手机定位」，随时可来回切（下一条定位就按新值走）。
         val gpsSwitch = findViewById<SwitchCompat>(R.id.switchCarGps)
         gpsSwitch.isChecked = CarGpsOption.enabled
         gpsSwitch.setOnCheckedChangeListener { _, checked ->
             CarGpsOption.save(ctx, checked)
-            snack(if (checked) "已启用：使用车机 GPS" else "已关闭：只用手机定位")
+            SessionController.onCarGpsOptionChanged()
+            snack(if (checked) "已启用：车机 GPS 与车速" else "已关闭：停止转发车机定位与车速")
         }
 
         // 目标帧率没有设置项：车机 /info 报 maxFPS 就跟随，没报按 60（见 video/StreamFps.kt）。

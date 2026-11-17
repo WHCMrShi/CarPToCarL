@@ -7,13 +7,8 @@ import android.content.Context
  *
  * ## 它控制什么
  *
- * 只控制一件事：**要不要把车机经 iAP2 0xFFFB 推来的定位，转成 CarLife 的 0x18010
- * `CarlifeCarGps` 发给 CarLife+ 引擎**。
- *
- * - 开：车机有经纬度时（`$GPGGA`/`$GPRMC`）就转发，CarLife 地图在「车机定位优先」时
- *   用车的坐标——车内手机 GPS 差（贴膜、仪表台下、无线充电板上）时唯一能救导航定位的路；
- * - 关：一个字节都不发，CarLife 完全按手机自己的定位走。车机只发 `$PASCD`（无经纬度）
- *   时开不开都一样，日志会写明「样本无经纬度」。
+ * 开启后转发有效 GPS 坐标（0x18010）及独立 PASCD 车速（0x1800F）。
+ * 无坐标的运动样本不伪装成 GPS；关闭后停止车辆数据转发。
  *
  * ## 为什么给用户留开关
  *
@@ -23,6 +18,10 @@ import android.content.Context
  * 默认使用手机定位；用户手动保存过的开关选择保持不变。
  */
 object CarGpsOption {
+    /** Invalidates queued samples even if the switch is turned off and back on quickly. */
+    @Volatile
+    internal var generation: Any = Any()
+        private set
     private const val PREFS = "car_gps_option_v1"
     private const val KEY_ENABLED = "enabled"
     private const val DEFAULT_ENABLED = false
@@ -48,6 +47,7 @@ object CarGpsOption {
         context: Context?,
         value: Boolean,
     ) {
+        if (enabled != value) generation = Any()
         enabled = value
         val app = context?.applicationContext ?: return
         app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
