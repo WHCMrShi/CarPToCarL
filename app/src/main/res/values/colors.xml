@@ -36,5 +36,5 @@
     <color name="m3_hold_overlay">#33FFFFFF</color>
     <color name="q4_action_accent">#F50537</color>
     <color name="q4_dialog_action">#FFFFFF</color>
-    <color name="ic_launcher_mark">#141414</color>
+    <color name="ic_launcher_mark">#FFFFFF</color>
 </resources>
