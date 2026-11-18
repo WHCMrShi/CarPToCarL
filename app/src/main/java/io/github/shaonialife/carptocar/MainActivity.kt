@@ -1962,7 +1962,7 @@ class MainActivity : AppCompatActivity() {
             gravity = android.view.Gravity.CENTER_HORIZONTAL
         }
         val padTop = ((if (landscape) 12 else 24) * density).toInt()
-        val padBottom = ((if (landscape) 12 else 20) * density).toInt()
+        val padBottom = (20 * density).toInt()
         hero.setPadding(hero.paddingStart, padTop, hero.paddingEnd, padBottom)
         if (landscape) {
             if (hero.parent === row) {
