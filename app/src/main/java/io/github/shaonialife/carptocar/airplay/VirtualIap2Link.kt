@@ -272,29 +272,12 @@ class VirtualIap2Link(
         }
     }
 
-    /**
-     * 通话状态变化时主动补推 0x4155。
-     *
-     * 调用时机有讲究（[SessionController.switchAudioScene] 负责顺序）：**先把 telephony
-     * 音频档 SETUP 好，再推状态**。车机收到「通话中」会立刻把音频路由切到通话通路，
-     * 此时若通话流还没建，它切过去只能拿到一条空的媒体流——「车机显示通话中却没有声音」
-     * 正是这个顺序错的典型症状。
-     */
-    fun pushCallState() {
-        synchronized(lock) {
-            if (!mib3Identified) return
-            val state = currentCallState()
-            sendCallStateLocked(state)
-            log("IAPLINK: 主动补推 0x4155（通话状态=$state）")
-        }
-    }
-
     /** 当前通话状态（provider 缺省或越界一律回「无通话」，绝不发未知值给车机）。 */
     private fun currentCallState(): Int =
         (callStateProvider?.invoke() ?: IAP2_CALL_STATE_NONE)
             .coerceIn(IAP2_CALL_STATE_NONE, IAP2_CALL_STATE_ACTIVE)
 
-    /** 发一条 0x4155（订阅应答与主动补推共用，保证两条路径的参数形态完全一致）。 */
+    /** 应答车机的通话状态订阅。 */
     private fun sendCallStateLocked(state: Int) {
         sendCsmLocked(CALL_STATE_UPDATE, Iap2Csm.param(CALL_STATE_PARAM, byteArrayOf(state.toByte())))
     }

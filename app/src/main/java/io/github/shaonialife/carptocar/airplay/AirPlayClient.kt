@@ -74,9 +74,6 @@ class AirPlayClient(
     private val requestClock: () -> Long = { SystemClock.uptimeMillis() },
 ) {
 
-    /** 音频 SETUP 时用的车机地址（会话中途要重新核对音量时复用）。 */
-    @Volatile
-    private var lastAudioHost: String? = null
     /**
      * 当前使用的接收端端点。0x4301 晚到 / mDNS 后上线时由主控热更新；
      * 配对循环每轮重试都重新读取，改动在下一轮即生效。
@@ -2027,16 +2024,6 @@ class AirPlayClient(
     }
 
     /**
-     * 通话状态变化时主动补推一次 0x4155（见 [VirtualIap2Link.pushCallState]）。
-     *
-     * **必须在通话音频档 SETUP 成功之后调用**：车机收到「通话中」立刻切音频路由，
-     * 那时通话流若还没建，它切过去只能拿到一条空流。
-     */
-    fun pushCallState() {
-        obtainIapLink().pushCallState()
-    }
-
-    /**
      * MIB3 布防：屏幕流 SETUP 成功后调用——主动经**控制通道** POST /command 发一次
      * DETECT，随后等车机 SYN（真机 Frida 时序，详见 [VirtualIap2Link.armMib3]）。
      * 明文会话（pre-HomeKit 老车机）没有 WiFi 隧道语义，跳过。
@@ -2430,7 +2417,7 @@ class AirPlayClient(
                                 if (micPort > 0) put("dataPort", micPort.toLong())
                                 // 与 catplay 发送端（StreamDescriptionAudio::new）逐字段对齐：
                                 // input = 这条流是不是**麦克风上行**（车机 → 手机）：
-                                //   false（默认）只下行；true 用于通话上行流（见 microphoneCandidates）。
+                                // 默认仅协商下行音频。
                                 // supportsRTPPacketRedundancy=false（我们不打包冗余帧）。
                                 // 缺这两个布尔时部分严格实现的接收端会按「未声明=不支持」处理，
                                 // 在音频通路初始化阶段就放弃该流。
@@ -2453,7 +2440,6 @@ class AirPlayClient(
                 ),
             )
         val host = endpoint.ipAddresses.firstOrNull() ?: "receiver"
-        lastAudioHost = host
         val startedAt = SystemClock.uptimeMillis()
         var statusLine: String
         var responseBody: ByteArray
@@ -2588,21 +2574,6 @@ class AirPlayClient(
      * ② 若确实处于静音位（≤[MUTE_THRESHOLD_DB]），抬到 [SAFE_VOLUME_DB]。
      * 查询失败/车机不支持都不影响主链路。
      */
-    /**
-     * 会话中途重新核对并纠正车机音量（**幂等**，可随时调）。
-     *
-     * 用途（2026-10-26 真机）：接过一次微信电话后，车机侧数据照收、音频时钟按实时推进，
-     * 但喇叭全静音——正是「接收端音量被通话接管后停在静音位」的典型表现。通话结束时
-     * 由主控重新调一次这里，把它抬回可用档位。
-     *
-     * 阻塞（RTSP 往返，最长 4s×2），请从后台线程调用。
-     */
-    fun refreshVolume(reason: String) {
-        val host = lastAudioHost ?: endpoint.ipAddresses.firstOrNull() ?: return
-        log("AIRPLAY: $reason → 重新核对车机音量（$host）")
-        runCatching { probeAndFixVolume(host) }
-    }
-
     private fun probeAndFixVolume(host: String) {
         val url = "rtsp://$host:${endpoint.airPlayPort}/"
         val volume: Float? =
@@ -2766,129 +2737,6 @@ class AirPlayClient(
         }
         log("AIRPLAY: 音频候选（按偏好）=${ordered.map { it.label }}")
         return ordered.distinctBy { it.key }
-    }
-
-    /**
-     * **通话音频**档位候选（`audioType=telephony`，2026-10-29 适配）。
-     *
-     * 为什么要单独一套候选：车机把 telephony 档当成**另一台输出设备**——切到它等于告诉
-     * 接收端「现在要打电话」，它会打开通话增益与麦克风通路。媒体档（[audioCandidates]）
-     * 无论怎么调都不会触发这件事，所以通话时必须换成这一档，挂断再换回去。
-     *
-     * 三条与媒体档不同的规则：
-     *  1. **只认 telephony**：车机没声明这一档就返回**空**，绝不退回 media 顶替
-     *     （退回 media 等于没适配，还会把「车机不支持」伪装成「已支持」）；
-     *  2. **AAC 优先于 PCM**：真 iPhone 的通话音频是 AAC-LC，低延迟档也多为 AAC；
-     *     PCM 只在 AAC 位缺失时兜底（通话对时序敏感，PCM 更容易被 WiFi 抖动打成欠载）；
-     *  3. 不参与 [AudioProfileMemory] 的媒体档记忆——通话档踩雷不该影响下次媒体选档。
-     *
-     * 102（MainHighAudio）排在 100 前面：与媒体侧同一条实证规律（102 才是高质量音频通路）。
-     */
-    fun callCandidates(): List<AudioProfile> {
-        val info = negotiatedInfo ?: return emptyList()
-        val declared =
-            (info["audioFormats"] as? List<*>)
-                ?.mapNotNull { it as? Map<*, *> }
-                .orEmpty()
-        if (declared.isEmpty()) return emptyList()
-        val phone =
-            declared.filter {
-                (it["audioType"] as? String)?.lowercase() == AUDIO_TYPE_TELEPHONY
-            }
-        if (phone.isEmpty()) {
-            log("AIRPLAY: 车机 /info 未声明 audioType=telephony → 通话档不切换（保持媒体档）")
-            return emptyList()
-        }
-        // 候选顺序：AAC 48k → AAC 44.1k → PCM 48k → PCM 44.1k；每组内 102 先于 100
-        val wanted =
-            listOf(
-                AUDIO_FORMAT_AAC_48K_STEREO to AudioCodec.AAC_LC,
-                AUDIO_FORMAT_AAC_LC_44K_STEREO to AudioCodec.AAC_LC,
-                AUDIO_FORMAT_PCM_48K_STEREO to AudioCodec.PCM,
-                AUDIO_FORMAT_PCM_44K_STEREO to AudioCodec.PCM,
-            )
-        val result = mutableListOf<AudioProfile>()
-        for ((bit, codec) in wanted) {
-            for (streamType in listOf(AUDIO_STREAM_TYPE_MAIN_HIGH, AUDIO_STREAM_TYPE)) {
-                val channel =
-                    phone.firstOrNull { ((it["type"] as? Number)?.toLong()) == streamType } ?: continue
-                val output = (channel["audioOutputFormats"] as? Number)?.toLong() ?: 0L
-                if ((output and bit) == 0L) continue
-                if (result.any { it.streamType == streamType && it.formatBit == bit }) continue
-                result +=
-                    AudioProfile(
-                        audioType = AUDIO_TYPE_TELEPHONY,
-                        formatBit = bit,
-                        sampleRate = if (bit == AUDIO_FORMAT_PCM_44K_STEREO || bit == AUDIO_FORMAT_AAC_LC_44K_STEREO) {
-                            44_100
-                        } else {
-                            48_000
-                        },
-                        latencyMs = latencyFor(info, AUDIO_TYPE_TELEPHONY, streamType),
-                        streamType = streamType,
-                        codec = codec,
-                    )
-            }
-        }
-        if (result.isEmpty()) {
-            log(
-                "AIRPLAY: 车机声明了 telephony 档但格式位不含 AAC-LC/PCM 立体声" +
-                    "（$phone）→ 通话档不切换",
-            )
-            return emptyList()
-        }
-        log("AIRPLAY: 通话音频候选=${result.map { it.label }}")
-        return result
-    }
-
-    /**
-     * **麦克风上行**候选（`input=true`，车机麦克风 → 手机）。
-     *
-     * 只取 telephony 档且 `audioInputFormats` 声明了 PCM 立体声的那一条。上行不推流，
-     * 我们只是按这条 SETUP 拿到端口后收车机发来的包——所以采样率是**接收**格式，
-     * 与下行档无关（真 iPhone 通话上下行是两条独立的流）。
-     *
-     * 车机没声明输入位时返回空：此时连「车机有没有麦克风可给我们用」都无法确认，
-     * 硬建一条只会换来 SETUP 被拒 + 多占一次接收端资源仲裁。
-     */
-    fun microphoneCandidates(): List<AudioProfile> {
-        val info = negotiatedInfo ?: return emptyList()
-        val declared =
-            (info["audioFormats"] as? List<*>)
-                ?.mapNotNull { it as? Map<*, *> }
-                .orEmpty()
-        val phone =
-            declared.filter {
-                (it["audioType"] as? String)?.lowercase() == AUDIO_TYPE_TELEPHONY
-            }
-        if (phone.isEmpty()) return emptyList()
-        val result = mutableListOf<AudioProfile>()
-        listOf(AUDIO_FORMAT_PCM_48K_STEREO to 48_000, AUDIO_FORMAT_PCM_44K_STEREO to 44_100)
-            .forEach { (bit, rate) ->
-                for (streamType in listOf(AUDIO_STREAM_TYPE, AUDIO_STREAM_TYPE_MAIN_HIGH)) {
-                    val channel =
-                        phone.firstOrNull { ((it["type"] as? Number)?.toLong()) == streamType } ?: continue
-                    val input = (channel["audioInputFormats"] as? Number)?.toLong() ?: 0L
-                    if ((input and bit) == 0L) continue
-                    if (result.any { it.streamType == streamType && it.formatBit == bit }) continue
-                    result +=
-                        AudioProfile(
-                            audioType = AUDIO_TYPE_TELEPHONY,
-                            formatBit = bit,
-                            sampleRate = rate,
-                            latencyMs = latencyFor(info, AUDIO_TYPE_TELEPHONY, streamType, input = true),
-                            streamType = streamType,
-                            codec = AudioCodec.PCM,
-                            isInput = true,
-                        )
-                }
-            }
-        if (result.isEmpty()) {
-            log("AIRPLAY: 车机 telephony 档未声明 PCM 输入位 → 无麦克风上行流")
-            return emptyList()
-        }
-        log("AIRPLAY: 麦克风上行候选=${result.map { it.label }}")
-        return result
     }
 
     /**
