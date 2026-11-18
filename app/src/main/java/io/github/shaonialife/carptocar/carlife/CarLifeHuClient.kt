@@ -720,6 +720,9 @@ class CarLifeHuClient(
 
     private fun handleMessage(serviceType: Int, payload: ByteArray) {
         when (serviceType) {
+            in CarLifeProtocol.phoneStateNames -> {
+                log("CARLIFE: 引擎电话状态=${CarLifeProtocol.phoneStateNames.getValue(serviceType)} id=$serviceType")
+            }
             CarLifeVehicleData.SUBSCRIBE -> {
                 log("VEHICLE: 收到车辆能力查询 0x10031")
                 val modules = setOf(CarLifeVehicleData.VELOCITY, CarLifeVehicleData.GEAR_MODULE)

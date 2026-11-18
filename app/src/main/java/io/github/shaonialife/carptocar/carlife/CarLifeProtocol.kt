@@ -65,6 +65,14 @@ internal object CarLifeProtocol {
     const val MD_MODULE_STATUS = 65574
     const val HU_MODULE_CONTROL = 98344
 
+    // MD → HU：电话状态由命令号表示，消息无正文。
+    val phoneStateNames = mapOf(
+        0x10014 to "来电",
+        0x10015 to "去电",
+        0x10016 to "空闲",
+        0x10017 to "通话中",
+    )
+
     /** 手机通知车机开始语音唤醒录音（0x10022），不是 98386 的确认。 */
     const val MD_MIC_RECORD_WAKEUP_START = 65570
 
