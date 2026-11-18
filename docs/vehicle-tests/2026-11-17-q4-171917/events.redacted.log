@@ -1,0 +1,49 @@
+# 手工脱敏选段。按时间排序并去重，保留时间及消息类型，不可用于报文重放。
+[16:37:04.543] PATH-DIAG: round=1 event=BEGIN
+[16:37:04.567] CARLIFE: 等待本机无线引擎
+[16:37:11.962] WIFI-MEMORY: 开始有界预连接，蓝牙继续
+[16:37:31.684] HANDOVER-DIAG: BT_SETUP_CLOSED，Wi-Fi 未就绪，仍在 SETUP
+[16:37:32.186] WIFI: onAvailable，进程绑定成功
+[16:37:32.199] CONNECT-DIAG: 已取消的 Wi-Fi 加入完成结果被丢弃
+[16:37:34.691] STAGE: 建链失败自动重试 #1
+[16:37:36.343] WIFI: 应用专属网络已在位，跳过重复加入
+[16:37:36.954] CONNECT-DIAG: 端点来自 mDNS
+[16:37:37.639] AIRPLAY: 首次 RECORD 完成
+[16:37:39.496] PATH-DIAG: videoAttach cachedFrames=0 replay=false
+[16:37:39.497] CARLIFE: 打印请求重建编码器
+[16:37:39.508] BT-DISABLE: deferred reason=carlife-source-not-ready
+[16:37:39.689] STAGE: 重试小结 5.0s
+[16:37:41.000] STAGE: 推送本地提示帧
+[16:37:59.544] STAGE: 真实源首帧超时，CarLife 推流=false，累计真实帧=0
+[16:38:03.336] HANDOVER-DIAG: KEEP_VIDEO；控制存活，源未推流
+[16:38:07.901] CARLIFE: 本机控制连接建立
+[16:38:08.120] CARLIFE: 协议 3.0 版本匹配
+[16:38:08.926] HUD-DIAG: SUBSCRIBE_DONE（HUD 能力）
+[16:38:10.075] PATH-DIAG: encoderInit ATTEMPT sent=true
+[16:38:10.534] CARLIFE: 收到真实首帧，keyFrame=true
+[16:38:10.562] CARLIFE: 首次向车机视频通道写出真实帧
+[16:38:11.183] BT-DISABLE: request
+[16:38:11.249] BT-DISABLE: response RTSP 200
+[16:38:11.275] HANDOVER-DIAG: KEEP_VIDEO；控制存活，源已推流
+[16:49:07.343] VEHICLE: 车速 0x1800F 本地写入 #660
+[16:49:07.346] VEHICLE: 挡位 D 0x18029 本地写入 #660
+[16:50:07.349] VEHICLE: 车速 116 km/h 0x1800F 本地写入 #720
+[17:17:55.347] VEHICLE: 挡位 R 0x18029 本地写入 #2388
+[17:18:02.400] VEHICLE: 挡位 D 0x18029 本地写入 #2395
+[17:18:07.356] VEHICLE: 车速 2 km/h 0x1800F 本地写入 #2400
+[17:18:37.338] VEHICLE: 车速 0 km/h 0x1800F 本地写入 #2430
+[17:18:37.342] VEHICLE: 挡位 D 0x18029 本地写入 #2430
+[17:18:40.607] VIDEO-PATH: wireFrames=50799 dropped=601 pending=0
+[17:18:41.499] AUDIO-DIAG: droppedBlocks=6
+[17:18:42.151] VIDEO: keepAlive 写失败，Connection reset
+[17:18:42.171] VIDEO: 重连失败 #1，ECONNREFUSED
+[17:18:42.222] EVENT: Connection reset
+[17:18:42.245] CONNECT-DIAG: control-reader EOF
+[17:18:42.354] NSD: CarPlay 服务消失
+[17:18:42.684] VIDEO: 重连失败 #2，ECONNREFUSED
+[17:18:43.193] VIDEO: 重连失败 #3，ECONNREFUSED
+[17:18:43.695] CONNECT-DIAG: keepalive-recovery-exhausted
+[17:18:43.701] CONNECT-DIAG: CarPlay owner 结束，停止附属 CarLife
+[17:19:10.931] WIFI: observer network lost
+[17:19:10.950] WIFI: 热点重新绑定
+[17:19:14.471] IDLE: 等待预算到期，结束重试
