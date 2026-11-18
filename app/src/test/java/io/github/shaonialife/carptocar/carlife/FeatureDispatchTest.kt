@@ -3,6 +3,9 @@ package io.github.shaonialife.carptocar.carlife
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.OutputStream
+import java.net.Socket
 import java.nio.ByteBuffer
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.CopyOnWriteArrayList
@@ -199,6 +202,39 @@ class FeatureDispatchTest {
             assertTrue(h.logs[2].contains("exceptionType=3）：手机端正在请求屏幕共享权限"))
             assertTrue(h.commands.isEmpty())
             assertTrue(h.hu.isRunning)
+        } finally { h.stop() }
+    }
+
+    @Test fun heartbeatWritesVideoHeaderAndHudContinuesOnCommandChannel() {
+        val h = Harness(matched = false)
+        try {
+            @Suppress("UNCHECKED_CAST")
+            val sockets = CarLifeHuClient::class.java.getDeclaredField("sockets")
+                .apply { isAccessible = true }.get(h.hu) as MutableMap<Int, Socket>
+            val tick = CarLifeHuClient::class.java.getDeclaredMethod("heartbeatTick", Long::class.javaPrimitiveType)
+                .apply { isAccessible = true }
+            val output = ByteArrayOutputStream()
+            sockets[8240] = object : Socket() { override fun getOutputStream() = output }
+            tick.invoke(h.hu, 1_000L)
+            assertTrue(h.commands.isEmpty())
+            assertArrayEquals(byteArrayOf(0, 0, 0, 0, 0, 0, 3, -24, 0, 2, 0, 2), output.toByteArray())
+
+            h.receive(0x10002, byteArrayOf(8, 1))
+            val broken = object : Socket() {
+                override fun getOutputStream(): OutputStream = throw IOException("video closed")
+            }
+            sockets[8240] = broken
+            tick.invoke(h.hu, 2_000L)
+            assertTrue(broken.isClosed)
+            assertTrue(h.hu.isRunning)
+            assertEquals(listOf(CarLifeProtocol.HU_STATISTICS, CarLifeHudProtocol.SUBSCRIBE), h.commands)
+
+            output.reset()
+            sockets[8240] = object : Socket() { override fun getOutputStream() = output }
+            tick.invoke(h.hu, 3_000L)
+            assertEquals(12, output.size())
+            assertEquals(0x20002, ByteBuffer.wrap(output.toByteArray(), 8, 4).int)
+            assertFalse(h.commands.contains(CarLifeProtocol.HEARTBEAT))
         } finally { h.stop() }
     }
 

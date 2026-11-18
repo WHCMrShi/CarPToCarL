@@ -4,6 +4,7 @@ import io.github.shaonialife.carptocar.iap2.PascdMotion
 import io.github.shaonialife.carptocar.iap2.PascdGear
 
 import java.io.DataInputStream
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
@@ -196,7 +197,7 @@ class CarLifeHuClient(
     private val progressLog = LogThrottle(10_000L)
     private val emptyMediaLog = LogThrottle(5_000L)
 
-    /** 命令帧写锁：心跳线程、握手线程与视频看门狗会并发下发，必须串行写同一条 socket。 */
+    /** 命令帧写锁：HUD 定时处理、握手线程与视频看门狗会并发下发。 */
     private val writeLock = Any()
 
     /** 车机 GPS 上次下发时刻（节流用；NMEA 本来就 ~1Hz，不必更密）。 */
@@ -218,7 +219,7 @@ class CarLifeHuClient(
     @Volatile private var videoReadPhase: VideoReadPhase? = null
 
     /**
-     * 视频通道（9242）是否已失效。
+     * 视频通道（8240）是否已失效。
      *
      * 实测（2026-10-24 12:38:48）CarLife 引擎冷启动时 7 个端口**全部 accept**，但
      * 视频/媒体/TTS 三条会在 accept 后立刻被引擎 reset——TCP 连接是通的，socket
@@ -1140,7 +1141,7 @@ class CarLifeHuClient(
      * 视频通道看门狗。
      *
      * 两条互斥的处理路径：
-     *  - **socket 真的死了**（被引擎 reset / 关掉）→ 重连 9242 并重走 98386+98311；
+     *  - **socket 真的死了**（被引擎 reset / 关掉）→ 重连 8240 并重走 98386+98311；
      *  - **曾经出帧后暂时停摆** → 只重发初始化，不主动拆整轮会话。
      *  - **从未出过帧** → 初始化仍无效且 CarPlay 已就绪时，按上层预算限次重建。
      *
@@ -1196,7 +1197,7 @@ class CarLifeHuClient(
         }
     }
 
-    /** 重连 9242。成功返回 true（已挂上新的读线程）。 */
+    /** 重连 8240。成功返回 true（已挂上新的读线程）。 */
     private fun reopenVideo(): Boolean {
         runCatching { sockets.remove(CarLifeProtocol.PORT_VIDEO)?.close() }
         val socket = Socket()
@@ -1916,11 +1917,28 @@ class CarLifeHuClient(
             while (running.get()) {
                 Thread.sleep(1000)
                 if (!running.get()) return
-                hudObserver.tick(android.os.SystemClock.uptimeMillis())
-                send(CarLifeProtocol.HEARTBEAT, ByteArray(0))
+                heartbeatTick(android.os.SystemClock.uptimeMillis())
             }
         } catch (error: Exception) {
             if (running.get()) log("CARLIFE: 心跳中止 - ${error.message}")
+        }
+    }
+
+    private fun heartbeatTick(now: Long) {
+        hudObserver.tick(now)
+        if (!running.get()) return
+        val video = sockets[CarLifeProtocol.PORT_VIDEO] ?: return
+        if (video.isClosed) return
+        try {
+            val output = video.getOutputStream()
+            output.write(CarLifeProtocol.packStream(now.toInt(), CarLifeProtocol.HEARTBEAT, ByteArray(0)))
+            output.flush()
+        } catch (error: IOException) {
+            if (running.get() && sockets[CarLifeProtocol.PORT_VIDEO] === video && !video.isClosed) {
+                log("CARLIFE: 视频心跳写入失败（8240）- ${error.message}")
+            }
+            // 关闭本次写入的 socket，由已有的视频看门狗接手。
+            runCatching { video.close() }
         }
     }
 
