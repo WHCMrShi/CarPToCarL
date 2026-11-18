@@ -207,9 +207,6 @@ class CarLifeHuClient(
 
     private val vehicleLock = Any()
     private val stoppedVehicleModules = mutableSetOf<Int>()
-    private val vehicleModules = mutableSetOf<Int>()
-    private var vehicleSubscriptionRequested = false
-    private var advertisedVehicleModules: Set<Int>? = null
     private var vehicleSamplesSent = 0
     private var lastVehicleGear: PascdGear? = null
     private var vehicleGearsSent = 0
@@ -481,9 +478,6 @@ class CarLifeHuClient(
         versionMatched = false
         synchronized(vehicleLock) {
             stoppedVehicleModules.clear()
-            vehicleModules.clear()
-            vehicleSubscriptionRequested = false
-            advertisedVehicleModules = null
             vehicleSamplesSent = 0
             lastVehicleGear = null
             vehicleGearsSent = 0
@@ -716,9 +710,12 @@ class CarLifeHuClient(
 
     private fun handleMessage(serviceType: Int, payload: ByteArray) {
         when (serviceType) {
-            CarLifeVehicleData.SUBSCRIBE -> synchronized(vehicleLock) {
-                vehicleSubscriptionRequested = true
-                publishVehicleCapabilities(force = true)
+            CarLifeVehicleData.SUBSCRIBE -> {
+                log("VEHICLE: 收到车辆能力查询 0x10031")
+                val modules = setOf(CarLifeVehicleData.VELOCITY, CarLifeVehicleData.GEAR_MODULE)
+                if (send(CarLifeVehicleData.SUBSCRIBE_DONE, CarLifeVehicleData.capabilities(modules))) {
+                    log("VEHICLE: 车辆能力答复 0x18032 modules=$modules")
+                }
             }
 
             CarLifeVehicleData.START, CarLifeVehicleData.STOP -> synchronized(vehicleLock) {
@@ -1901,9 +1898,6 @@ class CarLifeHuClient(
         if (!permitted()) return
         synchronized(vehicleLock) {
             if (!permitted()) return
-            vehicleModules.add(CarLifeVehicleData.VELOCITY)
-            if (sample.gear != null) vehicleModules.add(CarLifeVehicleData.GEAR_MODULE)
-            publishVehicleCapabilities()
             for (speedKmh in sample.speedsKmh) {
                 if (CarLifeVehicleData.VELOCITY !in stoppedVehicleModules &&
                     sendChecked(CarLifeVehicleData.SPEED, CarLifeVehicleData.speed(speedKmh), ::permitted)) {
@@ -1928,20 +1922,7 @@ class CarLifeHuClient(
     }
 
     internal fun carGpsOptionChanged() = synchronized(vehicleLock) {
-        vehicleModules.clear()
         lastVehicleGear = null
-        publishVehicleCapabilities()
-    }
-
-    /** Only advertise observed motion modules, never infer GPS/gyro support from PASCD. */
-    private fun publishVehicleCapabilities(force: Boolean = false) {
-        if (!vehicleSubscriptionRequested || !versionMatched) return
-        val modules = if (CarGpsOption.enabled) vehicleModules.toSet() else emptySet()
-        if (!force && modules == advertisedVehicleModules) return
-        if (send(CarLifeVehicleData.SUBSCRIBE_DONE, CarLifeVehicleData.capabilities(modules))) {
-            advertisedVehicleModules = modules
-            log("VEHICLE: 车辆能力答复 modules=$modules；未观察到的能力不声明")
-        }
     }
 
     // ---- 底层写入 ----

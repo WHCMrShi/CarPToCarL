@@ -91,8 +91,8 @@ class CarLifeVehicleDataTest {
         CarLifeHuClient::class.java.getDeclaredMethod("handleMessage", Int::class.javaPrimitiveType, ByteArray::class.java)
             .apply { isAccessible = true }.invoke(hu, id, payload)
     }
-    private fun client(output: ByteArrayOutputStream): CarLifeHuClient =
-        CarLifeHuClient(log = {}, onVideoFrame = { _, _, _ -> }).also {
+    private fun client(output: ByteArrayOutputStream, log: (String) -> Unit = {}): CarLifeHuClient =
+        CarLifeHuClient(log = log, onVideoFrame = { _, _, _ -> }).also {
             set(it, "running", AtomicBoolean(true))
             set(it, "versionMatched", true)
             set(it, "cmdOut", output)
@@ -118,26 +118,28 @@ class CarLifeVehicleDataTest {
         } finally { CarGpsOption.save(null, previous) }
     }
 
-    @Test fun requestBeforeSourceIsUpdatedOnFirstSampleAndStopPreventsSpeed() {
+    @Test fun queryIsLoggedAndReceivesFixedCapabilitiesWithoutLaterUpdates() {
         val previous = CarGpsOption.enabled
         try {
             CarGpsOption.save(null, true)
             val output = ByteArrayOutputStream()
-            val hu = client(output)
+            val logs = mutableListOf<String>()
+            val hu = client(output) { logs.add(it) }
+            val response = CarLifeProtocol.packCommand(0x18032, CarLifeVehicleData.capabilities(setOf(1, 4)))
+            set(hu, "versionMatched", false)
             receive(hu, CarLifeVehicleData.SUBSCRIBE)
-            assertArrayEquals(CarLifeProtocol.packCommand(0x18032, byteArrayOf(8, 0)), output.toByteArray())
+            assertArrayEquals(response, output.toByteArray())
+            assertTrue(logs.first().contains("收到车辆能力查询 0x10031"))
             output.reset()
-            receive(hu, CarLifeVehicleData.STOP, byteArrayOf(8, 1))
-            hu.sendCarMotion(PascdMotion(listOf(36)), CarGpsOption.generation) { true }
-            assertArrayEquals(CarLifeProtocol.packCommand(0x18032, CarLifeVehicleData.capabilities(setOf(1))), output.toByteArray())
-            output.reset()
-            receive(hu, CarLifeVehicleData.START, byteArrayOf(8, 1, 24, 10))
+            set(hu, "versionMatched", true)
             hu.sendCarMotion(PascdMotion(listOf(36)), CarGpsOption.generation) { true }
             assertArrayEquals(CarLifeProtocol.packCommand(0x1800F, byteArrayOf(8, 36)), output.toByteArray())
             output.reset()
             CarGpsOption.save(null, false)
             hu.carGpsOptionChanged()
-            assertArrayEquals(CarLifeProtocol.packCommand(0x18032, byteArrayOf(8, 0)), output.toByteArray())
+            assertEquals(0, output.size())
+            receive(hu, CarLifeVehicleData.SUBSCRIBE)
+            assertArrayEquals(response, output.toByteArray())
         } finally { CarGpsOption.save(null, previous) }
     }
 }
