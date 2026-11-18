@@ -160,7 +160,14 @@ class FeatureDispatchTest {
             h.awaitInit()
             assertEquals(1, h.commands.count { it == CarLifeProtocol.HU_FEATURE_CONFIG })
             val packet = h.packets.single { ByteBuffer.wrap(it, 4, 4).int == CarLifeProtocol.HU_FEATURE_CONFIG }
-            assertArrayEquals(CarLifeProtocol.featureConfig(), packet.copyOfRange(8, packet.size))
+            val payload = packet.copyOfRange(8, packet.size)
+            assertArrayEquals(CarLifeProtocol.featureConfig(), payload)
+            val config = CarLifeProtobuf.parse(payload)
+            val items = config.items.filter { it.number == 2 && it.wire == 2 }
+                .map { CarLifeProtobuf.parse(it.bytes!!) }
+            assertEquals(items.size, config.int(1))
+            val voiceMic = items.single { it.bytes(1)?.decodeToString() == "VOICE_MIC" }
+            assertEquals(1, voiceMic.int(2))
         } finally { h.stop() }
     }
 

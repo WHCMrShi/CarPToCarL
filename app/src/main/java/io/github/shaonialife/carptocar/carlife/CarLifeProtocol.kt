@@ -309,9 +309,10 @@ internal object CarLifeProtocol {
      *  - 每秒都有完整帧，平均码率随之上升（I 帧远大于 P 帧），1080p 下的块效应明显减轻。
      */
     const val I_FRAME_INTERVAL_DEFAULT = 20
+    const val USE_MOBILE_MIC = 1 // 百度 CarLife 接入指南 V2.1.1 §10.5.3.3
 
     /**
-     * 特征配置：CONNECT_TYPE + I 帧间隔 + 分辨率直通 + 歌词支持。
+     * 特征配置：CONNECT_TYPE + I 帧间隔 + 分辨率直通 + 歌词支持 + 手机麦克风。
      *
      * 2026-10-25 逆向 `FeatureConfigManager.excute()`（手机引擎）实证两条关键开关：
      *  - `DISABLE_RESOLUTION_OPTION = 1` → `Recorder.useVehicleResolution = true`：
@@ -332,6 +333,7 @@ internal object CarLifeProtocol {
         items += pbString(1, "CONNECT_TYPE") + pbVarint(2, connectType)
         items += pbString(1, "DISABLE_RESOLUTION_OPTION") + pbVarint(2, if (useVehicleResolution) 1 else 0)
         items += pbString(1, "MEDIA_LYRIC_SUPPORT") + pbVarint(2, if (mediaLyricSupport) 1 else 0)
+        items += pbString(1, "VOICE_MIC") + pbVarint(2, USE_MOBILE_MIC)
         var list = ByteArray(0)
         for (item in items) list += pbBytes(2, item)
         val cnt = items.size

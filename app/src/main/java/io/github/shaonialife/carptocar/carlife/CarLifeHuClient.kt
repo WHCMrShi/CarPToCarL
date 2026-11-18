@@ -1388,7 +1388,8 @@ class CarLifeHuClient(
             log(
                 "CARLIFE: 主动推送 98386 特征配置（CONNECT_TYPE=$connectType，" +
                     "I 帧间隔=${CarLifeProtocol.I_FRAME_INTERVAL_DEFAULT} 帧，" +
-                    "DISABLE_RESOLUTION_OPTION=1 分辨率直通，MEDIA_LYRIC_SUPPORT=1 歌词）",
+                    "DISABLE_RESOLUTION_OPTION=1 分辨率直通，MEDIA_LYRIC_SUPPORT=1 歌词，" +
+                    "VOICE_MIC=${CarLifeProtocol.USE_MOBILE_MIC} 手机麦克风）",
             )
         }
         val sent = send(CarLifeProtocol.HU_FEATURE_CONFIG, CarLifeProtocol.featureConfig(connectType))
