@@ -732,6 +732,20 @@ class CarLifeHuClient(
             }
 
             CarLifeProtocol.MD_VERSION_MATCH -> {
+                val status = readStatusField(payload)
+                when (status) {
+                    1L -> Unit
+                    2L -> {
+                        log("CARLIFE: 版本不匹配（0x10002 matchStatus=2）")
+                        controlEndReason.compareAndSet(null, "version-mismatch")
+                        stop()
+                        return
+                    }
+                    else -> {
+                        log("CARLIFE: 无效的版本匹配响应（0x10002 matchStatus=${status ?: "缺失或无效"}）")
+                        return
+                    }
+                }
                 versionMatched = true
                 send(CarLifeProtocol.HU_STATISTICS, CarLifeProtocol.statisticsInfo())
                 hudObserver.versionMatched()
@@ -739,6 +753,18 @@ class CarLifeHuClient(
                     if (featureConfigRequested) pushFeatureConfig(logIt = true)
                     scheduleFirstEncoderInit()
                 }
+            }
+
+            CarLifeProtocol.MD_CONNECT_EXCEPTION -> {
+                val type = readStatusField(payload)
+                val reason = when (type) {
+                    1L -> "手机端视频编码器初始化失败"
+                    2L -> "用户拒绝屏幕共享权限"
+                    3L -> "手机端正在请求屏幕共享权限，等待用户确认"
+                    null -> "异常类型字段缺失或无效"
+                    else -> "未定义的异常类型"
+                }
+                log("CARLIFE: 连接异常（0x10037 exceptionType=${type ?: "无效"}）：$reason")
             }
 
             CarLifeProtocol.MD_FEATURE_CONFIG -> synchronized(this) {
@@ -870,6 +896,12 @@ class CarLifeHuClient(
                 }
             }
         }
+    }
+
+    private fun readStatusField(payload: ByteArray): Long? {
+        val fields = CarLifeProtobuf.parse(payload)
+        if (fields.error != null) return null
+        return fields.items.lastOrNull { it.number == 1 && it.wire == 0 }?.value
     }
 
     // ---- CONNECT_TYPE 探测 ----

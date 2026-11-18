@@ -21,6 +21,7 @@ internal object CarLifeProtocol {
     // ---- 消息 ID ----
     const val HU_PROTOCOL_VERSION = 98305
     const val MD_VERSION_MATCH = 65538
+    const val MD_CONNECT_EXCEPTION = 0x10037
     const val HU_STATISTICS = 98343
     const val MD_INFO = 65540
     const val HU_INFO = 98307

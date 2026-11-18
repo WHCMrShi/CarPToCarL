@@ -54,9 +54,9 @@ class FeatureDispatchTest {
         fun initialize(force: Boolean = false) = CarLifeHuClient::class.java
             .getDeclaredMethod("sendEncoderInit", Boolean::class.javaPrimitiveType)
             .apply { isAccessible = true }.invoke(hu, force) as Boolean
-        fun receive(type: Int) = CarLifeHuClient::class.java
+        fun receive(type: Int, payload: ByteArray = ByteArray(0)) = CarLifeHuClient::class.java
             .getDeclaredMethod("handleMessage", Int::class.javaPrimitiveType, ByteArray::class.java)
-            .apply { isAccessible = true }.invoke(hu, type, ByteArray(0))
+            .apply { isAccessible = true }.invoke(hu, type, payload)
         fun waitForDispatch() = CarLifeHuClient::class.java.getDeclaredMethod("waitAfterFeatureConfig")
             .apply { isAccessible = true }.invoke(hu) as Boolean
         fun startAndAwaitInit() {
@@ -145,7 +145,7 @@ class FeatureDispatchTest {
             h.receive(CarLifeProtocol.VIDEO_ENC_DONE)
             assertFalse(h.initialize(force = true))
             assertEquals(listOf(CarLifeProtocol.HU_INFO), h.commands)
-            h.receive(CarLifeProtocol.MD_VERSION_MATCH)
+            h.receive(CarLifeProtocol.MD_VERSION_MATCH, byteArrayOf(8, 1))
             h.awaitInit()
             assertEquals(1, h.commands.count { it == CarLifeProtocol.HU_VIDEO_ENC_INIT })
         } finally { h.stop() }
@@ -156,11 +156,42 @@ class FeatureDispatchTest {
         try {
             h.receive(CarLifeProtocol.MD_FEATURE_CONFIG)
             assertTrue(h.commands.isEmpty())
-            h.receive(CarLifeProtocol.MD_VERSION_MATCH)
+            h.receive(CarLifeProtocol.MD_VERSION_MATCH, byteArrayOf(8, 1))
             h.awaitInit()
             assertEquals(1, h.commands.count { it == CarLifeProtocol.HU_FEATURE_CONFIG })
             val packet = h.packets.single { ByteBuffer.wrap(it, 4, 4).int == CarLifeProtocol.HU_FEATURE_CONFIG }
             assertArrayEquals(CarLifeProtocol.featureConfig(), packet.copyOfRange(8, packet.size))
+        } finally { h.stop() }
+    }
+
+    @Test fun invalidVersionRepliesDoNotAdvanceNegotiation() {
+        val h = Harness(matched = false)
+        try {
+            h.receive(CarLifeProtocol.MD_FEATURE_CONFIG)
+            h.receive(0x10002)
+            h.receive(0x10002, byteArrayOf(8, 1, 16))
+            h.receive(0x10002, byteArrayOf(8, -127, -128, -128, -128, 16)) // 2^32 + 1
+            assertTrue(h.commands.isEmpty())
+            assertFalse(h.initialize(force = true))
+            h.receive(0x10002, byteArrayOf(8, 2))
+            assertFalse(h.hu.isRunning)
+            assertTrue(h.commands.isEmpty())
+            assertTrue(h.logs.any { it.contains("stopped reason=version-mismatch") })
+        } finally { h.stop() }
+    }
+
+    @Test fun connectionExceptionLogsDocumentedReasonWithoutSendingCommands() {
+        val h = Harness(matched = false)
+        try {
+            h.receive(0x10037, byteArrayOf(8, 1))
+            h.receive(0x10037, byteArrayOf(8, 2))
+            h.receive(0x10037, byteArrayOf(8, 3))
+            assertEquals(3, h.logs.size)
+            assertTrue(h.logs[0].contains("exceptionType=1）：手机端视频编码器初始化失败"))
+            assertTrue(h.logs[1].contains("exceptionType=2）：用户拒绝屏幕共享权限"))
+            assertTrue(h.logs[2].contains("exceptionType=3）：手机端正在请求屏幕共享权限"))
+            assertTrue(h.commands.isEmpty())
+            assertTrue(h.hu.isRunning)
         } finally { h.stop() }
     }
 
