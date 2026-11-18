@@ -858,6 +858,7 @@ class AirPlayClient(
             iapTunnel?.socket?.let(owned::add)
             iapLink?.let(owned::add)
             socket = null
+            negotiatedInfo = null
             eventCommandSocket = null
             eventCommandCipher = null
             iapTunnel = null
@@ -1320,7 +1321,10 @@ class AirPlayClient(
                 // 奥迪 MMI 0000 声明 true：屏幕流 keepAlive 用 opcode=5 带 bplist 统计体
                 keepAliveSendStatsAsBody = (infoRoot?.get("keepAliveSendStatsAsBody") as? Boolean) == true,
             )
-        if (!checkSetupOwner(setupGeneration, "publish")) return null
+        synchronized(connectionLock) {
+            if (!checkSetupOwner(setupGeneration, "publish")) return null
+            negotiatedInfo = infoMap
+        }
         bluetoothDisableSession = BluetoothDisableSession(
             deviceId,
             (infoMap?.get("bluetoothIDs") as? List<*>)?.any {
@@ -1410,7 +1414,7 @@ class AirPlayClient(
         }
     }
 
-    /** `/info` 报文 → 字典。失败时把原因与原始 hex 落日志，并缓存到 negotiatedInfo。 */
+    /** `/info` 报文 → 字典。失败时把原因与原始 hex 落日志。 */
     private fun parseInfoBody(
         statusLine: String,
         body: ByteArray,
@@ -1429,7 +1433,6 @@ class AirPlayClient(
             }
         if (info == null) return null
         logInfoSummary(info)
-        negotiatedInfo = info
         return info
     }
 
@@ -3032,6 +3035,11 @@ class AirPlayClient(
         return "$manufacturer $model".trim().ifBlank { "unknown" }
     }
 
+    internal fun receiverManufacturerAndModel(): Pair<String?, String?>? {
+        val info = negotiatedInfo ?: return null
+        return (info["manufacturer"] as? String) to (info["model"] as? String)
+    }
+
     /**
      * SETUP #2：协商主屏视频流（type 110）。streamConnectionID 由客户端指定，
      * 两端各自按会话加密方式派生流密钥；接收端开 TCP 数据端口并在应答里返回。
@@ -3471,6 +3479,7 @@ class AirPlayClient(
                     else resources.also {
                         it.release(newSocket)
                         resources = ConnectionResources().also { next -> next.own(newSocket) }
+                        negotiatedInfo = null
                         socket = newSocket
                         activeAddress = address
                         activeHost = addressLiteral(address)

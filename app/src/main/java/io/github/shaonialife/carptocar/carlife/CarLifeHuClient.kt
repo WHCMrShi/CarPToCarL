@@ -176,6 +176,7 @@ class CarLifeHuClient(
     private val encoderInitClock: () -> Long = { android.os.SystemClock.uptimeMillis() },
     private val keyFrameWait: (Long) -> Unit = { Thread.sleep(it) },
     private val featureDispatchWait: (Long) -> Unit = { Thread.sleep(it) },
+    private val receiverManufacturerAndModel: () -> Pair<String?, String?>? = { null },
 ) {
 
     private val running = AtomicBoolean(false)
@@ -214,6 +215,8 @@ class CarLifeHuClient(
 
     @Volatile
     private var versionMatched = false
+    private var connectionAttempts = 1
+    private var connectionStartedAtNanos = System.nanoTime()
     private val controlEndReason = java.util.concurrent.atomic.AtomicReference<String?>(null)
     private data class VideoReadPhase(val owner: Socket?, val name: String, val at: Long)
     @Volatile private var videoReadPhase: VideoReadPhase? = null
@@ -471,12 +474,17 @@ class CarLifeHuClient(
     @Volatile internal var controlConnected = false
         private set
 
-    internal fun start(quietWhenUnavailable: Boolean = false, keepStarting: () -> Boolean): Boolean {
+    internal fun start(
+        quietWhenUnavailable: Boolean = false,
+        connectionAttempts: Int = 1,
+        keepStarting: () -> Boolean,
+    ): Boolean {
         if (!keepStarting()) return false
         if (running.get()) return true
         controlConnected = false
         controlEndReason.set(null)
         versionMatched = false
+        this.connectionAttempts = connectionAttempts
         synchronized(vehicleLock) {
             stoppedVehicleModules.clear()
             vehicleSamplesSent = 0
@@ -489,6 +497,7 @@ class CarLifeHuClient(
             sockets[port] = socket
             try {
                 socket.tcpNoDelay = true
+                if (port == CarLifeProtocol.PORT_CMD) connectionStartedAtNanos = System.nanoTime()
                 socket.connect(InetSocketAddress(host, port), connectTimeoutMs)
                 if (port == CarLifeProtocol.PORT_CMD) {
                     controlConnected = true
@@ -747,8 +756,12 @@ class CarLifeHuClient(
                         return
                     }
                 }
+                val firstMatch = !versionMatched
                 versionMatched = true
-                send(CarLifeProtocol.HU_STATISTICS, CarLifeProtocol.statisticsInfo())
+                if (firstMatch) {
+                    val elapsedMs = ((System.nanoTime() - connectionStartedAtNanos) / 1_000_000L).toInt()
+                    send(CarLifeProtocol.HU_STATISTICS, CarLifeProtocol.statisticsInfo(connectionAttempts, elapsedMs))
+                }
                 hudObserver.versionMatched()
                 synchronized(this) {
                     if (featureConfigRequested) pushFeatureConfig(logIt = true)
@@ -785,9 +798,10 @@ class CarLifeHuClient(
                 // 用 video 的坏处：引擎一旦把 1412×654 降档成 1280×720，回显值就变成 720p，
                 // 我们再把 720p 当「车机屏幕尺寸」告诉引擎，等于给它一个自我确认的错前提
                 // （而且这条 HU_INFO 比 AirPlay /info 更早到，首轮尤其关键）。
+                val receiver = receiverManufacturerAndModel()
                 val informed = send(
                     CarLifeProtocol.HU_INFO,
-                    CarLifeProtocol.deviceInfo("${requestedWidth}x$requestedHeight"),
+                    CarLifeProtocol.deviceInfo("${requestedWidth}x$requestedHeight", receiver?.first, receiver?.second),
                 )
                 synchronized(this) {
                     if (informed) deviceInfoReceived = true

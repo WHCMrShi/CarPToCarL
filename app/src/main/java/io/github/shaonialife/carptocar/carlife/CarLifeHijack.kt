@@ -793,6 +793,7 @@ object CarLifeHijack {
 
     private fun workerLoop(scope: ConnectionResources) {
         var announcedWait = false
+        var failedHandshakes = 0
         while (running.get() && !scope.isClosed) {
             // A successful control connection is the real session, never a throwaway probe.
             // Engine launch still requires the user to enter CarLife+ wireless connection.
@@ -872,15 +873,29 @@ object CarLifeHijack {
                 // 之后拿到的真实画布仍由 setRequestedResolution 覆盖并落盘。
                 initialWidth = initialCanvasW,
                 initialHeight = initialCanvasH,
+                receiverManufacturerAndModel = {
+                    val owner = io.github.shaonialife.carptocar.SessionController.currentClient
+                    owner?.receiverManufacturerAndModel()?.takeIf {
+                        !scope.isClosed && io.github.shaonialife.carptocar.SessionController.currentClient === owner
+                    }
+                },
             )
             val cleanup = AutoCloseable { hu.stop() }
             val connected = try {
-                scope.own(cleanup) && hu.start(quietWhenUnavailable = true) { running.get() && !scope.isClosed }
+                scope.own(cleanup) &&
+                    hu.start(quietWhenUnavailable = true, connectionAttempts = failedHandshakes + 1) {
+                        running.get() && !scope.isClosed
+                    }
             } catch (error: Exception) {
                 hu.stop()
                 if (error is InterruptedException) Thread.currentThread().interrupt()
                 if (!scope.isClosed) logSink?.invoke("CARLIFE: 接管中止 - ${error.message}")
                 false
+            }
+            if (connected) {
+                failedHandshakes = 0
+            } else if (hu.controlConnected) {
+                failedHandshakes++
             }
             val adopted = connected && synchronized(this) {
                 if (!running.get() || scope.isClosed || !hu.isRunning) false

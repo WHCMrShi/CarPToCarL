@@ -13,7 +13,11 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 class FeatureDispatchTest {
-    private class Harness(ordered: Boolean = true, matched: Boolean = true) {
+    private class Harness(
+        ordered: Boolean = true,
+        matched: Boolean = true,
+        receiverManufacturerAndModel: () -> Pair<String?, String?>? = { null },
+    ) {
         var waited = 0L
         var now = 100L
         var onWait: (() -> Unit)? = null
@@ -43,6 +47,7 @@ class FeatureDispatchTest {
             requestedFps = 60,
             encoderInitClock = { now }, keyFrameWait = { now += it },
             featureDispatchWait = { waited += it; onWait?.invoke() },
+            receiverManufacturerAndModel = receiverManufacturerAndModel,
         )
         init {
             running().set(true)
@@ -148,9 +153,30 @@ class FeatureDispatchTest {
             h.receive(CarLifeProtocol.VIDEO_ENC_DONE)
             assertFalse(h.initialize(force = true))
             assertEquals(listOf(CarLifeProtocol.HU_INFO), h.commands)
+            val device = CarLifeProtobuf.parse(h.packets.single().copyOfRange(8, h.packets.single().size))
+            assertNull(device.bytes(13))
+            assertNull(device.bytes(14))
+            h.setField("connectionAttempts", 3)
             h.receive(CarLifeProtocol.MD_VERSION_MATCH, byteArrayOf(8, 1))
             h.awaitInit()
             assertEquals(1, h.commands.count { it == CarLifeProtocol.HU_VIDEO_ENC_INIT })
+            val packet = h.packets.single { ByteBuffer.wrap(it, 4, 4).int == CarLifeProtocol.HU_STATISTICS }
+            val statistics = CarLifeProtobuf.parse(packet.copyOfRange(8, packet.size))
+            assertEquals(3, statistics.int(5))
+            assertEquals(1, statistics.int(6))
+            assertNotNull(statistics.int(7))
+        } finally { h.stop() }
+    }
+
+    @Test fun deviceInfoIncludesAlreadyAvailableReceiverMetadata() {
+        val h = Harness(matched = false) { "Audi" to "MMI" }
+        try {
+            h.receive(CarLifeProtocol.MD_INFO)
+            val packet = h.packets.single()
+            val device = CarLifeProtobuf.parse(packet.copyOfRange(8, packet.size))
+            assertEquals("Audi", device.bytes(13)?.decodeToString())
+            assertEquals("MMI", device.bytes(14)?.decodeToString())
+            assertEquals(listOf(CarLifeProtocol.HU_INFO), h.commands)
         } finally { h.stop() }
     }
 

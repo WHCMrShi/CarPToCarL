@@ -277,11 +277,14 @@ internal object CarLifeProtocol {
      */
     fun protocolVersion(): ByteArray = pbVarint(1, 3) + pbVarint(2, 0)
 
-    fun statisticsInfo(): ByteArray =
+    fun statisticsInfo(connectCount: Int, connectTimeMs: Int): ByteArray =
         pbString(1, "12345678") + // cuid
             pbString(2, "4.0.0") + // versionName
             pbVarint(3, 16) + // versionCode
-            pbString(4, "20029999") // channel
+            pbString(4, "20029999") + // channel
+            pbVarint(5, connectCount) +
+            pbVarint(6, 1) +
+            pbVarint(7, connectTimeMs)
 
     /**
      * 车机设备信息。字段号必须与官方车机版 `CarlifeDeviceInfoProto` 一致：
@@ -290,6 +293,8 @@ internal object CarLifeProtocol {
      */
     fun deviceInfo(
         display: String = "1280x720",
+        manufacturer: String? = null,
+        model: String? = null,
     ): ByteArray =
         pbString(1, "Android") +
             pbString(2, "msm8998") +
@@ -298,7 +303,9 @@ internal object CarLifeProtocol {
             pbString(5, "arm64-v8a") +
             pbString(6, "arm64-v8a") +
             pbString(7, "CarLifeVehicle") +
-            pbString(8, display)
+            pbString(8, display) +
+            (manufacturer?.trim()?.takeIf { it.isNotEmpty() }?.let { pbString(13, it) } ?: ByteArray(0)) +
+            (model?.trim()?.takeIf { it.isNotEmpty() }?.let { pbString(14, it) } ?: ByteArray(0))
 
     /**
      * 每多少个 P 帧插一个 I 帧。
