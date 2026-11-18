@@ -875,10 +875,10 @@ class MainActivity : AppCompatActivity() {
             }
             HeroState.CONNECTING -> {
                 heroSubline.text = (SessionController.phaseHint ?: DEFAULT_CONNECTING_HINT).trimEnd('…', '.', ' ')
-                styleCta(R.drawable.bg_cta_fill, R.color.m3_on_primary, R.drawable.ic_close, "长按取消连接")
+                styleCta(R.drawable.bg_cta_fill, R.color.m3_on_primary, R.drawable.ic_close, "长按取消")
             }
             HeroState.CONNECTED -> {
-                styleCta(R.drawable.bg_cta_disconnect, android.R.color.white, R.drawable.ic_power, "长按断开连接")
+                styleCta(R.drawable.bg_cta_disconnect, android.R.color.white, R.drawable.ic_power, "长按断开")
             }
         }
 
