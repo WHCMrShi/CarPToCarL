@@ -385,6 +385,12 @@
                                             android:textColor="@color/m3_on_surface"
                                             android:textSize="16sp" />
                                         <TextView
+                                            android:layout_width="match_parent"
+                                            android:layout_height="wrap_content"
+                                            android:text="@string/car_wifi_auto_connect_hint"
+                                            android:textColor="@color/car_wifi_hint_text"
+                                            android:textSize="12sp" />
+                                        <TextView
                                             android:id="@+id/ssidInput"
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
@@ -402,33 +408,20 @@
                                             android:textColorHint="@color/m3_on_var"
                                             android:textSize="14sp" />
 
-                                        <LinearLayout
-                                            android:layout_width="match_parent"
+                                        <TextView
+                                            android:id="@+id/btnClearWifiMemory"
+                                            android:layout_width="wrap_content"
                                             android:layout_height="wrap_content"
-                                            android:orientation="horizontal"
-                                            android:gravity="center_vertical">
-                                            <TextView
-                                                android:layout_width="0dp"
-                                                android:layout_height="wrap_content"
-                                                android:layout_weight="1"
-                                                android:layout_marginEnd="8dp"
-                                                android:text="@string/car_wifi_auto_connect_hint"
-                                                android:textColor="@color/m3_on_var"
-                                                android:textSize="14sp" />
-                                            <TextView
-                                                android:id="@+id/btnClearWifiMemory"
-                                                android:layout_width="wrap_content"
-                                                android:layout_height="wrap_content"
-                                                android:background="@drawable/bg_tbtn"
-                                                android:padding="9dp"
-                                                android:text="@string/clear_car_wifi_memory"
-                                                android:textColor="@color/m3_primary"
-                                                android:textSize="14sp"
-                                                android:textStyle="bold"
-                                                android:minHeight="48dp"
-                                                android:gravity="center"
-                                                android:focusable="true" />
-                                        </LinearLayout>
+                                            android:layout_gravity="end"
+                                            android:background="@drawable/bg_tbtn"
+                                            android:padding="9dp"
+                                            android:text="@string/clear_car_wifi_memory"
+                                            android:textColor="@color/m3_primary"
+                                            android:textSize="14sp"
+                                            android:textStyle="bold"
+                                            android:minHeight="48dp"
+                                            android:gravity="center"
+                                            android:focusable="true" />
                                     </LinearLayout>
                                 </LinearLayout>
                             </LinearLayout>

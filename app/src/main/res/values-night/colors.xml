@@ -8,6 +8,7 @@
     <color name="m3_surface_highest">#333333</color>
     <color name="m3_on_surface">#F2F2F2</color>
     <color name="m3_on_var">#B3B3B3</color>
+    <color name="car_wifi_hint_text">#858585</color>
     <color name="m3_outline">#808080</color>
     <color name="m3_outline_var">#333333</color>
     <color name="m3_primary">#E5E5E5</color>
