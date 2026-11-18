@@ -901,7 +901,6 @@ class MainActivity : AppCompatActivity() {
         cancelHold?.cancel()
         ctaTexture.apply(
             requireNotNull(ContextCompat.getDrawable(this, bgRes)),
-            showTexture = heroState != HeroState.IDLE && heroState != null,
             animate = heroState == HeroState.CONNECTING,
             color = getColor(if (heroState == HeroState.CONNECTED) R.color.q4_cta_texture_connected else R.color.q4_cta_texture),
         )

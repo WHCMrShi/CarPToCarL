@@ -39,13 +39,13 @@ internal class ConnectionButtonTexture(private val view: View) : View.OnAttachSt
         view.addOnAttachStateChangeListener(this)
     }
 
-    fun apply(base: Drawable, showTexture: Boolean, animate: Boolean, @ColorInt color: Int) {
+    fun apply(base: Drawable, animate: Boolean, @ColorInt color: Int) {
         view.removeCallbacks(tick)
-        connecting = showTexture && animate
+        connecting = animate
         texture.angle = 0f
         texture.color = color
         startedAt = SystemClock.uptimeMillis()
-        view.background = if (showTexture) LayerDrawable(arrayOf(base, texture)) else base
+        view.background = LayerDrawable(arrayOf(base, texture))
         schedule()
     }
 

@@ -222,8 +222,8 @@
                                     android:gravity="center_vertical"
                                     android:minHeight="60dp"
                                     android:orientation="horizontal"
-                                    android:paddingTop="6dp"
-                                    android:paddingBottom="6dp">
+                                    android:paddingTop="8dp"
+                                    android:paddingBottom="8dp">
 
                                     <LinearLayout
                                         android:layout_width="0dp"
@@ -243,7 +243,7 @@
                                             android:saveEnabled="false"
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
-                                            android:layout_marginTop="12dp"
+                                            android:layout_marginTop="8dp"
                                             android:background="@drawable/bg_ssid_sel"
                                             android:hint="AA:BB:CC:DD:EE:FF"
                                             android:importantForAutofill="no"
@@ -263,13 +263,14 @@
                                         <LinearLayout
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
+                                            android:layout_marginTop="4dp"
                                             android:orientation="horizontal"
                                             android:gravity="end">
                                             <TextView
                                                 android:id="@+id/btnSaveMac"
                                                 android:layout_width="wrap_content"
                                                 android:layout_height="wrap_content"
-                                                android:layout_marginStart="8dp"
+                                                android:minWidth="48dp"
                                                 android:background="@drawable/bg_tbtn"
                                                 android:gravity="center"
                                                 android:paddingStart="12dp"
@@ -296,8 +297,8 @@
                                     android:gravity="center_vertical"
                                     android:minHeight="60dp"
                                     android:orientation="horizontal"
-                                    android:paddingTop="6dp"
-                                    android:paddingBottom="6dp">
+                                    android:paddingTop="8dp"
+                                    android:paddingBottom="8dp">
 
                                     <LinearLayout
                                         android:layout_width="0dp"
@@ -321,7 +322,7 @@
                                             android:id="@+id/btDesc"
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
-                                            android:layout_marginTop="12dp"
+                                            android:layout_marginTop="8dp"
                                             android:enabled="false"
                                             android:background="@drawable/bg_input_locked"
                                             android:paddingStart="10dp"
@@ -336,13 +337,14 @@
                                         <LinearLayout
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
+                                            android:layout_marginTop="4dp"
                                             android:orientation="horizontal"
                                             android:gravity="end|center_vertical">
                                             <TextView
                                                 android:id="@+id/btnPickTarget"
                                                 android:layout_width="wrap_content"
                                                 android:layout_height="wrap_content"
-                                                android:layout_marginStart="0dp"
+                                                android:minWidth="48dp"
                                                 android:background="@drawable/bg_tbtn"
                                                 android:gravity="center"
                                                 android:paddingStart="10dp"
@@ -369,8 +371,8 @@
                                     android:gravity="center_vertical"
                                     android:minHeight="60dp"
                                     android:orientation="horizontal"
-                                    android:paddingTop="6dp"
-                                    android:paddingBottom="6dp">
+                                    android:paddingTop="8dp"
+                                    android:paddingBottom="8dp">
 
                                     <LinearLayout
                                         android:layout_width="0dp"
@@ -387,6 +389,7 @@
                                         <TextView
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
+                                            android:layout_marginTop="4dp"
                                             android:text="@string/car_wifi_auto_connect_hint"
                                             android:textColor="@color/car_wifi_hint_text"
                                             android:textSize="12sp" />
@@ -394,7 +397,7 @@
                                             android:id="@+id/ssidInput"
                                             android:layout_width="match_parent"
                                             android:layout_height="wrap_content"
-                                            android:layout_marginTop="12dp"
+                                            android:layout_marginTop="8dp"
                                             android:enabled="false"
                                             android:background="@drawable/bg_input_locked"
                                             android:paddingStart="10dp"
@@ -413,6 +416,8 @@
                                             android:layout_width="wrap_content"
                                             android:layout_height="wrap_content"
                                             android:layout_gravity="end"
+                                            android:layout_marginTop="4dp"
+                                            android:minWidth="48dp"
                                             android:background="@drawable/bg_tbtn"
                                             android:padding="9dp"
                                             android:text="@string/clear_car_wifi_memory"
