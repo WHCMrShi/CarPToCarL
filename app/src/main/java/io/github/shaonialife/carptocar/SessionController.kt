@@ -3676,17 +3676,16 @@ object SessionController {
                 !recentlyNoticed && videoSender?.isRunning == true &&
                     (videoSender?.pushNotice(noticeLines) ?: false)
             appendLog(
-                "STAGE: ⚠ ${ConnectStage.FIRST_FRAME.label}超时（${budget / 1000}s 内车机未收到本会话任何视频帧，" +
-                    "CarLife推流=$carlifePushing，累计送达=${CarLifeHijack.framesDelivered - base} 帧）——" +
+                "STAGE: ⚠ ${ConnectStage.FIRST_FRAME.label}超时（${budget / 1000}s 内本会话尚未成功写出 CarLife 视频帧，" +
+                    "本地写入=${CarLifeHijack.framesDelivered - base} 帧）——" +
                     (if (carlifePushing) {
-                        "CarLife 在推流但帧未送达车机（检查 SPS/VideoConfig 或重连车机）"
+                        "近期收到过 CarLife 视频帧"
                     } else {
-                        "画面来自本机 CarLife+：确认它处于「无线连接」且引擎在推流（7240）"
+                        "近期未收到 CarLife 视频帧，可检查 CarLife+ 是否处于「无线连接」"
                     }) +
-                    "；会话本身已建立，不需要重连车机" +
                     when {
-                        pushed -> "；已向车机屏幕推送提示"
-                        recentlyNoticed -> "；提示帧已在连上时推送（本次不重复）"
+                        pushed -> "；已写出提示帧"
+                        recentlyNoticed -> "；近期已尝试推送提示帧（本次不重复）"
                         else -> ""
                     },
             )
