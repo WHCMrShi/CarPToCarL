@@ -1,0 +1,53 @@
+# 2026-11-19 本地时间（UTC+08:00），按时间合并重复段落。消息仅保留诊断字段。
+[06:47:00.719] CONNECT-DIAG: revision=ef9e91c5dc98-dirty version=1.2.31-q4-debug sdk=36
+[06:47:01.388] PATH-DIAG: round=1 event=BEGIN
+[06:47:08.099] PATH-DIAG: stage=SCREEN_SETUP attempt=1 event=END outcome=RETURNED
+[06:47:08.220] PATH-DIAG: stage=RECORD attempt=1 event=END outcome=true
+[06:47:11.168] BT-DISABLE: deferred reason=carlife-source-not-ready
+[06:47:21.794] EVENT-DIAG: changeModes reason=screen native resourceID=1
+[06:47:22.020] RESOURCE-DIAG: requestUI version=2
+[06:47:22.040] RESOURCE-DIAG: response version=2 transportAccepted=true
+[06:47:22.644] VIDEO: 写出等待 CarLife 的提示帧
+[06:47:23.624] CONNECT-DIAG: control-reader ended reason=SocketException pending=0
+[06:47:23.625] CONNECT-DIAG: client close cancelled=false
+[06:47:23.636] EVENT: 读取结束 - Software caused connection abort
+[06:47:23.638] WIFI: wlan0 IPv4 缺失，默认蜂窝仍已验证
+[06:47:23.640] AUDIO: UDP 发送失败 - Network is unreachable
+[06:47:23.682] WIFI: wlan0 IPv4 恢复，默认蜂窝仍已验证
+[06:47:24.519] VIDEO: keepAlive write failure - Broken pipe
+[06:47:24.547] VIDEO: 数据口重拨 - ECONNREFUSED
+[06:47:24.816] NSD: CarPlay 服务消失
+[06:47:25.827] NSD: 重新发现 CarPlay 服务
+[06:47:25.870] CTRL: 收到车机第二次邀请
+[06:47:26.099] CONNECT-DIAG: video terminal reason=keepalive-recovery-exhausted
+[06:47:30.440] STAGE: 等首帧超时，CarLife推流=false
+[06:47:46.150] PATH-DIAG: stage=SCREEN_SETUP attempt=2 event=END outcome=RETURNED
+[06:47:46.203] PATH-DIAG: stage=RECORD attempt=4 event=END outcome=true
+[06:48:08.433] STAGE: 等首帧超时，CarLife推流=false
+[06:48:11.895] HANDOVER-DIAG: btClosed decision=KEEP_VIDEO controlAlive=true sourceStreaming=false
+[06:48:16.339] CARLIFE: 本机控制端口接入
+[06:48:16.520] CARLIFE: 未处理 0x1004b（2 B）
+[06:48:16.543] CARLIFE: 主动推送 98386 特征配置，VOICE_MIC=1
+[06:48:16.572] CARLIFE: 版本匹配成功，协议 3.0
+[06:48:16.573] CARLIFE-DIAG: handshake=matched elapsedMs=202
+[06:48:16.574] VEHICLE: 收到能力查询 0x10031
+[06:48:16.594] VEHICLE: 写出能力答复 0x18032 modules=[1, 4]
+[06:48:16.619] VEHICLE: module=1 start=true requestedHz=0
+[06:48:16.620] VEHICLE: module=4 start=true requestedHz=0
+[06:48:17.065] VEHICLE: 0x1800F 本地写入 #1，10 km/h
+[06:48:17.069] VEHICLE: 0x18029 本地写入 #1，D 挡
+[06:48:19.037] CARLIFE: 收到真实首帧，keyFrame=true
+[06:48:19.073] CARLIFE: 真实首帧本地写向车机
+[06:48:20.304] CARLIFE: 麦克风唤醒开始，65570
+[07:28:04.046] VEHICLE: 0x18029 本地写入 #2388，R 挡
+[07:28:46.039] VEHICLE: 0x1800F 本地写入 #2430
+[07:28:51.039] VEHICLE: 0x18029 本地写入 #2435，D 挡
+[07:28:54.923] VIDEO: 直通送帧失败 - Connection reset
+[07:28:54.931] VIDEO: 数据口重拨 - ECONNREFUSED
+[07:28:54.948] EVENT: 读取结束 - Connection reset
+[07:28:54.955] CONNECT-DIAG: control-reader ended reason=EOF pending=0
+[07:28:56.485] CONNECT-DIAG: video terminal reason=frame-write-recovery-exhausted
+[07:28:56.490] CARLIFE-DIAG: video frames=48142 lastFrameAgeMs=49
+[07:28:56.494] CONNECT-DIAG: CarPlay owner ended; stopping attached CarLife session
+[07:28:56.495] CARLIFE-DIAG: stopped reason=local-stop-or-cancel
+[07:29:27.189] PROC: 主线程心跳迟到 11 秒
