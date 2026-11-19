@@ -66,10 +66,7 @@ const val EXTRA_CAR_APPROACH = "io.github.shaonialife.carptocar.extra.CAR_APPROA
 class MainActivity : AppCompatActivity() {
     private enum class HeroState { IDLE, CONNECTING, CONNECTED }
 
-    /** 连接中的默认副标题（无阶段提示时）。 */
     private companion object {
-        const val DEFAULT_CONNECTING_HINT = "正在准备连接"
-
         /** 本机蓝牙地址未填写：英雄卡副标题与输入框下方提示共用同一句。 */
         const val HINT_MAC_MISSING = "请先保存本机蓝牙地址"
 
@@ -104,7 +101,6 @@ class MainActivity : AppCompatActivity() {
 
     // ---- 英雄卡状态机（1s 轮询 SessionController 对账）----
     private var heroState: HeroState? = null
-    private var connectedAt = 0L
 
     // 启动残留屏检查进行中（英雄卡显示「检查中」）；发现的残留暂缓清理时
     // 记在 pendingResidualDisplays，状态旁的「清理残留屏」按钮可再次发起
@@ -829,20 +825,17 @@ class MainActivity : AppCompatActivity() {
                 else -> HeroState.IDLE
             }
         if (s != heroState) {
-            if (s == HeroState.CONNECTED) connectedAt = SystemClock.elapsedRealtime()
             heroState = s
             applyHeroState(s)
         }
-        // 连接中：副标题跟随阶段提示（英雄卡内即可见，不必划到底部看日志）
-        if (s == HeroState.CONNECTING) {
-            heroSubline.text = (SessionController.phaseHint ?: DEFAULT_CONNECTING_HINT).trimEnd('…', '.', ' ')
+        if (s != HeroState.IDLE) {
+            heroSubline.text = SessionController.connectionSubtitle()
         }
         // 启动残留屏检查进行中：状态与副标题临时切换为检查提示
         if (s == HeroState.IDLE && startupCheckRunning) {
             heroStateText.text = "检查中"
             heroSubline.text = "正在检查残留屏"
         }
-        updateConnectedSubline()
         updateReadyRow()
     }
 
@@ -874,7 +867,6 @@ class MainActivity : AppCompatActivity() {
                 )
             }
             HeroState.CONNECTING -> {
-                heroSubline.text = (SessionController.phaseHint ?: DEFAULT_CONNECTING_HINT).trimEnd('…', '.', ' ')
                 styleCta(R.drawable.bg_cta_fill, R.color.m3_on_primary, R.drawable.ic_close, "长按取消")
             }
             HeroState.CONNECTED -> {
@@ -922,14 +914,6 @@ class MainActivity : AppCompatActivity() {
         }
         ctaButton.isEnabled = true
         ctaButton.alpha = if (blocked) CTA_BLOCKED_ALPHA else 1f
-    }
-
-    private fun updateConnectedSubline() {
-        if (heroState != HeroState.CONNECTED) return
-        val elapsed = SystemClock.elapsedRealtime() - connectedAt
-        val mm = elapsed / 60_000
-        val ss = elapsed % 60_000 / 1_000
-        heroSubline.text = String.format(Locale.US, "%02d:%02d", mm, ss)
     }
 
     private fun bindDisplayCard() {

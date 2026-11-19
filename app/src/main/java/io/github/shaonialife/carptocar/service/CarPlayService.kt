@@ -189,9 +189,6 @@ class CarPlayService : Service() {
         /** 通知栏文案刷新间隔：够跟上阶段变化，又不至于频繁唤醒。 */
         private const val STATE_TICK_MS = 3_000L
 
-        /** 首帧文案（服务刚起来、[SessionController.notificationSummary] 还没跑第一轮时用）。 */
-        private const val DEFAULT_TEXT = "正在准备连接车机（点「断开」可随时停止）"
-
         /** 通知上的「断开」——直接断开并停服务，不依赖界面是否存活。 */
         const val ACTION_DISCONNECT = "io.github.shaonialife.carptocar.action.NOTIFICATION_DISCONNECT"
 
@@ -208,11 +205,12 @@ class CarPlayService : Service() {
     private fun refreshNotification() {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         runCatching {
-            manager.notify(NOTIFICATION_ID, buildNotification(SessionController.notificationSummary()))
+            manager.notify(NOTIFICATION_ID, buildNotification())
         }
     }
 
-    private fun buildNotification(text: String = DEFAULT_TEXT): Notification {
+    private fun buildNotification(): Notification {
+        val text = SessionController.notificationSummary()
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             manager.createNotificationChannel(
