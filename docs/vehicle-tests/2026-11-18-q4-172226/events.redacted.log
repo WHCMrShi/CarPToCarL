@@ -1,0 +1,28 @@
+# 2026-11-18 本地时间（UTC+08:00）。节选去重，省略身份、网络地址及协议载荷。
+[16:32:37.475] CONNECT-DIAG: revision=ef9e91c5dc98-dirty version=1.2.31-q4-debug sdk=36
+[16:33:11.151] AIRPLAY: RECORD 完成
+[16:33:13.130] AIRPLAY: 音频流协商成功，type=100 media PCM 48000Hz
+[16:33:38.943] CARLIFE-DIAG: handshake=matched elapsedMs=201
+[16:33:39.433] AUDIO-DIAG: VR module previous=null current=0
+[16:33:41.474] CARLIFE: 真实首帧写向车机
+[17:18:20.817] AUDIO: 音频模式 NORMAL → IN_CALL
+[17:19:16.087] AUDIO-DIAG: realFeeds=0 udpPackets=4088 silenceSubmissions=4088 codec=PCM
+[17:19:34.215] AUDIO: 音频模式 IN_CALL → NORMAL
+[17:19:46.114] AUDIO-DIAG: realFeeds=503 codec=PCM
+[17:20:05.364] AUDIO: 音频模式 NORMAL → IN_COMMUNICATION
+[17:20:46.199] AUDIO-DIAG: realFeeds=0 udpPackets=4102 silenceSubmissions=4102 codec=PCM
+[17:20:47.080] AUDIO: 音频模式 IN_COMMUNICATION → NORMAL
+[17:20:53.702] EVENT: requestSiri Prewarm
+[17:20:53.896] EVENT-DIAG: changeModes SPEECH，nativeVR 借主屏和主音频
+[17:20:58.983] EVENT-DIAG: changeModes SPEECH_END，nativeVR 归还资源
+[17:21:01.880] EVENT: requestSiri Prewarm
+[17:21:02.073] EVENT-DIAG: changeModes SPEECH，nativeVR 借主屏和主音频
+[17:21:04.863] EVENT-DIAG: changeModes SPEECH_END，nativeVR 归还资源
+[17:21:09.975] EVENT: requestSiri Prewarm
+[17:21:10.160] EVENT-DIAG: changeModes SPEECH，nativeVR 借主屏和主音频
+[17:21:14.537] EVENT-DIAG: changeModes SPEECH_END，nativeVR 归还资源
+[17:21:16.224] AUDIO-DIAG: realFeeds=1352 codec=PCM
+[17:21:52.150] EVENT: 读取结束 - Connection reset
+[17:21:52.281] AUDIO: 已停止
+[17:21:52.332] CONNECT-DIAG: control-reader ended reason=EOF pending=0
+[17:22:20.173] CONNECT-DIAG: final-disconnect requested
