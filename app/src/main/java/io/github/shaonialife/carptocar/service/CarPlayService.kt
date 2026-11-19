@@ -210,7 +210,9 @@ class CarPlayService : Service() {
     }
 
     private fun buildNotification(): Notification {
-        val text = SessionController.notificationSummary()
+        val streaming = SessionController.isStreaming()
+        val connecting = SessionController.connectionRequested || SessionController.sessionStarting.get()
+        val text = if (streaming) null else SessionController.notificationSummary()
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             manager.createNotificationChannel(
@@ -252,9 +254,9 @@ class CarPlayService : Service() {
         val notification = NotificationCompat
             .Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_flow_c)
-            .setContentTitle("CarPToCarL · 车机连接")
+            .setContentTitle(if (streaming) "CarPToCarL · ${getString(R.string.connection_status_connected)}" else "CarPToCarL · 车机连接")
             .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setStyle(text?.let { NotificationCompat.BigTextStyle().bigText(it) })
             .setContentIntent(contentIntent)
             .addAction(0, "断开", disconnectIntent)
             .addAction(0, "打开界面", contentIntent)
@@ -266,8 +268,6 @@ class CarPlayService : Service() {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
 
-        val streaming = SessionController.isStreaming()
-        val connecting = SessionController.connectionRequested || SessionController.sessionStarting.get()
         // 空闲监听仍用普通通知；只为正在进行的连接会话申请 Live Updates。
         return if (streaming || connecting) {
             val shortText = getString(if (streaming) R.string.connection_status_connected else R.string.connection_status_connecting)

@@ -1756,17 +1756,12 @@ object SessionController {
      */
     fun isStreaming(): Boolean = videoSender?.isRunning == true
 
-    /** 连接状态卡片和通知共用的阶段文案与会话计时。 */
-    internal fun connectionSubtitle(): String {
-        val elapsedMs = videoSender?.runningDurationMs
-            ?: return (phaseHint ?: "正在准备连接").trimEnd('…', '.', ' ')
-        val seconds = elapsedMs.coerceAtLeast(0L) / 1_000
-        return String.format(Locale.US, "%02d:%02d", seconds / 60, seconds % 60)
-    }
+    /** 连接状态卡片和通知共用的阶段文案。 */
+    internal fun connectingSubtitle(): String = (phaseHint ?: "正在准备连接").trimEnd('…', '.', ' ')
 
     internal fun notificationSummary(): String =
         if (connectionRequested || sessionStarting.get() || isSessionRunning()) {
-            connectionSubtitle()
+            connectingSubtitle()
         } else {
             phaseHint ?: "空闲——等待车机靠近，或点「打开界面」查看"
         }

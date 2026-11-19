@@ -828,8 +828,8 @@ class MainActivity : AppCompatActivity() {
             heroState = s
             applyHeroState(s)
         }
-        if (s != HeroState.IDLE) {
-            heroSubline.text = SessionController.connectionSubtitle()
+        if (s == HeroState.CONNECTING) {
+            heroSubline.text = SessionController.connectingSubtitle()
         }
         // 启动残留屏检查进行中：状态与副标题临时切换为检查提示
         if (s == HeroState.IDLE && startupCheckRunning) {
@@ -840,6 +840,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyHeroState(s: HeroState) {
+        heroSubline.visibility = if (s == HeroState.CONNECTED) View.GONE else View.VISIBLE
         heroStateText.text =
             when (s) {
                 HeroState.IDLE -> getString(R.string.connection_status_idle)

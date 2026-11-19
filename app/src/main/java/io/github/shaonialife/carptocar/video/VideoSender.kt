@@ -322,11 +322,6 @@ class VideoSender(
     /** 推流是否活跃（静默降噪守卫判断用：start 失败时保持 false）。 */
     val isRunning: Boolean get() = running.get()
 
-    private var runningSinceMs = 0L
-
-    internal val runningDurationMs: Long?
-        get() = if (running.get()) uptimeMillis() - runningSinceMs else null
-
     /** 已发送帧总数（英雄卡实时帧率 = 1s 轮询取差值）。 */
     val framesSentTotal: Long get() = framesSent
 
@@ -446,9 +441,8 @@ class VideoSender(
             encoder = codec
             inputSurface = surface
             ended.set(false)
-            runningSinceMs = uptimeMillis()
             running.set(true)
-            lastKeepAliveAt = runningSinceMs
+            lastKeepAliveAt = uptimeMillis()
 
             onSurfaceReady(surface)
 
@@ -574,9 +568,8 @@ class VideoSender(
         sourceKeyFrames.reset()
         q4Handover.retire()
         ended.set(false)
-        runningSinceMs = uptimeMillis()
         running.set(true)
-        lastKeepAliveAt = runningSinceMs
+        lastKeepAliveAt = uptimeMillis()
         // 新一轮会话：上一轮的「最后一帧」不能拿来重发（车机解码器已重建，
         // 旧 IDR 的 SPS/PPS 与本轮 avcC 可能不一致）。
         lastIdrNals = null
