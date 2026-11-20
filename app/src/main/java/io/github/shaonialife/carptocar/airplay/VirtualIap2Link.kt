@@ -177,6 +177,8 @@ class VirtualIap2Link(
     private var eaIdentityIsAudi = false
     private var eaOpenDeclared = false
     private var eaRequests = emptyList<Q4EaProbe.Request>()
+    private val eaSessionProtocols = mutableMapOf<Int, String>()
+    private var nextManualEaSession = 0x0102
     private var mmiEaSession: Int? = null
     private var mmiEaConfirmed = false
     private var nextEaPingAt: Long? = null
@@ -204,6 +206,12 @@ class VirtualIap2Link(
                 } catch (error: java.io.IOException) {
                     eaCaptureFailed = true
                     log("EA: capture stopped for this link; ${error.javaClass.simpleName}")
+                }
+            }
+            if (payload.size >= 2) {
+                val session = ((payload[0].toInt() and 0xff) shl 8) or (payload[1].toInt() and 0xff)
+                if (session != mmiEaSession) {
+                    onEaNotice?.invoke("EA RX · ${eaSessionLabel(session)} · ${payload.size - 2} B")
                 }
             }
         }
@@ -573,29 +581,47 @@ class VirtualIap2Link(
     private fun probeEaSessionsLocked() {
         if (!eaIdentityIsAudi && eaRequests.isEmpty()) return
         val linkSession = engine.eaLinkSessionId
+        val request = eaRequests.firstOrNull { it.protocolName == Q4EaProbe.MMI_PROTOCOL }
         val reason = when {
             !controlSessionReady -> "wifi-control-not-ready"
             linkSession == null -> "wifi-ea-session-not-negotiated"
             !eaOpenDeclared -> "wifi-ea00-not-declared"
-            eaRequests.isEmpty() -> "wifi-target-protocols-not-declared"
+            request == null -> "wifi-mmi-protocol-not-declared"
             else -> null
         }
         if (reason != null) {
             log("EA: WiFi probe skipped reason=$reason")
             return
         }
-        log("EA: WiFi probe after authentication; requests=${eaRequests.size}/3 eaLinkSession=$linkSession")
-        for (request in eaRequests) {
-            val body = request.body()
-            val submitted = sendCsmLocked(Iap2MessageIds.EA_OPEN_SESSION, body, awaitAck = false)
-            val result = if (submitted) "submitted" else "failed"
-            log(
-                "EA: TX WiFi $result 0xea00 protocol=${request.protocolId} name=${request.protocolName} " +
-                    "session=${request.sessionId} len=${body.size} body=" + body.joinToString(" ") { "%02x".format(it) },
-            )
-            if (!submitted) return
-            if (request.protocolName == Q4EaProbe.MMI_PROTOCOL) mmiEaSession = request.sessionId
+        checkNotNull(request)
+        log("EA: WiFi probe after authentication; requests=1/3 eaLinkSession=$linkSession")
+        if (sendEaOpenLocked(request)) mmiEaSession = request.sessionId
+    }
+
+    internal fun requestEaSession(protocolName: String) {
+        synchronized(lock) {
+            if (!controlSessionReady || !eaOpenDeclared || engine.eaLinkSessionId == null) return
+            if (protocolName == Q4EaProbe.MMI_PROTOCOL || nextManualEaSession > 0xffff) return
+            val request = eaRequests.firstOrNull { it.protocolName == protocolName } ?: return
+            sendEaOpenLocked(request.copy(sessionId = nextManualEaSession++))
         }
+    }
+
+    private fun sendEaOpenLocked(request: Q4EaProbe.Request): Boolean {
+        val body = request.body()
+        val submitted = sendCsmLocked(Iap2MessageIds.EA_OPEN_SESSION, body, awaitAck = false)
+        val result = if (submitted) "submitted" else "failed"
+        log(
+            "EA: TX WiFi $result 0xea00 protocol=${request.protocolId} name=${request.protocolName} " +
+                "session=${request.sessionId} len=${body.size} body=" + body.joinToString(" ") { "%02x".format(it) },
+        )
+        if (submitted) eaSessionProtocols[request.sessionId] = request.protocolName
+        return submitted
+    }
+
+    private fun eaSessionLabel(session: Int): String {
+        val protocol = eaSessionProtocols[session]?.substringAfterLast('.')
+        return if (protocol == null) "会话 $session" else "$protocol · 会话 $session"
     }
 
     /** 直接投递完整 CSM 帧（Frida 抓的逐字节常量，勿重新编码）。 */
@@ -1067,7 +1093,10 @@ class VirtualIap2Link(
             val eaLog = Q4EaProbe.responseLog("WiFi", frame)
             if (eaLog != null) {
                 log(eaLog)
-                Q4EaProbe.status(frame)?.takeIf { it.sessionId == mmiEaSession }?.let { status ->
+                val status = Q4EaProbe.status(frame)
+                val detail = if (status == null) "字段异常" else "${eaSessionLabel(status.sessionId)} · 状态 ${status.code}"
+                onEaNotice?.invoke("EA 0xEA03 · $detail")
+                if (status != null && status.sessionId == mmiEaSession) {
                     if (status.code == 1 || (status.code == 0 && !mmiEaConfirmed)) nextEaPingAt = null
                     if (status.code == 0 || status.code == 1) mmiEaConfirmed = status.code == 0
                 }
@@ -1113,6 +1142,8 @@ class VirtualIap2Link(
      * 这里只负责「把句子捞出来交出去」并做低频日志，不猜任何语义。
      */
     var onLocationSamples: ((List<String>) -> Unit)? = null
+
+    internal var onEaNotice: ((String) -> Unit)? = null
 
     /** 已收到的定位报文数（日志抽样用）。 */
     private var locationFrames = 0

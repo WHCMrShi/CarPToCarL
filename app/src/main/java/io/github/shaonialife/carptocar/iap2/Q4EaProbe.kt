@@ -4,10 +4,12 @@ import io.github.shaonialife.carptocar.util.SessionTrace.toHexBody
 
 internal object Q4EaProbe {
     const val MMI_PROTOCOL = "de.audi.mmiconnectdatatransfer"
+    const val EADATA0_PROTOCOL = "com.audi.cpp.eadata0"
+    const val EADATA1_PROTOCOL = "com.audi.cpp.eadata1"
     private val protocolNames = listOf(
         MMI_PROTOCOL,
-        "com.audi.cpp.eadata0",
-        "com.audi.cpp.eadata1",
+        EADATA0_PROTOCOL,
+        EADATA1_PROTOCOL,
     )
 
     data class Request(val protocolId: Int, val protocolName: String, val sessionId: Int) {

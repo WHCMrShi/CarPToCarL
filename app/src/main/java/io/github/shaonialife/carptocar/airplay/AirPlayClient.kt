@@ -1904,6 +1904,8 @@ class AirPlayClient(
      */
     var onLocationSamples: ((List<String>) -> Unit)? = null
 
+    internal var onEaNotice: ((String) -> Unit)? = null
+
     /**
      * 「正在播放」信息提供者（歌名/歌手/专辑/播放状态），供虚拟 iAP2 链路的 0x5001
      * NowPlayingUpdate 使用。由 SessionController 在会话建立时注入（数据源 = CarLife
@@ -1976,6 +1978,7 @@ class AirPlayClient(
                     it.onMediaKey = { keyCode -> onMediaKey?.invoke(keyCode) }
                     it.onHidKeysReleased = { usages -> onHidKeysReleased?.invoke(usages) }
                     it.onLocationSamples = { sentences -> onLocationSamples?.invoke(sentences) }
+                    it.onEaNotice = { message -> onEaNotice?.invoke(message) }
                     it.begin()
                     iapLink = it
                 }
@@ -2022,6 +2025,10 @@ class AirPlayClient(
     fun pushNowPlaying() {
         // 媒体轮询不得在断开后创建新的虚拟链路/节拍线程。
         iapLink?.pushNowPlaying()
+    }
+
+    internal fun requestEaSession(protocolName: String) {
+        iapLink?.requestEaSession(protocolName)
     }
 
     /**

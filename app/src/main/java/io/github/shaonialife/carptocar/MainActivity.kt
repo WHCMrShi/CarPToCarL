@@ -33,6 +33,7 @@ import io.github.shaonialife.carptocar.bt.CarApproachReceiver
 import io.github.shaonialife.carptocar.bt.TargetDevicePrefs
 import io.github.shaonialife.carptocar.carlife.CarGpsOption
 import io.github.shaonialife.carptocar.iap2.EaPingOption
+import io.github.shaonialife.carptocar.iap2.Q4EaProbe
 import io.github.shaonialife.carptocar.carlife.CarLifeHijack
 import io.github.shaonialife.carptocar.carlife.CarLifeHuClient
 import io.github.shaonialife.carptocar.input.CarInputClient
@@ -974,6 +975,12 @@ class MainActivity : AppCompatActivity() {
         val eaPingSwitch = findViewById<SwitchCompat>(R.id.switchEaPing)
         eaPingSwitch.isChecked = EaPingOption.enabled
         eaPingSwitch.setOnCheckedChangeListener { _, checked -> EaPingOption.save(ctx, checked) }
+        findViewById<View>(R.id.btnEaData0).setOnClickListener {
+            SessionController.requestEaSession(Q4EaProbe.EADATA0_PROTOCOL)
+        }
+        findViewById<View>(R.id.btnEaData1).setOnClickListener {
+            SessionController.requestEaSession(Q4EaProbe.EADATA1_PROTOCOL)
+        }
 
         // 目标帧率没有设置项：车机 /info 报 maxFPS 就跟随，没报按 60（见 video/StreamFps.kt）。
         // 这里先按默认 60 起，等 SETUP 拿到车机值后由 SessionController 覆盖。

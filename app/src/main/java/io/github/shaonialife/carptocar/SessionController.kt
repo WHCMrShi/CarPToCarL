@@ -340,6 +340,10 @@ object SessionController {
         bluetoothClient?.pushNowPlaying()
     }
 
+    internal fun requestEaSession(protocolName: String) {
+        currentClient?.requestEaSession(protocolName)
+    }
+
     /**
      * 合并两个歌名数据源，构造 iAP2 0x5001 载荷。
      *
@@ -4142,6 +4146,9 @@ object SessionController {
                                 onCarLocation(sentences) {
                                     currentClient === created && created.controlSessionReady
                                 }
+                            }
+                            created.onEaNotice = { message ->
+                                if (currentClient === created) uiHintSink?.invoke(message)
                             }
                             // 新一轮会话：清掉上一轮的定位，别把停车前的位置当成本次定位；
                             // 语音键的按下状态也别跨会话带过来。

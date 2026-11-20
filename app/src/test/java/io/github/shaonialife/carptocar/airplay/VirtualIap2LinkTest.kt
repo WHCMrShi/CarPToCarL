@@ -5,6 +5,7 @@ import io.github.shaonialife.carptocar.iap2.Iap2Csm
 import io.github.shaonialife.carptocar.iap2.Iap2LinkEngine
 import io.github.shaonialife.carptocar.iap2.Iap2NowPlaying
 import io.github.shaonialife.carptocar.iap2.MfiLengthMemory
+import io.github.shaonialife.carptocar.iap2.Q4EaProbe
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -361,25 +362,58 @@ class VirtualIap2LinkTest {
     }
 
     @Test
-    fun eaRequestsUseWifiControlOnlyAfterAuthentication() {
+    fun eaRequestsOpenMmiAutomaticallyAndViwiOnlyOnDemand() {
         val harness = Harness()
+        val notices = mutableListOf<String>()
+        harness.link.onEaNotice = { notices += it }
         harness.link.armMib3()
         harness.car.start(0)
         harness.exchangeUntilNormal()
         val identification = Iap2Csm.string(0, "Audi MMI") +
             Iap2Csm.u16(7, 0xEA00) +
-            Iap2Csm.group(10, Iap2Csm.u8(0, 9), Iap2Csm.string(1, "com.audi.cpp.eadata0"))
+            Iap2Csm.group(10, Iap2Csm.u8(0, 1), Iap2Csm.string(1, Q4EaProbe.MMI_PROTOCOL)) +
+            Iap2Csm.group(10, Iap2Csm.u8(0, 9), Iap2Csm.string(1, Q4EaProbe.EADATA0_PROTOCOL)) +
+            Iap2Csm.group(10, Iap2Csm.u8(0, 10), Iap2Csm.string(1, Q4EaProbe.EADATA1_PROTOCOL))
         assertEquals(listOf(0x1D02, 0xAA00), harness.carSends(0x1D01, identification))
         assertEquals(listOf(0xAA02), harness.carSends(0xAA01, Iap2Csm.param(0, ByteArray(642))))
         val authenticated = harness.carSends(0xAA03, Iap2Csm.param(0, ByteArray(96)))
         assertTrue(authenticated.indexOf(0xEA00) > authenticated.indexOf(0xAA05))
-        val raw = checkNotNull(harness.lastRawFrameOf(0xEA00))
-        val request = Iap2Csm.Parser().offer(raw).single()
+        assertEquals(1, authenticated.count { it == 0xEA00 })
+        fun lastEaRequest() = Iap2Csm.Parser().offer(checkNotNull(harness.lastRawFrameOf(0xEA00))).single().body
         assertEquals(
-            listOf(Iap2Csm.Param(0, byteArrayOf(9)), Iap2Csm.Param(1, byteArrayOf(1, 2))),
-            Iap2Csm.parseParams(request.body),
+            listOf(Iap2Csm.Param(0, byteArrayOf(1)), Iap2Csm.Param(1, byteArrayOf(1, 1))),
+            Iap2Csm.parseParams(lastEaRequest()),
         )
         assertTrue(0xEA00 !in harness.carSends(0xAA03, Iap2Csm.param(0, ByteArray(96))))
+
+        fun request(protocol: String, protocolId: Int, session: Int) {
+            val before = harness.controlFrames().count { it.second == 0xEA00 }
+            harness.link.requestEaSession(protocol)
+            harness.tick()
+            harness.exchange()
+            assertEquals(before + 1, harness.controlFrames().count { it.second == 0xEA00 })
+            assertTrue(lastEaRequest().contentEquals(Iap2Csm.u8(0, protocolId) + Iap2Csm.u16(1, session)))
+        }
+
+        request(Q4EaProbe.EADATA0_PROTOCOL, 9, 258)
+        request(Q4EaProbe.EADATA1_PROTOCOL, 10, 259)
+        request(Q4EaProbe.EADATA0_PROTOCOL, 9, 260)
+        harness.carSends(0xEA03, Iap2Csm.u16(0, 257) + Iap2Csm.u8(1, 0))
+        harness.carSends(0xEA03, Iap2Csm.u16(0, 259) + Iap2Csm.u8(1, 0))
+        harness.carSends(0xEA03, Iap2Csm.u16(0, 300) + Iap2Csm.u8(1, 1))
+        assertTrue(harness.car.sendEaPing(257))
+        harness.exchange()
+        assertTrue(harness.car.sendEaPing(259))
+        harness.exchange()
+        assertEquals(
+            listOf(
+                "EA 0xEA03 · mmiconnectdatatransfer · 会话 257 · 状态 0",
+                "EA 0xEA03 · eadata1 · 会话 259 · 状态 0",
+                "EA 0xEA03 · 会话 300 · 状态 1",
+                "EA RX · eadata1 · 会话 259 · 1 B",
+            ),
+            notices,
+        )
         harness.link.close()
     }
 
