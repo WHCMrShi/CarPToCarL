@@ -52,3 +52,17 @@ EA 研究员随后取得同一 Apple 条目 `570608111` 的三个网页归档，
 **版本判定：** 没有取得上述版本主应用的 Info.plist。商店页本身不列出完整的应用协议清单，不能据此断言某版有或没有声明。**会话判定：** 没有找到同一版本、精确协议名、对端接受本地会话三者可对应的公开记录。[Audi of America 技术通告 2039054/1，第 1 页](https://static.nhtsa.gov/odi/tsbs/2014/SB-10066418-2280.pdf) 将 A3 MIB High 的 MMI connect 本地音乐路径明确描述为 Wi-Fi UPnP，因此不能用音乐播放成功代替 EA 成功证据；这也不能排除该 App 的其他功能使用 EA。
 
 **下一步：** 优先取来源可核验的 iOS 2.9.0 或 2.9.3 原始主应用 Info.plist（早期版本亦有价值）。同时记录来源、版本和构建号，逐字核对 UISupportedExternalAccessoryProtocols 数组；无需运行 App 或解密可执行文件。仅命中一个包能证明该构建声明过，不能证明它是首个声明版本，更不能证明该会话在 Q4 被接受。未取得上述材料，本轮没有启动二进制分析或新实车实验。
+
+### 新证据：myAudi 5.9 用户提供样本（不是旧版 MMI connect 或国区一汽奥迪）
+
+离线只读 ZIP、plist 和二进制符号检查。主包 `Payload/OneTouch.app/Info.plist`：标识 `de.audi.myaudimobileassistant`，版本 5.9，构建号 `46783.261023093001`。IPA SHA-256：`1c50dc661210e5c3e426eae9ee27636a18214d4477426e7cdae3a0b3d2602973`。哈希标识该样本，不认证发行来源；未验证签名信任链。没有上传包或二进制、没有运行 App。
+
+| 本车声明 | 主 Info.plist 的 UISupportedExternalAccessoryProtocols | 主可执行文件内 XML entitlement：com.apple.developer.carplay-protocols |
+| --- | --- | --- |
+| de.audi.mmiconnectdatatransfer | 有 | 未列出 |
+| com.audi.cpp.eadata0 | 有 | 有 |
+| com.audi.cpp.eadata1 | 有 | 有 |
+
+这修正的是“没有找到任何 App 端映射”的结论：现在已取得一个具体 myAudi 构建的直接声明，**不是** Q4 会话正例。最值得区分的实现线索是：主可执行文件有上述三个名称；内嵌 `Frameworks/PDICarKit.framework/PDICarKit` 同时出现两个 eadata 名称、EAAccessoryManager、EASession 和创建指定协议会话的选择子。这比单靠资源名称更强，但共现不能代替调用图，更不能给两个通道擅自分配读、写或某个业务字段。
+
+另在主程序中检出 `GetVehicleStatusFuelLevelUseCase` 等油量业务符号，英文资源有低油量及低电量提示。它们尚未与 PDICarKit 连接起来。包也含推送服务与远程通知能力；不能把 A4L 画面归因到某个 EA 协议、此特定 App 或后台推送。包内配置 `marketSupportsAutomaker: false` 也不代表全球、所有账号或本车的运行态。接下来优先查明车辆状态业务的数据来源与 EA 接入组件是否实际相连，或取得受支持客户端的本车正例；不根据提示文字设计车端交互。
