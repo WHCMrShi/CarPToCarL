@@ -23,3 +23,18 @@
 优先核对本车点名的应用、市场和 MMI 适配，而非猜测三个协议的分工。可接受的进展证据是 Audi 对该配置和官方客户端的明确说明，或车主在停车状态使用厂商支持的客户端所得的脱敏正例。记录客户端/系统/MMI 版本、连接方式、事件次序；分开记录“提示打开 App”“会话被接受”“应用显示了可归属于本地链路的新数据”。仅有界面或云端数值不满足后两项。
 
 在没有受支持的接入方式或正例前，不恢复旧模块，不新增超时重试、业务端点或 UI，不把其他客户端的身份当作本应用身份。下一阶段的门槛是确认会话层，而不是实现最终的电量和里程需求。
+
+## 跨市场、跨年代的应用侧核查
+
+不以中国区当前上架或仍在维护作为入选条件。下面按**数据方向、实际承载、可迁移证据**筛选，而非靠 App 名称推断。
+
+| 候选 | 可核验事实 | 对本项目的意义 |
+| --- | --- | --- |
+| Audi Sport Performance，2016 TT RS | [Audi 发布资料](https://www.audi.com/en/audi-tt-rs-coupe-and-tt-rs-roadster-until-2023-the-sporty-vanguard-of-the-model-series-6673/infotainment-and-audi-connect-6686) 在 Performance app 一节写明 iOS 和 Android 版通过 Wi-Fi 读取车载电子系统的遥测，同节单独介绍 USB 手机投屏。 | 是“车到手机”的强正例；不是 Q4、不是 EA 协议证明，也不能推导消息格式。 |
+| Audi Sport Performance，2023 R8 GT | [德国 App Store](https://apps.apple.com/de/app/audi-sport-performance/id6445920363) 和 [Google Play](https://play.google.com/store/apps/details?id=de.audi.sport.gmbh.performance) 列出 R8 GT 车型和车辆传感器记录。 | 可跨平台对照功能；未披露承载。不能因为同名就拿 TT RS 的 Wi-Fi 描述补足这一版本。 |
+| Audi MMI connect、历史 myAudi | 上述 TT RS 资料另述 MMI connect 的手机到 MMI 的 Wi-Fi 媒体传输；[Audi 2020 RS Q8 配置册](https://uploads.audi-mediacenter.com/system/production/uploaded_files/16506/file/332979ce3a4ee0010c50c1503d08c48299d2861b/Preisliste_RS_Q8_03_20.pdf?disposition=attachment) 将 myAudi 的部分娱乐功能与 WLAN 相联；[Audi 隐私说明](https://www.audi.com/en/data-protection-notice-regarding-audi-connect-17148) 则将远程 Vehicle Status 描述为经 Audi 系统交付。 | App 里同时有本地功能和云数据，不代表状态经本地 EA 取得。优先找历史应用公开声明，不复现媒体共享。 |
+| Audi connect plug and play | [Audi 英国](https://www.audi.co.uk/en/owners/audi-connect/plug-and-play/) 和 [Audi 法国](https://www.audi.fr/fr/univers-myaudi/les-fonctionnalites/audi-connect/connect-plug-and-play/) 描述 OBD DataPlug 与手机蓝牙连接。 | 本地车数据正例，但依赖外部硬件；不作为 MMI EA 实现依据。 |
+
+架构评估：跨平台官方实例值得研究，但本地 Wi-Fi、可见的车型数据和 EA 是三个不同命题。目前不对任何候选作“已匹配 Q4 协议”的标记。Android 端先建模**有证据的客户端职责**；进入消息级 mock 的依据应是可核验的应用协议声明和受支持的会话语义，而不是商店 ID、相似品牌名或其他车型的传输方式。
+
+定向复核：用三个完整协议名分别交叉查找 App 属性清单、EASession、发行资料和公开源码。命中项包括车机声明、第三方代码中的字符串，以及同源的[上游说明](https://github.com/jjuugk/CarPToCarL/blob/4a415c2f6b53222ab1613df496f18e39786a8ecd/README.md)，没有取得发行方的「App 版本 → Q4 协议名」声明。旧 MMI connect 商店快照未取得，结论是**映射未知**，而非“不支持”。下一项取证只收能新增这种映射的材料或受支持会话的正例；不把重复转载当独立佐证。
