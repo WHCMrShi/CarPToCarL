@@ -304,7 +304,7 @@ B. 车机被动（iPhone 是发起方，常见）
 | 0x6801               | DeviceHIDReport                              | D→A | 手机侧 HID 回传                     | —     |
 | 0x6802               | AccessoryHIDReport                           | A→D | 触摸/旋钮事件                        | ✅     |
 | 0x6803               | StopHID                                      | A→D | 停                              | —     |
-| 0xEA00               | StartExternalAccessoryProtocolSession        | D→A | 开 EA 隧道（param0=协议号，param1=协议名） | 视车机   |
+| 0xEA00               | StartExternalAccessoryProtocolSession        | D→A | 申请 EA 会话（参数 0 为协议标识，参数 1 为会话标识），见[字段核对](q4-ea-research.md#0xea00-字段与历史发送代码2026-11-20) | 视车机   |
 | 0xEA03               | StatusExternalAccessoryProtocolSession       | A→D | 隧道就绪                           | 视车机   |
 | 0x5000/0x5001        | StartNowPlayingUpdates / Update              | 双向  | 媒体状态（仪表盘歌名）                    | 可选    |
 | 0x5200/0x5201/0x5203 | StartRouteGuidanceUpdates / Update / Stop    | A→D / D→A | 结构化导航引导（投仪表/HUD）              | 可选    |

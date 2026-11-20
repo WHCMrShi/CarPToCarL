@@ -134,3 +134,17 @@ Apple 公开模型是系统使配件可见，客户端为配件的协议请求�
 | [Apple CarPlay Simulator](https://developer.apple.com/documentation/carplay/testing-your-app-in-carplay-simulator) | 模拟车机环境，连接真实 iPhone。 | 不是实现 iPhone 端 iAP2 的模拟器。 |
 
 独立评估：可坐实“连接就绪、应用启动、会话被接受、应用读到数据”是不同事件；不可跨项目把投屏成功与配件数据读取拼成一个替代手机端的 EA 正例。外部资料尚不足以归因到上游漏掉了某一特定报文。后续证据以独立实现的 **发送端 EA 专项测试、已执行的互操作用例或适用的手机角色规范** 为准。
+
+### 0xEA00 字段与历史发送代码（2026-11-20）
+
+本机保存的《MFi Accessory Interface Specification for Apple Devices》2012-10-30 版第 199 页表 26-42，与 CatPlay 根据同名 Simulator 归档生成的字段定义一致。carplayd 公开的消息目录只列出消息名、发送方向和参数数量。CatPlay 记录了输入文件哈希；本轮未取得 Apple 分发的归档原件，未独立复算该哈希。[carplayd 消息目录](https://github.com/lvalen91/carplayd/blob/4eb254499aa00f456aea91d00755cf150c7d18a4/rust/carplayd/crates/iap2-core/src/spec.rs#L295-L296) · [CatPlay 导出与输入摘要](https://github.com/catplay-labs/catplay/blob/ca30c1365ea9bad931143097079ea388243542f8/core/catplay_csm/src/msg/iap2.rs#L1-L4)
+
+| 核对项 | 字段定义 | 11 月 5 日车测采用的源码分析基线 `65514f0` |
+| --- | --- | --- |
+| 消息 | Device 发起 StartExternalAccessoryProtocolSession，两个字段各出现一次 | 消息号、方向和字段数量一致 |
+| 参数 0 | uint8，指向配件声明的协议标识 | 发送配件声明中的协议标识，编号、类型、含义一致 |
+| 参数 1 | uint16，标识此次 EA 协议会话 | 发送以 NUL 结尾的 UTF-8 协议名。编号一致，类型和含义均有差异 |
+
+协议名在配件声明的 SupportedExternalAccessoryProtocol 分组里有独立的位置。更早的 `d0cf756` 父版本曾按 uint16 编码参数 1，值复用了协议号。字段表没有规定会话标识必须等于协议号。[字段导出](https://github.com/catplay-labs/catplay/blob/ca30c1365ea9bad931143097079ea388243542f8/core/catplay_csm/src/msg/iap2.rs#L5265-L5273) · [发送逻辑的历史变更](https://github.com/WHCMrShi/CarPToCarL/commit/d0cf756c9b71c3d3e4182d159c56b9157e8d85b4)
+
+11 月 5 日的脱敏记录保留了发送事件，缺少 APK 提交号与逐字节申请体。代码差异已能确认，Q4 当时收到的具体值及未建会话的原因仍未知。[车测记录与基线说明](vehicle-tests/2026-11-05-q4/README.md)
