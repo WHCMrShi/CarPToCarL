@@ -12,13 +12,19 @@ import io.github.shaonialife.carptocar.audio.AudioSender
  * 现在改为**直通**：直接把引擎的裸 PCM 喂给 [AudioSender.feedPcm]，由其内部完成
  * 采样率/声道对齐 + RTP/ChaCha20 封包发送。不依赖录屏授权、少一次中转。
  *
- * 调用方先为当前 PCM 包选定已协商的发送端，再交给本类处理格式与统计。
+ * 前提：AirPlay 音频通道已协商成功（[SessionController.audioSender] 正在直通模式运行），
+ * 否则直接丢弃（与旧实现的「未开启声音则丢弃」语义一致，由 [CarLifeHijack.routeAudio] 判断）。
  */
 internal class CarLifeAudioSink(
     private val log: (String) -> Unit,
     /** Port origin only, for queue budgets; merged 9240 PCM is never music-only. */
     private val speech: Boolean = false,
     private val clock: () -> Long = { android.os.SystemClock.uptimeMillis() },
+    private val forward: (ByteArray, Int, Int, Int, Boolean) -> Boolean = { pcm, size, rate, channels, tts ->
+        val sender = io.github.shaonialife.carptocar.SessionController.audioSender
+        if (sender == null || !sender.isRunning) false
+        else { sender.feedPcm(pcm, size, rate, channels, speech = tts); true }
+    },
 ) {
     /** CarLife 引擎宣告的源采样率（CarlifeMusicInit；<=0 表示尚未宣告，按 48k 处理）。 */
     @Volatile
@@ -64,7 +70,6 @@ internal class CarLifeAudioSink(
         channels: Int,
         pcm: ByteArray,
         size: Int,
-        forward: (ByteArray, Int, Int, Int, Boolean) -> Boolean,
     ) {
         if (size <= 0) return
         if (srcRate <= 0) {

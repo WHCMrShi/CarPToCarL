@@ -1,8 +1,6 @@
 package io.github.shaonialife.carptocar.carlife
 
 import io.github.shaonialife.carptocar.BuildConfig
-import io.github.shaonialife.carptocar.SessionController
-import io.github.shaonialife.carptocar.audio.NavigationAudioSender
 
 import io.github.shaonialife.carptocar.iap2.PascdMotion
 
@@ -843,18 +841,16 @@ object CarLifeHijack {
                 // SPS 是码流的真相：确认后立刻告诉上层（界面显示、落盘快照都跟着它）。
                 onStreamSize = { w, h -> if (!scope.isClosed) onActualStreamSize?.invoke(w, h) },
                 onAudioFormat = { rate, channels -> if (!scope.isClosed) sink.configure(rate, channels) },
-                onAudioPcm = { pcm, size, readerCurrent ->
-                    routeAudio(sink, pcm, size, { !scope.isClosed && nowPlayingState === mediaState && readerCurrent() })
-                },
+                onAudioPcm = { pcm, size -> if (!scope.isClosed) routeAudio(sink, pcm, size) },
                 // The Q4 experiment takes 9241 directly. Ordinary sessions use the existing sink.
                 onTtsFormat = { rate, channels -> if (!scope.isClosed) naviSink.configure(rate, channels) },
-                onTtsPcm = { pcm, size, rate, channels, bits, generation, type, readerCurrent ->
-                    routeAudio(
-                        naviSink, pcm, size, { !scope.isClosed && nowPlayingState === mediaState && readerCurrent() },
-                        q4NavigationProbe = BuildConfig.Q4_ALT_AUDIO_SETUP_PROBE,
-                        type = type,
-                    ) { target ->
-                        target.offer(pcm, size, rate, channels, bits, sourceIdentity, generation)
+                onTtsPcm = { pcm, size, rate, channels, bits, generation, type ->
+                    if (!scope.isClosed) {
+                        val separate = BuildConfig.Q4_ALT_AUDIO_SETUP_PROBE &&
+                            io.github.shaonialife.carptocar.SessionController.routeQ4NavigationAudio(
+                                pcm, size, rate, channels, bits, sourceIdentity, generation, type,
+                            )
+                        if (!separate) routeAudio(naviSink, pcm, size)
                     }
                 },
                 onAudioGate = { active -> if (!scope.isClosed && nowPlayingState === mediaState) {
@@ -1267,29 +1263,12 @@ object CarLifeHijack {
         sink: CarLifeAudioSink,
         pcm: ByteArray,
         size: Int,
-        sourceCurrent: () -> Boolean,
-        q4NavigationProbe: Boolean = false,
-        type: Int = 0,
-        forwardNavigation: (NavigationAudioSender) -> Unit = {},
     ) {
-        val handled = SessionController.routeCarLifeAudio(
-            size, q4NavigationProbe, type, sourceCurrent,
-            forwardMedia = { target ->
-                if (!target.isRunning) false
-                else {
-                    sink.write(0, 0, pcm, size) { samples, bytes, rate, channels, speech ->
-                        if (!sourceCurrent() || !target.isRunning) false
-                        else {
-                            target.feedPcm(samples, bytes, rate, channels, speech = speech)
-                            true
-                        }
-                    }
-                    true
-                }
-            },
-            forwardNavigation = forwardNavigation,
-        )
-        if (handled) return
+        val routed = io.github.shaonialife.carptocar.SessionController.audioSender?.isRunning == true
+        if (routed) {
+            sink.write(0, 0, pcm, size)
+            return
+        }
         audioDroppedBytes += size
         val now = android.os.SystemClock.uptimeMillis()
         if (now - lastAudioDropLog >= AUDIO_DROP_LOG_MS) {
