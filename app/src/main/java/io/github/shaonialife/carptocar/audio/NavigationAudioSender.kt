@@ -29,7 +29,7 @@ internal class NavigationAudioSender(
 
     private sealed interface RtpWork {
         data class Packet(val payload: ByteArray, val pcmAtNs: Long, val startsPrompt: Boolean) : RtpWork
-        data class End(val reportIdle: Boolean) : RtpWork
+        data class End(val inputPeak: Int?) : RtpWork
     }
 
     private val queue = ArrayBlockingQueue<Block>(8)
@@ -158,8 +158,8 @@ internal class NavigationAudioSender(
                     ducking?.end(lastPacketEndNs)
                     lastPacketEndNs = null
                     firstPacket = true
-                    if (work.reportIdle) {
-                        log("ALT-AUDIO-PROBE: 9241 idle 60ms; totals packetized=${packetized.get()} sent=$sent udpDrops=$udpDrops rejected=${rejected.get()} syncFailures=$syncFailures rtpQueueDrops=${rtpQueueDrops.get()} rtpAgeDrops=$rtpAgeDrops")
+                    if (work.inputPeak != null) {
+                        log("ALT-AUDIO-PROBE: 9241 idle 60ms inputPeak=${work.inputPeak}; totals packetized=${packetized.get()} sent=$sent udpDrops=$udpDrops rejected=${rejected.get()} syncFailures=$syncFailures rtpQueueDrops=${rtpQueueDrops.get()} rtpAgeDrops=$rtpAgeDrops")
                     }
                 }
                 is RtpWork.Packet -> {
@@ -214,10 +214,10 @@ internal class NavigationAudioSender(
     }
 
     private fun packetizeSpeech(resampler: OboeSpeechResampler) {
-        var frame = ByteArray(PACKET_BYTES)
-        var frameOffset = 0
+        val frame = ByteBuffer.allocate(PACKET_BYTES).order(ByteOrder.LITTLE_ENDIAN)
         var previous: Block? = null
         var frameAtNs = 0L
+        var inputPeak = 0
         var startsPrompt = true
         var loggedRate = 0
         var loggedChannels = 0
@@ -227,39 +227,35 @@ internal class NavigationAudioSender(
             val accepted = synchronized(rtpLock) {
                 if (closed) return
                 if (rtpQueue.size >= MAX_PENDING_RTP) false else {
-                    rtpQueue.addLast(RtpWork.Packet(frame, frameAtNs, startsPrompt))
+                    rtpQueue.addLast(RtpWork.Packet(frame.array().copyOf(), frameAtNs, startsPrompt))
                     rtpLock.notify()
                     true
                 }
             }
-            frameOffset = 0
-            if (accepted) {
-                // The RTP worker owns the queued array.
-                frame = ByteArray(PACKET_BYTES)
-                startsPrompt = false
-            } else if (rtpQueueDrops.incrementAndGet() == 1) {
-                log("ALT-AUDIO-PROBE: dropped PCM before RTP: output queue full")
-            }
+            frame.clear()
+            if (accepted) startsPrompt = false
+            else if (rtpQueueDrops.incrementAndGet() == 1) log("ALT-AUDIO-PROBE: dropped PCM before RTP: output queue full")
         }
 
-        fun endPrompt(reportIdle: Boolean) {
+        fun endPrompt(peak: Int?) {
             synchronized(rtpLock) {
                 if (closed) return
                 // Keep the boundary behind its audio, with at most one extra slot for it.
                 val previousEnd = rtpQueue.lastOrNull() as? RtpWork.End
                 if (previousEnd != null) rtpQueue.removeLast()
-                rtpQueue.addLast(RtpWork.End(reportIdle || previousEnd?.reportIdle == true))
+                rtpQueue.addLast(RtpWork.End(peak ?: previousEnd?.inputPeak))
                 rtpLock.notify()
             }
             startsPrompt = true
         }
 
         fun finishPrompt() {
-            if (frameOffset > 0) {
-                frame.fill(0, fromIndex = frameOffset)
-                queuePacket()
+            if (frame.position() > 0) {
+                reject("discarded incomplete PCM packet at 9241 idle, samples=${frame.position() / 2}")
+                frame.clear()
             }
-            endPrompt(reportIdle = true)
+            endPrompt(inputPeak)
+            inputPeak = 0
             resampler.reset()
         }
 
@@ -273,43 +269,48 @@ internal class NavigationAudioSender(
             }
             if (System.nanoTime() - block.atNs > MAX_AUDIO_AGE_NS) {
                 reject("9241 block older than 250ms")
-                frameOffset = 0
+                frame.clear()
                 resampler.reset()
                 previous = null
-                endPrompt(reportIdle = false)
+                endPrompt(null)
                 continue
             }
             if (prior != null && (prior.source !== block.source || prior.generation != block.generation ||
                     prior.rate != block.rate || prior.channels != block.channels)
             ) {
-                frameOffset = 0
+                frame.clear()
                 resampler.reset()
                 startsPrompt = true
             }
             previous = block
+            val pcm = ByteBuffer.wrap(block.pcm).order(ByteOrder.LITTLE_ENDIAN)
             fun write(sample: Short) {
-                if (frameOffset == 0) frameAtNs = block.atNs
-                val value = sample.toInt()
-                // PcmPacketSealer consumes little-endian PCM.
-                frame[frameOffset++] = value.toByte()
-                frame[frameOffset++] = (value ushr 8).toByte()
-                if (frameOffset == PACKET_BYTES) queuePacket()
+                if (frame.position() == 0) frameAtNs = block.atNs
+                frame.putShort(sample)
+                if (!frame.hasRemaining()) queuePacket()
             }
             if (block.rate == SAMPLE_RATE) {
-                val pcm = ByteBuffer.wrap(block.pcm).order(ByteOrder.LITTLE_ENDIAN)
                 while (pcm.hasRemaining() && !closed) {
-                    val left = pcm.short
+                    val left = pcm.short.toInt()
                     if (block.channels == 1) {
-                        write(left)
+                        inputPeak = maxOf(inputPeak, kotlin.math.abs(left))
+                        write(left.toShort())
                     } else {
-                        write(((left + pcm.short) / 2).toShort())
+                        val right = pcm.short.toInt()
+                        inputPeak = maxOf(inputPeak, kotlin.math.abs(left), kotlin.math.abs(right))
+                        write(((left + right) / 2).toShort())
                     }
                 }
-            } else if (!closed) {
-                val resampled = resampler.process(block.pcm, block.rate, block.channels)
-                while (resampled.hasRemaining() && !closed) write(resampled.short)
-                if (loggedRate != block.rate || loggedChannels != block.channels) {
-                    log("ALT-AUDIO-PROBE: 9241 resampler=Oboe Best ${block.rate}Hz ${block.channels}ch -> 48000Hz mono s16")
+            } else {
+                while (pcm.hasRemaining() && !closed) {
+                    inputPeak = maxOf(inputPeak, kotlin.math.abs(pcm.short.toInt()))
+                }
+                if (!closed) {
+                    val resampled = resampler.process(block.pcm, block.rate, block.channels)
+                    while (resampled.hasRemaining() && !closed) write(resampled.short)
+                    if (loggedRate != block.rate || loggedChannels != block.channels) {
+                        log("ALT-AUDIO-PROBE: 9241 resampler=Oboe Best ${block.rate}Hz ${block.channels}ch -> 48000Hz mono s16")
+                    }
                 }
             }
             loggedRate = block.rate

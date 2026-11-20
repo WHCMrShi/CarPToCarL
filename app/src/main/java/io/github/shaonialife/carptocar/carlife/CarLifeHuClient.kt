@@ -61,7 +61,7 @@ class CarLifeHuClient(
     /** 手机宣告音频格式（采样率, 声道数）。 */
     private val onAudioFormat: (sampleRate: Int, channels: Int) -> Unit = { _, _ -> },
     /** 收到一包裸 PCM（16bit 交织，size 为有效字节数）。 */
-    private val onAudioPcm: (pcm: ByteArray, size: Int, readerCurrent: () -> Boolean) -> Unit = { _, _, _ -> },
+    private val onAudioPcm: (pcm: ByteArray, size: Int) -> Unit = { _, _ -> },
     /** TTS 通道（9241）宣告音频格式。导航播报通常是独立的采样率/声道，与媒体分开记。 */
     private val onTtsFormat: (sampleRate: Int, channels: Int) -> Unit = { _, _ -> },
     /**
@@ -71,9 +71,8 @@ class CarLifeHuClient(
      * 「暂不处理」直接丢掉，于是「放音乐有声、开导航没声」。TTS 与媒体是两条独立流，
      * 采样率也可能不同（TTS 常见 16k 单声道），所以必须各自带格式送进发送端重采样。
      */
-    private val onTtsPcm: (
-        pcm: ByteArray, size: Int, rate: Int, channels: Int, bits: Int, generation: Int, type: Int, readerCurrent: () -> Boolean,
-    ) -> Unit = { _, _, _, _, _, _, _, _ -> },
+    private val onTtsPcm: (pcm: ByteArray, size: Int, rate: Int, channels: Int, bits: Int, generation: Int, type: Int) -> Unit =
+        { _, _, _, _, _, _, _ -> },
     /**
      * 引擎音频**开停信号**（0x30002 开始 / 0x30003 停止，长度 0 的裸类型包）。
      *
@@ -1637,7 +1636,6 @@ class CarLifeHuClient(
     ) {
         val label = channel.label
         val isTts = channel.isTts
-        val readerCurrent = { running.get() && channel.generation == generation }
         val data = DataInputStream(input)
         val head = ByteArray(CarLifeProtocol.AUDIO_HEAD_LEN)
         var headerAllocation = head.size
@@ -1696,10 +1694,7 @@ class CarLifeHuClient(
                             }
                             noteAudioPcm(channel)
                             if (channel.generation == generation) {
-                                onTtsPcm(
-                                    payload, length, ttsInit?.int(1) ?: 0, ttsInit?.int(2) ?: 0, ttsInit?.int(3) ?: 0,
-                                    generation, type, readerCurrent,
-                                )
+                                onTtsPcm(payload, length, ttsInit?.int(1) ?: 0, ttsInit?.int(2) ?: 0, ttsInit?.int(3) ?: 0, generation, type)
                             }
                         } else if (channel.controlLogged.add(type)) {
                             log("CARLIFE: TTS 开停信号 0x${type.toString(16)}（长度 0，仅记录）")
@@ -1735,7 +1730,7 @@ class CarLifeHuClient(
                             }
                             if (length > 0) {
                                 noteAudioPcm(channel)
-                                onAudioPcm(payload, length, readerCurrent)
+                                onAudioPcm(payload, length)
                             }
                         }
 
