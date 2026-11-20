@@ -1,5 +1,11 @@
 # 奥迪 Q4 e-tron CarPlay 交互链反推与实验记录
 
+## 2026-11-20 Q4 Wi-Fi EA 复测：MMI 会话收到正常状态
+
+手机日志修订号 `e79f865f70ac`。本轮 CarPlay 先连，Wi-Fi iAP2 认证后提交三条 `0xEA00`；只有 `de.audi.mmiconnectdatatransfer`（协议 ID 1、EA 会话 ID 257）在约 161 ms 后收到 `0xEA03 SessionStatusOK`。`eadata0` 和 `eadata1` 未见状态。专用正文文件只有启动标记，普通日志也未记录 EA 入站数据帧；会话正常状态不是车辆数据到达的证据。
+
+回执早于 CarLife 接入及 `disableBluetooth`，说明本次这两者不是收到会话状态的前置条件。相较早期蓝牙请求，本轮同时改变了时机和通道，不能单独归因。新版 CarLife 先启动的独立对照尚无。详见[脱敏时间线](vehicle-tests/2026-11-20-q4-wifi-ea/analysis.md)。
+
 ## 2026-11-20 Q4 EA 申请复测：两轮未观测到会话状态
 
 手机日志标识 `3dd2c7b1608f`，来自独立 `codex/q4-ea00-retest`。两轮蓝牙链路各提交三次 `0xEA00`，按当次声明取协议 ID 1/2/3，分别使用大端 uint16 会话 ID 257/258/259；后续累计链路 ACK 越过该批发送，但蓝牙及 Wi-Fi 日志无入站 `0xEA03`。回连后 Wi-Fi 收到一条面向 `cn.audi.connect` 的 `0xEA02 RequestAppLaunch`，不是会话状态，不能和任何一次申请配对。
