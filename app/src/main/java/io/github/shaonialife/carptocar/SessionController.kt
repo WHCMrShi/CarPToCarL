@@ -3,6 +3,7 @@ package io.github.shaonialife.carptocar
 import io.github.shaonialife.carptocar.net.AirPlayEndpointPorts
 
 import io.github.shaonialife.carptocar.util.SessionEpoch
+import io.github.shaonialife.carptocar.carlife.CarLifeAudioRoute
 
 import android.content.Context
 import android.view.KeyEvent
@@ -641,11 +642,12 @@ object SessionController {
     @Volatile
     var activeStreamHeight: Int = 0
 
-    @Volatile
-    var audioSender: AudioSender? = null
-    @Volatile private var navigationAudioSender: NavigationAudioSender? = null
     private val loggedNavigationUnavailable = AtomicBoolean()
     private val audioEpoch = SessionEpoch()
+    private val carLifeAudioRoute = CarLifeAudioRoute<AirPlayClient, AudioSender, NavigationAudioSender>(audioEpoch) {
+        it.receiverIdentity() == "DELPHI AUDI 3162"
+    }
+    val audioSender: AudioSender? get() = carLifeAudioRoute.mediaSender
 
     @Volatile
     var currentClient: AirPlayClient? = null
@@ -3152,7 +3154,7 @@ object SessionController {
         var previous: AudioSender? = null
         val installed = audioEpoch.commit(lease) {
             previous = audioSender
-            audioSender = candidate
+            carLifeAudioRoute.publishMedia(lease, candidate)
             state()
         }
         if (installed) previous?.stop() else candidate.stop()
@@ -3165,8 +3167,9 @@ object SessionController {
         var watcher: Thread? = null
         val detach = {
             activeAudioHadInput = activeAudioHadInput || audioSender?.hasRealInput == true
-            previous = audioSender; audioSender = null
-            previousNavigation = navigationAudioSender; navigationAudioSender = null
+            previous = audioSender
+            previousNavigation = carLifeAudioRoute.navigationSender
+            carLifeAudioRoute.detach()
             watcher = callWatcher; callWatcher = null; callWatcherLease = null
         }
         if (owner == null) audioEpoch.clear(detach) else audioEpoch.end(owner, detach)
@@ -3175,18 +3178,23 @@ object SessionController {
         previousNavigation?.close()
     }
 
-    internal fun routeQ4NavigationAudio(
-        pcm: ByteArray, size: Int, rate: Int, channels: Int, bits: Int, source: Any, generation: Int, type: Int,
+    internal fun routeCarLifeAudio(
+        size: Int,
+        q4NavigationProbe: Boolean,
+        type: Int,
+        sourceCurrent: () -> Boolean,
+        forwardMedia: (AudioSender) -> Boolean,
+        forwardNavigation: (NavigationAudioSender) -> Unit,
     ): Boolean {
-        if (currentClient?.receiverIdentity() != "DELPHI AUDI 3162") return false
-        if (type != 0x40003) return true
-        val sender = navigationAudioSender
-        if (sender != null) {
-            sender.offer(pcm, size, rate, channels, bits, source, generation)
-        } else if (loggedNavigationUnavailable.compareAndSet(false, true)) {
+        val result = carLifeAudioRoute.dispatch(
+            currentClient, q4NavigationProbe, type, sourceCurrent, forwardMedia, forwardNavigation,
+        )
+        if (result == CarLifeAudioRoute.Result.NAVIGATION_UNAVAILABLE &&
+            loggedNavigationUnavailable.compareAndSet(false, true)
+        ) {
             appendLog("ALT-AUDIO-PROBE: dropped 9241 PCM because 101 is not active, bytes=$size")
         }
-        return true
+        return result != CarLifeAudioRoute.Result.MEDIA_UNAVAILABLE
     }
 
     /** 根据 Android 音频模式应答车机的 iAP2 通话状态查询。 */
@@ -5050,7 +5058,8 @@ object SessionController {
                                             } else {
                                                 null
                                             }
-                                            navigationAudioSender = NavigationAudioSender(host, alternate, ::appendLog, ducking).also { it.start() }
+                                            val sender = NavigationAudioSender(host, alternate, ::appendLog, ducking).also { it.start() }
+                                            carLifeAudioRoute.publishNavigation(navigationLease, sender)
                                         }
                                     }
                                 }
