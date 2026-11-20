@@ -2,6 +2,12 @@
 
 继续 EA 实验请先看 [Q4 Wi-Fi EA Ping 交接](q4-ea-ping-handover.md)：包含独立分支、手机包修订号和下轮取证步骤。
 
+## 2026-11-20 晚间 Q4 实测：延后手动申请 VIWI 仍未见状态
+
+手机包修订号 `bfbda5e862a1`（`codex/q4-ea00-retest`）。四条 Wi-Fi iAP2 链路均收到 MMI 会话 `257` 的 `0xEA03 OK`。其中三条共提交 30 次手动申请，`eadata0` 21 次、`eadata1` 9 次。两种通道分别在同一轮未见 MMI Ping 和另一轮已有 Pong 时申请，均未见匹配的 `0xEA03` 或 EA 入站。专用文件在该修订下有 33 条入站，全部属于 `257`。
+
+30 条手动申请均可在 AirPlay 控制通道的 RTSP 记录中找到，并按 CSeq 匹配到 `200 OK`。这确认车机应答了外层请求，尚不能确认内层申请分发到 VIWI 处理器或触发内部 TCP。三条手动轮次的本机 CarLife 源均已就绪或沿用已就绪的源，CarPlay 先连的独立手动对照仍未覆盖。详见[脱敏时间线](vehicle-tests/2026-11-20-q4-viwi-manual/analysis.md)。
+
 ## 2026-11-20 Q4 Wi-Fi EA Ping 实测：MMI 数据会话双向通路已验证
 
 手机日志修订号 `4bf11b18dd8a`（实验分支 `codex/q4-ea00-retest`）。CarLife 首帧先到的一轮，专用文件在 16:34:34.133–16:41:38.691 保存 85 条周期性入站，间隔约 5 秒；已保留的普通日志缺该轮申请、回执和发送明细。CarPlay 先连的一轮，Wi-Fi 认证后申请三个协议，仅 MMI 会话 257 在 133 ms 后收到 `0xEA03 SessionStatusOK`；CarLife 首帧在首个 EA 回包约 39 秒后到达。

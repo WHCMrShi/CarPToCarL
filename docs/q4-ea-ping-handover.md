@@ -1,13 +1,13 @@
 # Q4 Wi-Fi EA Ping 实验交接
 
-2026-11-20 · MMI 的 Wi-Fi EA Ping 已获得稳定入站应答。下一轮用相同测试包做关闭与开启 Ping 的对照，补齐 CarLife 先启动场景的完整发送和回执记录。
+2026-11-20 晚间 · 已验证手动申请确实提交。两条 VIWI 通道在已有 Pong 的情况下仍未见状态，车机侧处理结果待取证。
 
 ## 从哪个分支继续
 
 | 项目 | 位置 |
 | --- | --- |
 | 源码 | [`WHCMrShi/CarPToCarL` 的 `codex/q4-ea00-retest`](https://github.com/WHCMrShi/CarPToCarL/tree/codex/q4-ea00-retest)，从 Q4 基线 `86f4d21` 单独建立 |
-| 手机已装 | Debug `1.2.31-q4-debug`，源码修订号 `4bf11b18dd8a`；覆盖安装后已核对 APK 哈希和私有采集文件的启动标记 |
+| 手机已装 | Debug `1.2.31-q4-debug`，源码修订号 `bfbda5e862a1`；覆盖安装后已核对 APK 哈希和私有采集文件的启动标记 |
 | Ping 实现 | `a29c76f`；本机离线单测、lint 和 Debug APK 构建通过，已用 `4bf11b18dd8a` 实车取证 |
 | 本交接与实车证据 | `codex/audi-q4-etron`；仅文档，未合入实验代码 |
 
@@ -17,17 +17,18 @@
 
 - 早期两轮在蓝牙上提交六条 `0xEA00`，没有观测到 `0xEA03`。[脱敏记录](vehicle-tests/2026-11-20-q4-ea00-retest/analysis.md)
 - Wi-Fi 版 `e79f865f70ac` 在 CarPlay 先连的一轮中，经 Wi-Fi iAP2 认证后提交三条申请。只有 `de.audi.mmiconnectdatatransfer`（协议 ID 1、EA 会话 ID 257）在约 161 ms 后收到 `SessionStatusOK`。`eadata0`（258）和 `eadata1`（259）未见状态，不判拒绝。回执早于 CarLife 接入及 `disableBluetooth`。[脱敏记录](vehicle-tests/2026-11-20-q4-wifi-ea/analysis.md)
-- 加入 Ping 前的 Wi-Fi 样本中，正文文件只有启动标记。最新版实车样本记录到 492 条 MMI 入站，其中 CarPlay 先连的一轮有 407 次可逐条配对的 Ping 应答。CarLife 首帧先到的一轮有 85 条周期性入站，发送与回执明细未保留。[脱敏时间线](vehicle-tests/2026-11-20-q4-wifi-ea-ping/analysis.md)
+- 下午的实车样本记录到 492 条 MMI 入站，其中 CarPlay 先连的一轮有 407 次可逐条配对的 Ping 应答。CarLife 首帧先到的一轮有 85 条周期性入站，发送与回执明细未保留。[脱敏时间线](vehicle-tests/2026-11-20-q4-wifi-ea-ping/analysis.md)
+- 晚间的手动测试包共提交 30 次 VIWI 申请。实车日志中四条 Wi-Fi 链路各收到一次 MMI 状态，EA 专用文件另有 33 条 MMI 入站。两条 VIWI 会话路径仍未见状态或数据。[手动申请时间线](vehicle-tests/2026-11-20-q4-viwi-manual/analysis.md)
 
 ## 当前测试包行为
 
-Wi-Fi iAP2 协商、识别和认证后，使用同一链路当次声明的协议 ID 经**控制会话**申请 EA，不等 `disableBluetooth`，不回退蓝牙。只有同连接的 MMI 申请收到匹配的 `SessionStatusOK` 且「EA Ping」打开，才经协商的 Wi-Fi **EA 数据会话**每 5 秒提交一个字节 `00`；外层数据报另带两字节 EA 会话 ID。链路不可写就跳过，不补发。开关默认关，关闭开关、收到 `SessionClose` 或断链即停。现有样本支持一字节 Ping 应答，协议定义与车辆数据语义待验证。
+Wi-Fi iAP2 认证后自动申请 MMI 会话。两条 VIWI 协议各有一个手动按钮，每次只提交一次 `0xEA00`，使用当次声明的协议 ID 和从 `258` 起递增的会话 ID。界面提示任意 Wi-Fi `0xEA03` 以及非 MMI EA 入站。收到匹配的 MMI `SessionStatusOK` 且打开「EA Ping」后，约每 5 秒发送一次 Ping。开关默认关，关闭开关、收到 `SessionClose` 或断链即停。
 
 实验分支的代码入口：`VirtualIap2Link.updateEaPingLocked` 决定何时发，`Iap2LinkEngine.sendEaPing` 构造链路数据报，`EaPayloadLog` 保存入站正文。
 
 ## 下次停车实测
 
-1. 分别记录 **CarPlay 先连接**和 **CarLife 先启动**两轮的启动顺序与时间。匹配的 MMI 正常状态到达后，用「使用车机 GPS」下方的 **EA Ping** 开关做关闭、开启、再关闭的对照，每段各留出多个周期，并记录切换时间。
+1. 记录 **CarPlay 先连接**和 **CarLife 先启动**的次序、点击时间和 Ping 开关状态。若能拿到车机侧诊断日志，按会话 ID 核对申请是否进入 `CIAP2EAPProtocolViwi` 及内部 TCP 连接结果。每条新链路先用少量申请，避免历史会话条目影响后续结果。
 2. 用 USB 接回手机、允许调试。通过 Debug 包的 `run-as` 读取两份应用私有文件；不用在手机手动导出：
 
    ```powershell
