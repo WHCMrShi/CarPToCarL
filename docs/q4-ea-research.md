@@ -148,3 +148,14 @@ Apple 公开模型是系统使配件可见，客户端为配件的协议请求�
 协议名在配件声明的 SupportedExternalAccessoryProtocol 分组里有独立的位置。更早的 `d0cf756` 父版本曾按 uint16 编码参数 1，值复用了协议号。字段表没有规定会话标识必须等于协议号。[字段导出](https://github.com/catplay-labs/catplay/blob/ca30c1365ea9bad931143097079ea388243542f8/core/catplay_csm/src/msg/iap2.rs#L5265-L5273) · [发送逻辑的历史变更](https://github.com/WHCMrShi/CarPToCarL/commit/d0cf756c9b71c3d3e4182d159c56b9157e8d85b4)
 
 11 月 5 日的脱敏记录保留了发送事件，缺少 APK 提交号与逐字节申请体。代码差异已能确认，Q4 当时收到的具体值及未建会话的原因仍未知。[车测记录与基线说明](vehicle-tests/2026-11-05-q4/README.md)
+
+### myAudi 5.9 的会话工厂从哪里取得协议名
+
+本轮复核用户提供的同一份 IPA，地址分别属于 OneTouch 主程序和内嵌 PDICarKit，各为对应镜像的未滑移地址。
+
+- **OneTouch 的 MMI 路径。** `AAFEABackgroundStrategy` 的 `dataTransferProtocolFromAccessory:`（`0x10480ad38`）遍历当前配件的 `protocolStrings`，返回首个以 `datatransfer` 结尾的原始字符串，无匹配则返回 nil。`startMFISession:isReconnect:` 在 `0x10480afcc` 调用该方法，将结果传给 `0x10480aff0` 的 Apple 会话初始化器，并在 `0x10480b020` 检查返回对象。检查已连接配件和处理配件连接通知的代码都有通向这个方法的调用点。若 iOS 提供的列表与 11 月 5 日 Q4 声明的三个名称相同，唯一匹配项是 `de.audi.mmiconnectdatatransfer`。这条结论只在进入该路径时成立。
+- **OneTouch 的协议集合。** 主程序另有两组协议名，一组含 `technology.cariad.car2phone` 与 MMI 协议，另一组含两个 eadata 协议。`0x1010aa9cc` 所在函数读取已连接配件的协议列表并做集合匹配。集合匹配返回布尔值，上述 MMI 会话初始化器的字符串来自重新读取配件列表。
+- **PDICarKit 的 eadata 路径。** `VEATNetworkController` 先用 `eadata0`、再用 `eadata1` 调用同一构造函数 `0x1b4298`，各保存一个 `TunnelManager`。构造函数在 `0x1b4860` 存入各自的协议名。会话启动函数从当前管理器的同一字段读取字符串，其中一条调用边为 `0x1b78b8 → 0x1c2b90`。下游通过闭包转交该字符串，在 `0x1514d0` 调用配件的 `createTMSessionWith:`；对于系统 EAAccessory，该实现经 `0x14eb8c` 调 Apple 初始化器。
+- **首次顺序。** 已核实两个 eadata 管理器的构造和设置委托都有先后。`CarKit.connect()` 在 `0x11e040` 提交异步工作，后续通过连接管理器的协议接口分派。尚未将上述初始化顺序证明为调用 Apple 初始化器的顺序，也未取得两条路径在同一次连接中的先后或首次返回非空的记录。
+
+OneTouch 的 Wi-Fi 后台服务配置调用 `AAFWiFiServicesManager.configure:`（`0x10001f090`），经后台管理器创建上述 EA 策略，注册配件通知。另有两处主程序调用 PDICarKit 的 `CarKit.connect()`（`0x104700160`、`0x104700e58`）。尚未发现后台服务配置与这两处调用之间强制规定先后的调用边。就 CarKit 自身而言，公开入口传入的常量能确定分派的方法槽，实际的连接管理器来自实例字段。在 `CKVEATConnectionManager` 实现中还会按当前连接状态分支（`0x5b674`）；截至该处，尚未确定本次将启动哪个隧道管理器。
