@@ -10,6 +10,7 @@ import io.github.shaonialife.carptocar.audio.AudioTuning
 import io.github.shaonialife.carptocar.iap2.CarPlayNowPlaying
 import io.github.shaonialife.carptocar.iap2.Iap2Csm
 import io.github.shaonialife.carptocar.iap2.Iap2LinkPacket
+import io.github.shaonialife.carptocar.iap2.Iap2SubscriptionReplies
 import io.github.shaonialife.carptocar.iap2.Iap2MessageIds
 import io.github.shaonialife.carptocar.iap2.Iap2SenderSession
 import io.github.shaonialife.carptocar.net.EndpointHosts
@@ -1961,6 +1962,8 @@ class AirPlayClient(
                     alive = { resources === scope && !scope.isClosed && socket?.isClosed == false },
                     nowPlayingProvider = { nowPlayingSource?.invoke() },
                     callStateProvider = { callStateSource?.invoke() ?: 0 },
+                    phoneListContext = context?.applicationContext?.takeIf { receiverIdentity() == "DELPHI AUDI 3162" },
+                    startPhoneListWorker = { task -> scope.start("airplay-phone-lists", body = task) },
                     onAuthenticationFailure = {
                         scope.start("airplay-mfi-failure") {
                             if (owner != null) failMfiIfCurrent(owner, scope, generation)
@@ -2047,6 +2050,14 @@ class AirPlayClient(
         }
     private var controlIapCount = 0
 
+    private fun isPhoneListFrame(frame: ByteArray): Boolean {
+        val start = Iap2LinkPacket.HEADER_BYTES
+        return frame.size >= start + Iap2Csm.HEADER_BYTES &&
+            frame[start] == 0x40.toByte() && frame[start + 1] == 0x40.toByte() &&
+            ((frame[start + 4].toInt() and 0xff) shl 8 or (frame[start + 5].toInt() and 0xff)) ==
+            Iap2SubscriptionReplies.LIST_UPDATE
+    }
+
     fun postControlIap(frame: ByteArray) {
         val scope = resources
         if (disposed || cancelled || scope.isClosed) return
@@ -2068,6 +2079,7 @@ class AirPlayClient(
                             body,
                             contentType = "application/x-apple-binary-plist",
                             expectedScope = scope,
+                            traceBody = !isPhoneListFrame(frame),
                         )
                     controlIapCount++
                     // Q4 returns a nonempty plist even for ordinary ACKs; it must not bypass sampling.
@@ -3555,6 +3567,7 @@ class AirPlayClient(
         contentType: String = "application/octet-stream",
         extraHeaders: List<Pair<String, String>> = emptyList(),
         expectedScope: ConnectionResources? = null,
+        traceBody: Boolean = true,
         beforeWrite: (() -> Unit)? = null,
     ): Pair<String, ByteArray> {
         if (cancelled || disposed || closingConnection || Thread.currentThread().isInterrupted) throw IOException("连接已退役")
@@ -3581,12 +3594,13 @@ class AirPlayClient(
                         "Content-Length: ${body.size}\r\n" +
                         "\r\n"
                 val plaintext = head.toByteArray(Charsets.US_ASCII) + body
-                io.github.shaonialife.carptocar.util.RtspDump.tx("$method $path", head, body)
+                val diagnosticBody = if (traceBody) body else byteArrayOf()
+                io.github.shaonialife.carptocar.util.RtspDump.tx("$method $path", head, diagnosticBody)
                 val encryption = cipher
                 SessionTrace.rtsp(
                     SessionTrace.Dir.TX,
                     "airplay-ctrl",
-                    head + SessionTrace.binary(body),
+                    head + SessionTrace.binary(diagnosticBody),
                 )
                 val wire =
                     if (encryption != null) {

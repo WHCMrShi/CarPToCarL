@@ -32,6 +32,7 @@ import io.github.shaonialife.carptocar.bt.CarApproachPrefs
 import io.github.shaonialife.carptocar.bt.CarApproachReceiver
 import io.github.shaonialife.carptocar.bt.TargetDevicePrefs
 import io.github.shaonialife.carptocar.carlife.CarGpsOption
+import io.github.shaonialife.carptocar.iap2.AndroidPhoneLists
 import io.github.shaonialife.carptocar.carlife.CarLifeHijack
 import io.github.shaonialife.carptocar.carlife.CarLifeHuClient
 import io.github.shaonialife.carptocar.input.CarInputClient
@@ -952,6 +953,8 @@ class MainActivity : AppCompatActivity() {
         ctaButton.alpha = if (blocked) CTA_BLOCKED_ALPHA else 1f
     }
 
+    private val phoneListPermissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+
     private fun bindDisplayCard() {
         val navigationSwitch = findViewById<SwitchCompat>(R.id.switchInstrumentNavigation)
         io.github.shaonialife.carptocar.media.NavigationNowPlaying.ensure(this)
@@ -969,6 +972,16 @@ class MainActivity : AppCompatActivity() {
             CarGpsOption.save(ctx, checked)
             SessionController.onCarGpsOptionChanged()
             snack(if (checked) "已启用：车机 GPS、车速与挡位" else "已关闭：停止转发车机定位、车速与挡位")
+        }
+
+        val phoneListsSwitch = findViewById<SwitchCompat>(R.id.switchPhoneLists)
+        phoneListsSwitch.isChecked = AndroidPhoneLists.enabled
+        phoneListsSwitch.setOnCheckedChangeListener { _, checked ->
+            AndroidPhoneLists.save(this, checked)
+            if (checked) {
+                val missing = AndroidPhoneLists.permissions.filterNot { AndroidPhoneLists.hasPermission(this, it) }
+                if (missing.isNotEmpty()) phoneListPermissions.launch(missing.toTypedArray())
+            }
         }
 
         // 目标帧率没有设置项：车机 /info 报 maxFPS 就跟随，没报按 60（见 video/StreamFps.kt）。

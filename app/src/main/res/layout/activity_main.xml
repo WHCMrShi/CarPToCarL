@@ -562,6 +562,18 @@
                                         android:textColor="@color/m3_on_surface"
                                         android:textSize="16sp" />
                                 </LinearLayout>
+                                <androidx.appcompat.widget.SwitchCompat
+                                    android:id="@+id/switchPhoneLists"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:minHeight="48dp"
+                                    android:thumb="@drawable/sw_thumb"
+                                    app:track="@drawable/sw_track"
+                                    app:switchMinWidth="48dp"
+                                    app:switchPadding="16dp"
+                                    android:text="@string/phone_list_sync"
+                                    android:textColor="@color/m3_on_surface"
+                                    android:textSize="16sp" />
 
                             </LinearLayout>
                             <LinearLayout

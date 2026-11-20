@@ -14,6 +14,8 @@ import io.github.shaonialife.carptocar.iap2.Iap2SubscriptionReplies
 import io.github.shaonialife.carptocar.iap2.MfiLengthMemory
 import io.github.shaonialife.carptocar.iap2.NmeaLocation
 import io.github.shaonialife.carptocar.iap2.NowPlayingUpdates
+import io.github.shaonialife.carptocar.iap2.AndroidPhoneLists
+import io.github.shaonialife.carptocar.iap2.PhoneListUpdate
 import io.github.shaonialife.carptocar.input.ConsumerKeys
 import io.github.shaonialife.carptocar.util.SessionTrace
 import java.security.SecureRandom
@@ -74,6 +76,8 @@ class VirtualIap2Link(
     /** Must only enqueue owner-scoped recovery; invoked under the link lock, at most once. */
     private val onAuthenticationFailure: (() -> Unit)? = null,
     private val onAuthenticationComplete: (() -> Unit)? = null,
+    private val phoneListContext: Context? = null,
+    private val startPhoneListWorker: ((() -> Unit) -> Unit)? = null,
 ) : AutoCloseable {
     @Volatile private var closed = false
     private val pacer: Thread
@@ -83,6 +87,7 @@ class VirtualIap2Link(
     private var frameCount = 0
     private var started = false
     private val nowPlayingUpdates = NowPlayingUpdates()
+    private var pendingPhoneListRequest: PhoneListUpdate.Request? = null
     private val nowPlayingLog = io.github.shaonialife.carptocar.util.LogThrottle(10_000, nowMillis)
 
     private fun noteNowPlayingAttempt(value: CarPlayNowPlaying, accepted: Boolean) {
@@ -280,6 +285,34 @@ class VirtualIap2Link(
     /** 应答车机的通话状态订阅。 */
     private fun sendCallStateLocked(state: Int) {
         sendCsmLocked(CALL_STATE_UPDATE, Iap2Csm.param(CALL_STATE_PARAM, byteArrayOf(state.toByte())))
+    }
+
+    private fun answerPhoneListLocked(body: ByteArray) {
+        val context = phoneListContext
+        val start = startPhoneListWorker
+        val request = PhoneListUpdate.Request.parse(body)
+        val empty = Iap2SubscriptionReplies.idleBodyFor(LIST_UPDATE)!!
+        if (context == null || start == null || !AndroidPhoneLists.enabled ||
+            (request.recents == null && request.favorites == null)
+        ) {
+            pendingPhoneListRequest = null
+            sendCsmLocked(LIST_UPDATE, empty)
+            return
+        }
+        if (pendingPhoneListRequest == request) return
+        pendingPhoneListRequest = request
+        val budget = engine.controlPayloadLimit - Iap2Csm.HEADER_BYTES
+        start {
+            val result = PhoneListUpdate.encode(AndroidPhoneLists.read(context, request), budget)
+            synchronized(lock) {
+                if (pendingPhoneListRequest === request) {
+                    pendingPhoneListRequest = null
+                    if (!closed && alive()) {
+                        sendCsmLocked(LIST_UPDATE, if (AndroidPhoneLists.enabled) result else empty)
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -541,7 +574,9 @@ class VirtualIap2Link(
             "IAPLINK: 隧道 tx 0x${messageId.toString(16)} " +
                 "(${Iap2MessageIds.nameOf(messageId)}) ${frame.size}B ok=$ok",
         )
-        SessionTrace.csm(SessionTrace.Dir.TX, "tunnel", messageId, body, if (ok) "" else "send-failed")
+        if (messageId != LIST_UPDATE) {
+            SessionTrace.csm(SessionTrace.Dir.TX, "tunnel", messageId, body, if (ok) "" else "send-failed")
+        }
     }
 
     /** 直接投递完整 CSM 帧（Frida 抓的逐字节常量，勿重新编码）。 */
@@ -735,15 +770,10 @@ class VirtualIap2Link(
 
             START_LIST_UPDATES -> {
                 if (!mib3) return
-                sendCsmLocked(
-                    LIST_UPDATE,
-                    Iap2Csm.param(0x0000, byteArrayOf(0)) +
-                        Iap2Csm.param(0x0002, byteArrayOf(0, 0)) +
-                        Iap2Csm.param(0x0005, byteArrayOf(0)) +
-                        Iap2Csm.param(0x0007, byteArrayOf(0, 0)),
-                )
-                log("IAPLINK: MIB3 0x4170 → 0x4171（空列表）")
+                answerPhoneListLocked(frame.body)
             }
+
+            Iap2MessageIds.STOP_LIST_UPDATES -> pendingPhoneListRequest = null
 
             Iap2MessageIds.START_NOW_PLAYING_UPDATES -> {
                 if (!mib3) return

@@ -368,7 +368,7 @@ class Iap2LinkEngine(
         awaitAck: Boolean = true,
     ): Boolean {
         if (state == State.DEAD) return false
-        val limit = (peerSynchronization?.maxLength ?: 0xFFFF) - HEADER_BYTES - 1
+        val limit = controlPayloadLimit
         if (limit <= 0 || bytes.size > limit) {
             die("control payload ${bytes.size} exceeds negotiated limit $limit")
             return false
@@ -377,6 +377,9 @@ class Iap2LinkEngine(
         drainSendWindow(nowMillis)
         return true
     }
+
+    internal val controlPayloadLimit: Int
+        get() = (peerSynchronization?.maxLength ?: 0xFFFF) - HEADER_BYTES - 1
 
     /** 文件数据使用协商会话及共享可靠链路；文件层 START/SUCCESS 超时由上层独立处理。 */
     val fileTransferSessionId: Int? get() {
