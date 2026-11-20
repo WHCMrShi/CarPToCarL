@@ -38,3 +38,17 @@
 架构评估：跨平台官方实例值得研究，但本地 Wi-Fi、可见的车型数据和 EA 是三个不同命题。目前不对任何候选作“已匹配 Q4 协议”的标记。Android 端先建模**有证据的客户端职责**；进入消息级 mock 的依据应是可核验的应用协议声明和受支持的会话语义，而不是商店 ID、相似品牌名或其他车型的传输方式。
 
 定向复核：用三个完整协议名分别交叉查找 App 属性清单、EASession、发行资料和公开源码。命中项包括车机声明、第三方代码中的字符串，以及同源的[上游说明](https://github.com/jjuugk/CarPToCarL/blob/4a415c2f6b53222ab1613df496f18e39786a8ecd/README.md)，没有取得发行方的「App 版本 → Q4 协议名」声明。旧 MMI connect 商店快照未取得，结论是**映射未知**，而非“不支持”。下一项取证只收能新增这种映射的材料或受支持会话的正例；不把重复转载当独立佐证。
+
+### 历史 MMI connect iOS：已补到商店原页，仍缺包内声明
+
+EA 研究员随后取得同一 Apple 条目 `570608111` 的三个网页归档，补上了上一轮的快照缺口：
+
+| 来源 | 版本锚点 | 证据范围 |
+| --- | --- | --- |
+| [英区商店快照](https://web.archive.org/web/20140629120527/https://itunes.apple.com/gb/app/mmi-connect/id570608111?mt=8) | 1.2，2014-04-10 | Details 中的版本与更新日期。 |
+| [德区商店快照](https://web.archive.org/web/20150602172807/https://itunes.apple.com/de/app/audi-mmi-connect/id570608111?mt=8) | 1.4.0，2015-04-28 | Audi 名下的同一商店条目。 |
+| [美区商店快照](https://web.archive.org/web/20180711162448/https://itunes.apple.com/us/app/mmi-connect/id570608111) | 2.9.0，2017-12-18；2.9.3，2018-07-08 | Version History 中 2.9.0 明确提到 MMI Wi-Fi；2.9.3 是快照所列最新版本，不能认定为最终版。 |
+
+**版本判定：** 没有取得上述版本主应用的 Info.plist。商店页本身不列出完整的应用协议清单，不能据此断言某版有或没有声明。**会话判定：** 没有找到同一版本、精确协议名、对端接受本地会话三者可对应的公开记录。[Audi of America 技术通告 2039054/1，第 1 页](https://static.nhtsa.gov/odi/tsbs/2014/SB-10066418-2280.pdf) 将 A3 MIB High 的 MMI connect 本地音乐路径明确描述为 Wi-Fi UPnP，因此不能用音乐播放成功代替 EA 成功证据；这也不能排除该 App 的其他功能使用 EA。
+
+**下一步：** 优先取来源可核验的 iOS 2.9.0 或 2.9.3 原始主应用 Info.plist（早期版本亦有价值）。同时记录来源、版本和构建号，逐字核对 UISupportedExternalAccessoryProtocols 数组；无需运行 App 或解密可执行文件。仅命中一个包能证明该构建声明过，不能证明它是首个声明版本，更不能证明该会话在 Q4 被接受。未取得上述材料，本轮没有启动二进制分析或新实车实验。
