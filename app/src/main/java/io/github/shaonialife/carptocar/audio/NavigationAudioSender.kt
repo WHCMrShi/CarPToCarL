@@ -214,7 +214,8 @@ internal class NavigationAudioSender(
     }
 
     private fun packetizeSpeech(resampler: OboeSpeechResampler) {
-        val frame = ByteBuffer.allocate(PACKET_BYTES).order(ByteOrder.LITTLE_ENDIAN)
+        var frame = ByteArray(PACKET_BYTES)
+        var frameOffset = 0
         var previous: Block? = null
         var frameAtNs = 0L
         var startsPrompt = true
@@ -226,14 +227,19 @@ internal class NavigationAudioSender(
             val accepted = synchronized(rtpLock) {
                 if (closed) return
                 if (rtpQueue.size >= MAX_PENDING_RTP) false else {
-                    rtpQueue.addLast(RtpWork.Packet(frame.array().copyOf(), frameAtNs, startsPrompt))
+                    rtpQueue.addLast(RtpWork.Packet(frame, frameAtNs, startsPrompt))
                     rtpLock.notify()
                     true
                 }
             }
-            frame.clear()
-            if (accepted) startsPrompt = false
-            else if (rtpQueueDrops.incrementAndGet() == 1) log("ALT-AUDIO-PROBE: dropped PCM before RTP: output queue full")
+            frameOffset = 0
+            if (accepted) {
+                // The RTP worker owns the queued array.
+                frame = ByteArray(PACKET_BYTES)
+                startsPrompt = false
+            } else if (rtpQueueDrops.incrementAndGet() == 1) {
+                log("ALT-AUDIO-PROBE: dropped PCM before RTP: output queue full")
+            }
         }
 
         fun endPrompt(reportIdle: Boolean) {
@@ -249,8 +255,8 @@ internal class NavigationAudioSender(
         }
 
         fun finishPrompt() {
-            if (frame.position() > 0) {
-                frame.array().fill(0, fromIndex = frame.position())
+            if (frameOffset > 0) {
+                frame.fill(0, fromIndex = frameOffset)
                 queuePacket()
             }
             endPrompt(reportIdle = true)
@@ -267,7 +273,7 @@ internal class NavigationAudioSender(
             }
             if (System.nanoTime() - block.atNs > MAX_AUDIO_AGE_NS) {
                 reject("9241 block older than 250ms")
-                frame.clear()
+                frameOffset = 0
                 resampler.reset()
                 previous = null
                 endPrompt(reportIdle = false)
@@ -276,15 +282,18 @@ internal class NavigationAudioSender(
             if (prior != null && (prior.source !== block.source || prior.generation != block.generation ||
                     prior.rate != block.rate || prior.channels != block.channels)
             ) {
-                frame.clear()
+                frameOffset = 0
                 resampler.reset()
                 startsPrompt = true
             }
             previous = block
             fun write(sample: Short) {
-                if (frame.position() == 0) frameAtNs = block.atNs
-                frame.putShort(sample)
-                if (!frame.hasRemaining()) queuePacket()
+                if (frameOffset == 0) frameAtNs = block.atNs
+                val value = sample.toInt()
+                // PcmPacketSealer consumes little-endian PCM.
+                frame[frameOffset++] = value.toByte()
+                frame[frameOffset++] = (value ushr 8).toByte()
+                if (frameOffset == PACKET_BYTES) queuePacket()
             }
             if (block.rate == SAMPLE_RATE) {
                 val pcm = ByteBuffer.wrap(block.pcm).order(ByteOrder.LITTLE_ENDIAN)
