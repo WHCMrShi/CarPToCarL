@@ -2285,6 +2285,7 @@ object SessionController {
                                     timeoutMillis = SPECIFIER_JOIN_TIMEOUT_MS,
                                     graceMillis = SPECIFIER_JOIN_GRACE_MS,
                                     isCancelled = { cancelled() },
+                                    onWifiDisabled = { if (!cancelled()) phaseHint = "请打开手机 Wi-Fi" },
                                 )
                             }
                         } catch (error: Exception) {
