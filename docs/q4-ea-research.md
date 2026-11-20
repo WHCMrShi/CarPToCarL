@@ -120,3 +120,17 @@ Apple 公开模型是系统使配件可见，客户端为配件的协议请求�
 **实施决定：不恢复旧模块，不写首发或首推猜测。** 阻塞点先于车辆字段：IPA 在建会话处把配件与协议名交给 Apple 系统实现，所查资料未提供 Android 手机端适用的 Q4 接入契约；事后分发代码也不能倒推出这一步。Android Auto 投屏的公开车况 API、运行于车机的 AAOS 应用接口与通用 VIWI 说明，均不是这一 EA 会话的实现或验证，未作为替代目标。
 
 **重新进入实现的门槛。** 优先取得适用于目标 MMI 与当前客户端角色的授权接口说明、SDK 或带会话建立与入站读例程的参考客户端。若先取得可合法分析的成功会话状态记录，则可先消除时序歧义，但它本身不是 Android 接入契约。最终验收仍是本应用能将车机接受的协议会话与其非空入站数据关联；应区分运输层握手字节与车辆来源的应用消息，不以 ACK、系统 API 成功或已有数据显示代替。
+
+### 外部正例筛选：角色相同，不等于验收到了同一层
+
+本轮不用 Q4 失败样本推导成功时序，也不把上游派生实现当独立正例。
+
+| 外部原始来源 | 哪一端、验证到哪里 | 不能填的空白 |
+| --- | --- | --- |
+| [ST UM2077 §14.3–14.4](https://www.st.com/resource/en/user_manual/dm00304278-spbt3-0dpx-data-package-stmicroelectronics.pdf#page=51) | 蓝牙配件厂商分别记录 iAP2 连接就绪、iOS App 打开会话后配件报告会话开始，另节展示应用启动。 | 是配件侧事件，不是手机协议栈线上的互操作规范。 |
+| [Emlid Reach RX 集成说明](https://docs.emlid.com/reachrx/developer-resources/api-integration-intro/) 与 [iOS 源码](https://github.com/emlid/ReachMFiExample) | 真 iPhone 上的 App 与 GNSS 配件，经本地 EA 读取定位数据。公开、可识别的应用层数据是比本地写成功更强的验收判据。 | 会话仍由 iOS 创建，对端不是 CarPlay 车机。 |
+| [AA2ACP 真实车机测试范围](https://github.com/jrammler/aa2acp/blob/main/TESTING.md#verified-state) | 对车机扮演手机；项目将已验证范围列至无线引导及 AirPlay 初始会话。 | 没有列出 EA 应用会话、首个应用数据或双端对应记录。 |
+| [OrangeCar](https://github.com/sbuysse/orangecar/tree/main/carplay)、[CatPlay 发送端快照](https://github.com/catplay-labs/catplay/blob/ca30c1365ea9bad931143097079ea388243542f8/catplay_carplay_tx_gadget/src/carplay_client_session.rs) | 有替代手机端源码或投屏记录。 | 本轮未取得二者发送端的 EA 应用数据验收。测试车机兼容、存在协议常量，均不能替代它。 |
+| [Apple CarPlay Simulator](https://developer.apple.com/documentation/carplay/testing-your-app-in-carplay-simulator) | 模拟车机环境，连接真实 iPhone。 | 不是实现 iPhone 端 iAP2 的模拟器。 |
+
+独立评估：可坐实“连接就绪、应用启动、会话被接受、应用读到数据”是不同事件；不可跨项目把投屏成功与配件数据读取拼成一个替代手机端的 EA 正例。外部资料尚不足以归因到上游漏掉了某一特定报文。后续证据以独立实现的 **发送端 EA 专项测试、已执行的互操作用例或适用的手机角色规范** 为准。
