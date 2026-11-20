@@ -166,7 +166,11 @@ class Iap2LinkEngine(
     var onUnknownSessionData: ((Int, Int) -> Unit)? = null
 
     internal val eaLinkSessionId: Int?
-        get() = adoptedSynchronization?.sessions?.singleOrNull { it.kind == 2 && it.version == 1 }?.id
+        get() {
+            val sessions = adoptedSynchronization?.sessions ?: return null
+            return sessions.singleOrNull { it.kind == 2 && it.version == 1 }?.id
+                ?.takeIf { id -> id > 0 && sessions.count { it.id == id } == 1 }
+        }
 
     internal var onEaDiagnostic: ((String) -> Unit)? = null
     internal var onEaPayload: ((linkSession: Int, sequence: Int, payload: ByteArray) -> Unit)? = null
@@ -384,6 +388,20 @@ class Iap2LinkEngine(
         return true
     }
 
+    internal fun sendEaPing(session: Int): Boolean {
+        val linkSession = eaLinkSessionId ?: return false
+        val peer = peerSynchronization ?: return false
+        if (session !in 0..0xffff || state != State.NORMAL || sendBacklog.isNotEmpty() ||
+            peer.maxLength < HEADER_BYTES + 4 || declaredMaxOutgoing < 1
+        ) return false
+        if (lastSentAcknowledged?.let { sequenceDistance(sentSequence, it) >= declaredMaxOutgoing } == true) return false
+        val payload = byteArrayOf((session ushr 8).toByte(), session.toByte(), 0x00)
+        sentSequence = nextSequence(sentSequence)
+        writePacket(payload, sentSequence, CONTROL_ACKNOWLEDGEMENT, linkSession)
+        if (peer.maxRetransmissions == 0) lastSentAcknowledged = sentSequence
+        return true
+    }
+
     /** 文件数据使用协商会话及共享可靠链路；文件层 START/SUCCESS 超时由上层独立处理。 */
     val fileTransferSessionId: Int? get() {
         val sessions = peerSynchronization?.sessions ?: return null
@@ -581,13 +599,12 @@ class Iap2LinkEngine(
         if (isDataFrame) {
             if (sessionId == eaLinkSessionId) {
                 val data = requireNotNull(payload)
+                handleData(sequence, data, ea = true)
                 val detail = if (data.size < 2) "missing-session-id len=${data.size}"
                     else "session=${readU16(data, 0)} dataBytes=${data.size - 2}"
                 onEaDiagnostic?.invoke("RX WiFi data linkSession=$sessionId seq=$sequence $detail")
                 onEaPayload?.invoke(sessionId, sequence, data)
-            }
-            // 控制消息的会话 ID：本国表 10 或采纳表（Audi=1；测试台两者一致）
-            if (sessionId == SESSION_CONTROL || sessionId == adoptedPeerControlSessionId) {
+            } else if (sessionId == SESSION_CONTROL || sessionId == adoptedPeerControlSessionId) {
                 // 收到对端的数据即代表对端认为链路可用；ACK 帧若丢失/被跳过，这里兜底进入 NORMAL
                 completeNegotiationIfPending(nowMillis)
                 handleData(sequence, payload!!)
@@ -731,6 +748,7 @@ class Iap2LinkEngine(
         sequence: Int,
         payload: ByteArray,
         fileTransfer: Boolean = false,
+        ea: Boolean = false,
     ) {
         val distance = sequenceDistance(sequence, lastReceivedInOrder)
         val peerWindow = peerSynchronization?.maxOutgoing ?: maxOutgoing
@@ -741,6 +759,10 @@ class Iap2LinkEngine(
         // RFCOMM 为可靠有序流，不会丢包；序号跳变只可能是对端把 ACK/SYN 也计入了序号
         // （各家实现账法不一致）。因此接受任意前进量并推进水位，避免死锁式丢帧。
         lastReceivedInOrder = sequence
+        if (ea) {
+            sendAcknowledgement()
+            return
+        }
         if (pendingEvents.size >= 256) {
             die("event queue overflow")
             return

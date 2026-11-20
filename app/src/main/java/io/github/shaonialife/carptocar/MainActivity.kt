@@ -32,6 +32,7 @@ import io.github.shaonialife.carptocar.bt.CarApproachPrefs
 import io.github.shaonialife.carptocar.bt.CarApproachReceiver
 import io.github.shaonialife.carptocar.bt.TargetDevicePrefs
 import io.github.shaonialife.carptocar.carlife.CarGpsOption
+import io.github.shaonialife.carptocar.iap2.EaPingOption
 import io.github.shaonialife.carptocar.carlife.CarLifeHijack
 import io.github.shaonialife.carptocar.carlife.CarLifeHuClient
 import io.github.shaonialife.carptocar.input.CarInputClient
@@ -970,6 +971,9 @@ class MainActivity : AppCompatActivity() {
             SessionController.onCarGpsOptionChanged()
             snack(if (checked) "已启用：车机 GPS、车速与挡位" else "已关闭：停止转发车机定位、车速与挡位")
         }
+        val eaPingSwitch = findViewById<SwitchCompat>(R.id.switchEaPing)
+        eaPingSwitch.isChecked = EaPingOption.enabled
+        eaPingSwitch.setOnCheckedChangeListener { _, checked -> EaPingOption.save(ctx, checked) }
 
         // 目标帧率没有设置项：车机 /info 报 maxFPS 就跟随，没报按 60（见 video/StreamFps.kt）。
         // 这里先按默认 60 起，等 SETUP 拿到车机值后由 SessionController 覆盖。

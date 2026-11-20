@@ -56,6 +56,7 @@ class VirtualIap2LinkTest {
         var nowPlaying: CarPlayNowPlaying? = null
         var authenticationFailures = 0
         var authenticationCompletions = 0
+        var eaPingEnabled = false
         val link =
             VirtualIap2Link(
                 log = { },
@@ -74,6 +75,7 @@ class VirtualIap2LinkTest {
                 nowPlayingProvider = { nowPlaying },
                 onAuthenticationFailure = { authenticationFailures++ },
                 onAuthenticationComplete = { authenticationCompletions++ },
+                eaPingEnabled = { eaPingEnabled },
             )
         var clock = 0L
         var now = 1L
@@ -378,6 +380,59 @@ class VirtualIap2LinkTest {
             Iap2Csm.parseParams(request.body),
         )
         assertTrue(0xEA00 !in harness.carSends(0xAA03, Iap2Csm.param(0, ByteArray(96))))
+        harness.link.close()
+    }
+
+    @Test
+    fun eaPingRequiresConfirmedMmiAndStopsOnSwitchOffOrClose() {
+        val harness = Harness()
+        val received = mutableListOf<List<Int>>()
+        harness.car.onEaPayload = { linkSession, _, payload ->
+            received += listOf(linkSession) + payload.map { it.toInt() and 0xff }
+        }
+        harness.link.armMib3()
+        harness.car.start(0)
+        harness.exchangeUntilNormal()
+        harness.carSends(
+            0x1D01,
+            Iap2Csm.string(0, "Audi MMI") + Iap2Csm.u16(7, 0xEA00) +
+                Iap2Csm.group(10, Iap2Csm.u8(0, 1), Iap2Csm.string(1, "de.audi.mmiconnectdatatransfer")),
+        )
+        harness.carSends(0xAA01, Iap2Csm.param(0, ByteArray(642)))
+        harness.carSends(0xAA03, Iap2Csm.param(0, ByteArray(96)))
+        fun tickAfter(millis: Long) {
+            harness.clock += millis
+            harness.tick()
+            harness.linkToCar()
+            harness.carToLink()
+        }
+        fun status(session: Int, code: Int) =
+            harness.carSends(0xEA03, Iap2Csm.u16(0, session) + Iap2Csm.u8(1, code))
+
+        harness.eaPingEnabled = true
+        status(258, 0)
+        tickAfter(5_000)
+        assertTrue(received.isEmpty())
+        harness.eaPingEnabled = false
+        status(257, 0)
+        tickAfter(5_000)
+        assertTrue(received.isEmpty())
+
+        harness.eaPingEnabled = true
+        tickAfter(0)
+        tickAfter(4_999)
+        assertTrue(received.isEmpty())
+        tickAfter(1)
+        tickAfter(5_000)
+        assertEquals(List(2) { listOf(11, 1, 1, 0) }, received)
+
+        harness.eaPingEnabled = false
+        tickAfter(5_000)
+        assertEquals(2, received.size)
+        harness.eaPingEnabled = true
+        status(257, 1)
+        tickAfter(10_000)
+        assertEquals(2, received.size)
         harness.link.close()
     }
 

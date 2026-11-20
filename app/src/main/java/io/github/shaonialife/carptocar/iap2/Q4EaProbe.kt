@@ -3,8 +3,9 @@ package io.github.shaonialife.carptocar.iap2
 import io.github.shaonialife.carptocar.util.SessionTrace.toHexBody
 
 internal object Q4EaProbe {
+    const val MMI_PROTOCOL = "de.audi.mmiconnectdatatransfer"
     private val protocolNames = listOf(
-        "de.audi.mmiconnectdatatransfer",
+        MMI_PROTOCOL,
         "com.audi.cpp.eadata0",
         "com.audi.cpp.eadata1",
     )
@@ -30,22 +31,32 @@ internal object Q4EaProbe {
         }
     }
 
+    data class Status(val sessionId: Int, val code: Int)
+
+    private fun status(fields: List<Iap2Csm.Param>): Status? {
+        val session = fields.singleOrNull { it.id == 0 }?.value ?: return null
+        val code = fields.singleOrNull { it.id == 1 }?.value?.singleOrNull()?.toInt()?.and(0xff) ?: return null
+        if (session.size != 2) return null
+        return Status(((session[0].toInt() and 0xff) shl 8) or (session[1].toInt() and 0xff), code)
+    }
+
+    fun status(frame: Iap2Csm.Frame): Status? =
+        if (frame.messageId == Iap2MessageIds.EA_SESSION_STATUS) parseCompleteParams(frame.body)?.let(::status) else null
+
     fun responseLog(channel: String, frame: Iap2Csm.Frame): String? {
         if (frame.messageId != Iap2MessageIds.EA_SESSION_STATUS) return null
         val fields = parseCompleteParams(frame.body)
-        val session = fields?.singleOrNull { it.id == 0 }?.value
-        val status = fields?.singleOrNull { it.id == 1 }?.value?.singleOrNull()?.toInt()?.and(0xff)
+        val status = fields?.let(::status)
         val summary = when {
             fields == null -> "malformed TLV"
-            session?.size != 2 || status == null -> "invalid fields=" + fields.joinToString { "#${it.id}(${it.value.size}B)" }
+            status == null -> "invalid fields=" + fields.joinToString { "#${it.id}(${it.value.size}B)" }
             else -> {
-                val sessionId = ((session[0].toInt() and 0xff) shl 8) or (session[1].toInt() and 0xff)
-                val statusName = when (status) {
+                val statusName = when (status.code) {
                     0 -> "SessionStatusOK"
                     1 -> "SessionClose"
                     else -> "unknown"
                 }
-                "session=$sessionId status=$status($statusName)"
+                "session=${status.sessionId} status=${status.code}($statusName)"
             }
         }
         return "EA: RX $channel 0xea03 $summary len=${frame.body.size} body=${frame.body.toHexBody()}"

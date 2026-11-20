@@ -563,6 +563,20 @@
                                         android:textSize="16sp" />
                                 </LinearLayout>
 
+                                <androidx.appcompat.widget.SwitchCompat
+                                    xmlns:app="http://schemas.android.com/apk/res-auto"
+                                    android:id="@+id/switchEaPing"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:minHeight="48dp"
+                                    android:thumb="@drawable/sw_thumb"
+                                    app:track="@drawable/sw_track"
+                                    app:switchMinWidth="48dp"
+                                    app:switchPadding="16dp"
+                                    android:text="EA Ping"
+                                    android:textColor="@color/m3_on_surface"
+                                    android:textSize="16sp" />
+
                             </LinearLayout>
                             <LinearLayout
                                 android:id="@+id/logCard"

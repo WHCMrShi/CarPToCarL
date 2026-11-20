@@ -10,6 +10,7 @@ import io.github.shaonialife.carptocar.iap2.Iap2LinkEngine
 import io.github.shaonialife.carptocar.iap2.Iap2MessageIds
 import io.github.shaonialife.carptocar.iap2.Iap2SenderSession
 import io.github.shaonialife.carptocar.iap2.Q4EaProbe
+import io.github.shaonialife.carptocar.iap2.EaPingOption
 import io.github.shaonialife.carptocar.iap2.Iap2NowPlaying
 import io.github.shaonialife.carptocar.iap2.Iap2SubscriptionReplies
 import io.github.shaonialife.carptocar.iap2.MfiLengthMemory
@@ -53,6 +54,7 @@ class VirtualIap2Link(
     private val alive: () -> Boolean,
     /** MFi 长度记忆的持久化上下文；null = 进程内记忆（单测）。 */
     private val mfiContext: Context? = null,
+    private val eaPingEnabled: () -> Boolean = { EaPingOption.enabled },
     /** 时钟（单测可注入）。 */
     private val nowMillis: () -> Long = { System.nanoTime() / 1_000_000L },
     /**
@@ -175,6 +177,9 @@ class VirtualIap2Link(
     private var eaIdentityIsAudi = false
     private var eaOpenDeclared = false
     private var eaRequests = emptyList<Q4EaProbe.Request>()
+    private var mmiEaSession: Int? = null
+    private var mmiEaConfirmed = false
+    private var nextEaPingAt: Long? = null
     private val eaCaptureConnection = java.util.UUID.randomUUID().toString()
     private var eaCaptureFailed = false
 
@@ -485,6 +490,7 @@ class VirtualIap2Link(
                 artworkSender.submitted(plan, accepted)
             }
         }
+        updateEaPingLocked(now)
         flushOutputLocked()
     }
 
@@ -588,6 +594,7 @@ class VirtualIap2Link(
                     "session=${request.sessionId} len=${body.size} body=" + body.joinToString(" ") { "%02x".format(it) },
             )
             if (!submitted) return
+            if (request.protocolName == Q4EaProbe.MMI_PROTOCOL) mmiEaSession = request.sessionId
         }
     }
 
@@ -1035,6 +1042,24 @@ class VirtualIap2Link(
                     ?.takeIf { it.isNotBlank() }
             }.joinToString(" ")
 
+    private fun updateEaPingLocked(now: Long) {
+        val session = mmiEaSession
+        if (session == null || !mmiEaConfirmed || !controlSessionReady || !eaPingEnabled()) {
+            nextEaPingAt = null
+            return
+        }
+        val due = nextEaPingAt
+        if (due == null || now >= due) {
+            nextEaPingAt = now + 5_000L
+            if (due == null || !eaPingEnabled()) return
+            if (engine.sendEaPing(session)) {
+                log("EA: TX WiFi ping submitted linkSession=${engine.eaLinkSessionId} session=$session body=00")
+            } else {
+                log("EA: TX WiFi ping skipped session=$session link-not-writable")
+            }
+        }
+    }
+
     private fun handleFrameLocked(bytes: ByteArray) {
         frameCount++
         val frames = parser.offer(bytes)
@@ -1042,6 +1067,10 @@ class VirtualIap2Link(
             val eaLog = Q4EaProbe.responseLog("WiFi", frame)
             if (eaLog != null) {
                 log(eaLog)
+                Q4EaProbe.status(frame)?.takeIf { it.sessionId == mmiEaSession }?.let { status ->
+                    if (status.code == 1 || (status.code == 0 && !mmiEaConfirmed)) nextEaPingAt = null
+                    if (status.code == 0 || status.code == 1) mmiEaConfirmed = status.code == 0
+                }
             } else if (frameCount <= 30 || frameCount % 100 == 0) {
                 val hex = frame.body.joinToString(" ") { "%02x".format(it) }
                 log(
