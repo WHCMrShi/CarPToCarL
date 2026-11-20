@@ -17,6 +17,7 @@ import io.github.shaonialife.carptocar.iap2.NmeaLocation
 import io.github.shaonialife.carptocar.iap2.NowPlayingUpdates
 import io.github.shaonialife.carptocar.input.ConsumerKeys
 import io.github.shaonialife.carptocar.util.SessionTrace
+import io.github.shaonialife.carptocar.util.EaPayloadLog
 import java.security.SecureRandom
 import java.util.TimeZone
 import java.util.UUID
@@ -174,6 +175,8 @@ class VirtualIap2Link(
     private var eaIdentityIsAudi = false
     private var eaOpenDeclared = false
     private var eaRequests = emptyList<Q4EaProbe.Request>()
+    private val eaCaptureConnection = java.util.UUID.randomUUID().toString()
+    private var eaCaptureFailed = false
 
     /**
      * iAP2 控制会话是否真正就绪：链路进入 NORMAL **且** MFi 挑战已应答完。
@@ -189,6 +192,16 @@ class VirtualIap2Link(
     init {
         engine.onFileDiagnostic = { log("ARTWORK: WiFi $it") }
         engine.onEaDiagnostic = { log("EA: $it") }
+        engine.onEaPayload = { linkSession, sequence, payload ->
+            if (!eaCaptureFailed) {
+                try {
+                    EaPayloadLog.record(eaCaptureConnection, linkSession, sequence, payload)
+                } catch (error: java.io.IOException) {
+                    eaCaptureFailed = true
+                    log("EA: capture stopped for this link; ${error.javaClass.simpleName}")
+                }
+            }
+        }
         engine.onHandshakeObservation = { log("CONNECT-DIAG: WiFi handshake $it") }
         engine.onPeerSynchronizationAdopted = { sync ->
             artworkSender.newLink()

@@ -169,6 +169,7 @@ class Iap2LinkEngine(
         get() = adoptedSynchronization?.sessions?.singleOrNull { it.kind == 2 && it.version == 1 }?.id
 
     internal var onEaDiagnostic: ((String) -> Unit)? = null
+    internal var onEaPayload: ((linkSession: Int, sequence: Int, payload: ByteArray) -> Unit)? = null
 
     /** 诊断：每个入向链路帧的摘要（control/seq/ack/sessionId/载荷长度），真车排查用。 */
     var onFrameReceived: ((control: Int, sequence: Int, ack: Int, sessionId: Int, size: Int) -> Unit)? = null
@@ -583,6 +584,7 @@ class Iap2LinkEngine(
                 val detail = if (data.size < 2) "missing-session-id len=${data.size}"
                     else "session=${readU16(data, 0)} dataBytes=${data.size - 2}"
                 onEaDiagnostic?.invoke("RX WiFi data linkSession=$sessionId seq=$sequence $detail")
+                onEaPayload?.invoke(sessionId, sequence, data)
             }
             // 控制消息的会话 ID：本国表 10 或采纳表（Audi=1；测试台两者一致）
             if (sessionId == SESSION_CONTROL || sessionId == adoptedPeerControlSessionId) {

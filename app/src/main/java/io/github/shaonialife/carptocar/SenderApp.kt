@@ -9,6 +9,7 @@ import android.util.Log
 import io.github.shaonialife.carptocar.carlife.CarGpsOption
 import io.github.shaonialife.carptocar.launcher.VirtualLauncher
 import io.github.shaonialife.carptocar.util.DebugFileLog
+import io.github.shaonialife.carptocar.util.EaPayloadLog
 import io.github.shaonialife.carptocar.util.SessionTrace
 import io.github.shaonialife.carptocar.video.FirstFramePolicy
 import io.github.shaonialife.carptocar.video.VideoCanvasMode
@@ -31,6 +32,11 @@ class SenderApp : Application() {
         // 完整会话报文录制（files/session_trace.log）：与上面的过程日志分开两份文件，
         // 原因见 SessionTrace 注释（报文量大会挤掉过程日志）。必须在业务起来之前 attach。
         SessionTrace.attach(this)
+        try {
+            EaPayloadLog.attach(filesDir, BuildConfig.SOURCE_REVISION)
+        } catch (error: java.io.IOException) {
+            DebugFileLog.append(this, "EA: capture initialization failed; ${error.javaClass.simpleName}")
+        }
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         val store = io.github.shaonialife.carptocar.util.FatalErrorStore(filesDir)
         Thread.setDefaultUncaughtExceptionHandler(io.github.shaonialife.carptocar.util.FatalErrorHandler(
