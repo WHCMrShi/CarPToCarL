@@ -171,6 +171,9 @@ class VirtualIap2Link(
     private var mfiWindowMillis = 0L
     private var mfiChallengeSentAtMs = 0L
     private var mfiFinished = false
+    private var eaIdentityIsAudi = false
+    private var eaOpenDeclared = false
+    private var eaRequests = emptyList<Q4EaProbe.Request>()
 
     /**
      * iAP2 控制会话是否真正就绪：链路进入 NORMAL **且** MFi 挑战已应答完。
@@ -185,6 +188,7 @@ class VirtualIap2Link(
 
     init {
         engine.onFileDiagnostic = { log("ARTWORK: WiFi $it") }
+        engine.onEaDiagnostic = { log("EA: $it") }
         engine.onHandshakeObservation = { log("CONNECT-DIAG: WiFi handshake $it") }
         engine.onPeerSynchronizationAdopted = { sync ->
             artworkSender.newLink()
@@ -533,16 +537,45 @@ class VirtualIap2Link(
     private fun sendCsmLocked(
         messageId: Int,
         body: ByteArray = ByteArray(0),
-    ) {
+        awaitAck: Boolean = true,
+    ): Boolean {
         // 与蓝牙侧同一把尺子：越权只记 WARN；0xA100/0xFFF0 按车机可收清单裁掉。
-        if (!AccessoryDeclaration.noteSend(messageId, "tunnel", log)) return
+        if (!AccessoryDeclaration.noteSend(messageId, "tunnel", log)) return false
         val frame = Iap2Csm.encode(messageId, body)
-        val ok = engine.sendControl(frame, System.nanoTime() / 1_000_000L)
+        val ok = engine.sendControl(frame, System.nanoTime() / 1_000_000L, awaitAck = awaitAck)
         if (!ok || messageId != Iap2MessageIds.NOW_PLAYING_UPDATE) log(
             "IAPLINK: 隧道 tx 0x${messageId.toString(16)} " +
                 "(${Iap2MessageIds.nameOf(messageId)}) ${frame.size}B ok=$ok",
         )
         SessionTrace.csm(SessionTrace.Dir.TX, "tunnel", messageId, body, if (ok) "" else "send-failed")
+        return ok
+    }
+
+    private fun probeEaSessionsLocked() {
+        if (!eaIdentityIsAudi && eaRequests.isEmpty()) return
+        val linkSession = engine.eaLinkSessionId
+        val reason = when {
+            !controlSessionReady -> "wifi-control-not-ready"
+            linkSession == null -> "wifi-ea-session-not-negotiated"
+            !eaOpenDeclared -> "wifi-ea00-not-declared"
+            eaRequests.isEmpty() -> "wifi-target-protocols-not-declared"
+            else -> null
+        }
+        if (reason != null) {
+            log("EA: WiFi probe skipped reason=$reason")
+            return
+        }
+        log("EA: WiFi probe after authentication; requests=${eaRequests.size}/3 eaLinkSession=$linkSession")
+        for (request in eaRequests) {
+            val body = request.body()
+            val submitted = sendCsmLocked(Iap2MessageIds.EA_OPEN_SESSION, body, awaitAck = false)
+            val result = if (submitted) "submitted" else "failed"
+            log(
+                "EA: TX WiFi $result 0xea00 protocol=${request.protocolId} name=${request.protocolName} " +
+                    "session=${request.sessionId} len=${body.size} body=" + body.joinToString(" ") { "%02x".format(it) },
+            )
+            if (!submitted) return
+        }
     }
 
     /** 直接投递完整 CSM 帧（Frida 抓的逐字节常量，勿重新编码）。 */
@@ -648,6 +681,9 @@ class VirtualIap2Link(
                 if (mib3) {
                     // 记忆键 = 车机身份 + " tunnel"：与蓝牙链路的记忆互不污染
                     mfiIdentity = mfiIdentityOf(params) + " tunnel"
+                    eaIdentityIsAudi = mfiIdentityOf(params).contains("audi", ignoreCase = true)
+                    eaOpenDeclared = receives?.contains(ids.EA_OPEN_SESSION) == true
+                    eaRequests = Q4EaProbe.requests(frame.body)
                 }
                 sendCsmLocked(ids.IDENTIFICATION_ACCEPTED)
                 sendCsmLocked(ids.MFI_REQUEST_CERTIFICATE)
@@ -690,10 +726,11 @@ class VirtualIap2Link(
                     mfiCurrentLength = 0
                     mfiFinished = true
                 }
-                sendCsmLocked(ids.MFI_AUTHENTICATION_SUCCEEDED)
+                val authenticationSubmitted = sendCsmLocked(ids.MFI_AUTHENTICATION_SUCCEEDED)
                 if (mib3) {
                     mib3AuthStage = 4
                     sendMib3BurstLocked()
+                    if (authenticationSubmitted) probeEaSessionsLocked()
                     onAuthenticationComplete?.invoke()
                 } else {
                     log("IAPLINK: 隧道 MFi 完成——等待对端订阅（随后其标记隧道就绪）")

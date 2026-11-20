@@ -359,6 +359,29 @@ class VirtualIap2LinkTest {
     }
 
     @Test
+    fun eaRequestsUseWifiControlOnlyAfterAuthentication() {
+        val harness = Harness()
+        harness.link.armMib3()
+        harness.car.start(0)
+        harness.exchangeUntilNormal()
+        val identification = Iap2Csm.string(0, "Audi MMI") +
+            Iap2Csm.u16(7, 0xEA00) +
+            Iap2Csm.group(10, Iap2Csm.u8(0, 9), Iap2Csm.string(1, "com.audi.cpp.eadata0"))
+        assertEquals(listOf(0x1D02, 0xAA00), harness.carSends(0x1D01, identification))
+        assertEquals(listOf(0xAA02), harness.carSends(0xAA01, Iap2Csm.param(0, ByteArray(642))))
+        val authenticated = harness.carSends(0xAA03, Iap2Csm.param(0, ByteArray(96)))
+        assertTrue(authenticated.indexOf(0xEA00) > authenticated.indexOf(0xAA05))
+        val raw = checkNotNull(harness.lastRawFrameOf(0xEA00))
+        val request = Iap2Csm.Parser().offer(raw).single()
+        assertEquals(
+            listOf(Iap2Csm.Param(0, byteArrayOf(9)), Iap2Csm.Param(1, byteArrayOf(1, 2))),
+            Iap2Csm.parseParams(request.body),
+        )
+        assertTrue(0xEA00 !in harness.carSends(0xAA03, Iap2Csm.param(0, ByteArray(96))))
+        harness.link.close()
+    }
+
+    @Test
     fun fullMib3HandshakeWithBurstAndSubscriptions() {
         val h = Harness()
         h.link.armMib3()

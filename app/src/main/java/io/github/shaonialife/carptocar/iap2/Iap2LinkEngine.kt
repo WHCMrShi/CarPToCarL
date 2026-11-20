@@ -165,6 +165,11 @@ class Iap2LinkEngine(
     /** 诊断：丢弃未知会话 ID 的数据帧时回调（(sessionId, bytes)）。 */
     var onUnknownSessionData: ((Int, Int) -> Unit)? = null
 
+    internal val eaLinkSessionId: Int?
+        get() = adoptedSynchronization?.sessions?.singleOrNull { it.kind == 2 && it.version == 1 }?.id
+
+    internal var onEaDiagnostic: ((String) -> Unit)? = null
+
     /** 诊断：每个入向链路帧的摘要（control/seq/ack/sessionId/载荷长度），真车排查用。 */
     var onFrameReceived: ((control: Int, sequence: Int, ack: Int, sessionId: Int, size: Int) -> Unit)? = null
 
@@ -573,6 +578,12 @@ class Iap2LinkEngine(
                 (control and CONTROL_SYNCHRONIZE) == 0 &&
                 (control and CONTROL_EXTENDED_ACKNOWLEDGEMENT) == 0
         if (isDataFrame) {
+            if (sessionId == eaLinkSessionId) {
+                val data = requireNotNull(payload)
+                val detail = if (data.size < 2) "missing-session-id len=${data.size}"
+                    else "session=${readU16(data, 0)} dataBytes=${data.size - 2}"
+                onEaDiagnostic?.invoke("RX WiFi data linkSession=$sessionId seq=$sequence $detail")
+            }
             // 控制消息的会话 ID：本国表 10 或采纳表（Audi=1；测试台两者一致）
             if (sessionId == SESSION_CONTROL || sessionId == adoptedPeerControlSessionId) {
                 // 收到对端的数据即代表对端认为链路可用；ACK 帧若丢失/被跳过，这里兜底进入 NORMAL
