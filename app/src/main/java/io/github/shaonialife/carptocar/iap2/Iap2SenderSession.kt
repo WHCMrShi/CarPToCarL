@@ -452,6 +452,7 @@ class Iap2SenderSession(
         // 0xaa05 在 33.248、问候在 35.249，中间空了 2 秒正是那段 HID 等待。
         evidence.phase("device-state")
         sendDeviceStateGreetings()
+        probeEaSessions(identification.body, identityText)
 
         // ---- 订阅与 HID：0x6800 是可选步骤 ----
         // xcertplay 在订阅后发 StartHID；DiPlay 删掉了这一步（订阅完直接等 0x5702）。
@@ -1272,6 +1273,24 @@ class Iap2SenderSession(
         SessionTrace.csm(SessionTrace.Dir.TX, "bt", messageId, body, "fire-and-forget")
     }
 
+    private fun probeEaSessions(identificationBody: ByteArray, identity: String) {
+        val requests = Q4EaProbe.requests(identificationBody)
+        if (requests.isEmpty() && "audi" !in identity) return
+        log("EA: BT probe after device-state; requests=${requests.size}/3 (unambiguous 0x1d01 declarations)")
+        for (request in requests) {
+            val body = request.body()
+            val requestLog = "0xea00 protocol=${request.protocolId} name=${request.protocolName} session=${request.sessionId} " +
+                "len=${body.size} body=" + body.joinToString(" ") { "%02x".format(it) }
+            try {
+                sendFireAndForget(Iap2MessageIds.EA_OPEN_SESSION, body)
+                log("EA: TX BT submitted $requestLog")
+            } catch (error: IOException) {
+                log("EA: TX BT failed $requestLog error=${error.message}")
+                return
+            }
+        }
+    }
+
     private fun expect(
         messageId: Int,
         deadline: Long,
@@ -1425,7 +1444,10 @@ class Iap2SenderSession(
         if (frames.isEmpty()) return null
         // 完整会话录制：原始报文（含 0x1D01 能力清单这类大包）进 session_trace.log，
         // 与 main_debug.log 的摘要行按时间戳对齐，用于事后离线分析拆链/超时。
-        frames.forEach { SessionTrace.csm(SessionTrace.Dir.RX, "bt", it.messageId, it.body) }
+        frames.forEach {
+            Q4EaProbe.responseLog("BT", it)?.let(log)
+            SessionTrace.csm(SessionTrace.Dir.RX, "bt", it.messageId, it.body)
+        }
         frames.forEach { evidence.message("RX_PARSED", it.messageId) }
         frames.forEach { recordNowPlayingSubscription(it) }
         frames.forEachIndexed { index, frame -> if (index > 0) receivedFrames += frame }

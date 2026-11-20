@@ -77,6 +77,8 @@ object Iap2MessageIds {
 
     /** 配件请求手机启动 CarPlay 应用（MIB3：launchMethod=1，无弹窗直接启动）。 */
     const val REQUEST_APP_LAUNCH = 0xEA02
+    const val EA_OPEN_SESSION = 0xEA00
+    const val EA_SESSION_STATUS = 0xEA03
 
     /** MFi 证书序号（**仅控制会话版本 2** 使用，配件 → 手机）。 */
     const val MFI_AUTH_SERIAL_NUMBER = 0xAA06
@@ -118,6 +120,8 @@ object Iap2MessageIds {
             START_LIST_UPDATES -> "StartListUpdates"
             STOP_LIST_UPDATES -> "StopListUpdates"
             REQUEST_APP_LAUNCH -> "RequestAppLaunch"
+            EA_OPEN_SESSION -> "StartExternalAccessoryProtocolSession"
+            EA_SESSION_STATUS -> "StatusExternalAccessoryProtocolSession"
             MFI_AUTH_SERIAL_NUMBER -> "AccessoryAuthenticationSerialNumber"
             START_LOCATION_INFORMATION -> "StartLocationInformation"
             LOCATION_INFORMATION -> "LocationInformation"

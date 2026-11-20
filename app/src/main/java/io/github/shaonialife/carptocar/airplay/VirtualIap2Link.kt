@@ -9,6 +9,7 @@ import io.github.shaonialife.carptocar.iap2.Iap2Csm
 import io.github.shaonialife.carptocar.iap2.Iap2LinkEngine
 import io.github.shaonialife.carptocar.iap2.Iap2MessageIds
 import io.github.shaonialife.carptocar.iap2.Iap2SenderSession
+import io.github.shaonialife.carptocar.iap2.Q4EaProbe
 import io.github.shaonialife.carptocar.iap2.Iap2NowPlaying
 import io.github.shaonialife.carptocar.iap2.Iap2SubscriptionReplies
 import io.github.shaonialife.carptocar.iap2.MfiLengthMemory
@@ -988,8 +989,11 @@ class VirtualIap2Link(
         frameCount++
         val frames = parser.offer(bytes)
         for (frame in frames) {
-            val hex = frame.body.joinToString(" ") { "%02x".format(it) }
-            if (frameCount <= 30 || frameCount % 100 == 0) {
+            val eaLog = Q4EaProbe.responseLog("WiFi", frame)
+            if (eaLog != null) {
+                log(eaLog)
+            } else if (frameCount <= 30 || frameCount % 100 == 0) {
+                val hex = frame.body.joinToString(" ") { "%02x".format(it) }
                 log(
                     "IAPLINK: rx 0x${frame.messageId.toString(16)} " +
                         "(${Iap2MessageIds.nameOf(frame.messageId)}) ${frame.body.size}B hex=${hex.take(160)}",
