@@ -1,0 +1,60 @@
+# Q4 independent navigation audio experiment, local time UTC+08:00
+# APK base 136d7e5 with uncommitted navigation experiment; installed APK verified by SHA-256.
+# Source: USB export of app main_debug.log and decoded RTSP plist summaries. This is an event summary, not a replay capture.
+# Wi-Fi follow-up source: Android dumpsys wifi, retained state transitions and STA events. Logcat already rotated past the failed requests.
+
+[07:32:34.800] Android primary Wi-Fi client switched from connect mode to scan-only mode.
+[07:32:34.988] Android recorded WIFI_DISABLED. No subsequent return to connect mode is present before the four failed requests below.
+[11:10:44.963] Android returns onUnavailable about 14 ms after the first app-specific hotspot request, previouslyBound=false.
+[11:10:53.189] Bluetooth iAP2 provides fresh hotspot credentials.
+[11:10:54.233] Android returns onUnavailable about 15 ms after the second request, previouslyBound=false.
+[11:11:13.981] Bluetooth iAP2 provides hotspot credentials again.
+[11:11:14.015] Android returns onUnavailable about 19 ms after the third request, previouslyBound=false.
+[11:11:23.068] Android returns onUnavailable about 13 ms after the fourth request, previouslyBound=false.
+[11:11:43.118] Android Wi-Fi controller recorded a Wi-Fi toggle attributed to the OEM car integration package com.oplus.ocar.
+[11:11:43.356] Android primary Wi-Fi client switched from scan-only mode to connect mode.
+[11:11:43.717] Android recorded WIFI_ENABLED.
+[11:11:44.088] CarLife control connection ready.
+[11:11:44.615] Head-unit-initiated iAP2 session supplies hotspot credentials after the user manually starts the connection from MMI.
+[11:11:45.321] Android associated to the hotspot, followed by WPA handshake and IP configuration at 11:11:45.619.
+[11:11:45.644] Fifth app-specific hotspot request receives onAvailable and binds, about one second after submission.
+[11:11:46.153] CarPlay control TCP connected.
+[11:11:46.869] Initial CarPlay RECORD accepted, before CarLife source keyframe.
+[11:11:46.999] CarLife first source keyframe.
+[11:11:49.109] SETUP type=100 media PCM 48 kHz stereo, accepted, dataPort=7070.
+[11:11:49.194] SETUP type=101 Opus 48 kHz mono, accepted, dataPort=7071, no controlPort in response.
+[11:11:49.249] RECORD accepted with both streams declared. No 9241 input recorded in this round.
+[11:12:30.177] User-side final-disconnect request in app log.
+[11:12:34.722] CarLife control connection ready, before the next CarPlay session.
+[11:12:37.360] CarLife first source keyframe.
+[11:12:55.703] CarPlay control TCP connected, after CarLife source keyframe.
+[11:12:56.119] Q4 /info type=101/default output=0x40004400.
+[11:12:58.676] SETUP type=100 media PCM 48 kHz stereo, accepted, dataPort=7070.
+[11:12:58.685] GET_PARAMETER volume returned 501.
+[11:12:58.695] Existing SET_PARAMETER volume probe at -25 dB also returned 501.
+[11:12:58.732] TX type=101 SETUP, advertised format 0x40000000 and requested latency 250 ms.
+[11:12:58.782] RX 200 with type=101, dataPort=7071, no controlPort in response.
+[11:12:58.795] Existing follow-up RECORD accepted.
+[11:12:58.840] Android Opus encoder opened at 48 kHz, 960 samples per packet.
+[11:12:59.378] Feedback for 101 already present at sampleTime=0, before any 9241 RTP.
+[11:13:00.388] Feedback for 101 sampleTime=48000, still before 9241 RTP.
+[11:13:14.295] First 9241 PCM arrived before INIT and was rejected by the experimental path.
+[11:13:14.313] 9241 INIT 16 kHz mono PCM16.
+[11:13:14.371] First accepted TTS block, 1024 bytes.
+[11:13:14.549] First logged input queue-full drop.
+[11:13:14.561] First encrypted navigation RTP locally sent, sampleTime=753600.
+[11:13:44.167] Navigation input absolute peak reached full scale in one window.
+[11:14:47.120] Media engine START in the round that carried navigation RTP.
+[11:15:24.134] CarPlay requestSiri button down. Bridge wrote CarLife hard key 0x21 at 11:15:24.137.
+[11:15:29.263] Recent main PCM window recorded 1408 real input submissions, 0 rejected.
+[11:15:29.405] CarPlay requestSiri button up after 5272 ms. Bridge wrote hard key 0x22.
+[11:15:31.980] CarPlay requestSiri button down. Bridge wrote hard key 0x21.
+[11:15:35.613] CarPlay requestSiri button up after 3633 ms. Bridge wrote hard key 0x22.
+[11:15:45.540] CarPlay requestSiri button down. Bridge wrote hard key 0x21.
+[11:15:48.612] CarPlay requestSiri button up after 3073 ms. Bridge wrote hard key 0x22.
+[11:15:57.304] Navigation totals: 3798 encoded, 3798 locally sent, 0 non-blocking UDP drops, 211 input/tail rejections. Sync port was absent.
+[11:16:37.044] Control reader EOF in the wrap-up interval, over 39 seconds after the last navigation summary.
+
+# Across this time window, all 459 outgoing POST /command binary plists decoded. No duckAudio or unduckAudio command was present.
+# User observation, not a log entry: separate navigation sounded different and caused less music stutter. Navigation was quiet. During a prompt the wheel volume adjustment showed Entertainment and changed music volume.
+# Later user observation: the steering-wheel voice button did not produce a visible response. Hard-key events above are successful local socket writes.

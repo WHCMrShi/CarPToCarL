@@ -1,0 +1,33 @@
+# Q4 | 2026-11-19 傍晚与 2026-11-20 早晨 CST | 应用日志节选
+# 11-19 傍晚。应用日志保留段从 16:47 起，以下音频计数已经累积。
+[16:51:46.232] ALT-AUDIO-PROBE: 9241 INIT rate=16000 channels=1 bits=16
+[17:12:53.302] ALT-AUDIO-PROBE: 9241 idle; totals packetized=32374 sent=32052 udpDrops=0 rejected=147 rtpQueueDrops=76 rtpAgeDrops=246
+[17:14:48.110] EVENT: requestSiri Prewarm
+[17:14:48.638] EVENT: requestSiri 按下 → VR_START 0x21
+[17:14:48.642] CARLIFE: 0x21 → 9340 / 0x68008 已入队
+[17:14:48.646] CARLIFE: 0x21 在 9340 本地写入完成
+[17:14:50.223] EVENT: requestSiri 松开，按住 1586ms → Q4 对话由小布结束
+# 11-20 早晨
+[06:48:27.031] CONNECT-DIAG: start requested; default media=48k PCM
+[06:48:34.675] CARLIFE: 控制端口已连接
+[06:48:37.741] AIRPLAY: TCP 已连通；portSource=MDNS
+[06:48:39.887] CARLIFE: 收到首个关键帧
+[06:48:45.331] ALT-AUDIO-PROBE: SETUP type=101 format=0x4000 PCM48 mono s16 latencyMs=250
+[06:48:46.589] ALT-AUDIO-PROBE: RTSP/1.0 200 OK, alternateDataPort=7071 controlPort=0 accepted=true
+[06:48:47.085] ALT-AUDIO-PROBE: SETUP accepted=true, RECORD accepted=true
+[06:49:11.907] ALT-AUDIO-PROBE: 9241 INIT rate=16000 channels=1 bits=16
+[06:49:11.908] ALT-AUDIO-PROBE: first 9241 PCM 16000Hz mono s16, bytes=1024
+[06:49:11.983] ALT-AUDIO-PROBE: 9241 queue full, discarded=1
+[06:49:11.995] ALT-AUDIO-PROBE: 9241 queue full, discarded=2
+[06:49:11.998] ALT-AUDIO-PROBE: first RTP of prompt bytes=704 sent=1 pcmAgeMs=87
+[06:49:12.004] ALT-AUDIO-PROBE: 9241 resampler=Oboe Best 16000->48000 mono s16
+[06:49:12.018] ALT-AUDIO-PROBE: 9241 queue full, discarded=3
+[06:49:12.065] NAV-PROMPT: RX duckAudio [RTSP/1.0 200 OK]
+[06:49:12.120] ALT-AUDIO-PROBE: dropped PCM before RTP: output queue full
+[06:49:12.166] ALT-AUDIO-PROBE: dropped PCM before RTP: PCM age at send deadline exceeds 250ms
+[06:49:15.167] ALT-AUDIO-PROBE: 9241 idle; totals packetized=449 sent=354 udpDrops=0 rejected=5 rtpQueueDrops=25 rtpAgeDrops=70
+[06:49:15.421] NAV-PROMPT: RX unduckAudio [RTSP/1.0 200 OK]
+[06:49:23.312] ALT-AUDIO-PROBE: 9241 INIT rate=16000 channels=1 bits=16
+[06:49:23.315] ALT-AUDIO-PROBE: first RTP of prompt bytes=704 sent=355 pcmAgeMs=0
+[06:49:24.555] ALT-AUDIO-PROBE: 9241 idle; totals packetized=619 sent=524 udpDrops=0 rejected=6 rtpQueueDrops=25 rtpAgeDrops=70
+[07:31:55.624] ALT-AUDIO-PROBE: 9241 idle; totals packetized=47716 sent=47589 udpDrops=0 rejected=189 rtpQueueDrops=32 rtpAgeDrops=95

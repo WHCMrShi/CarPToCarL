@@ -35,6 +35,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-local.ps1
 ```
 
 默认依次执行 `:app:testDebugUnitTest`、`:app:lintDebug`、`:app:assembleDebug`。
+启用 `-Pq4AltAudioSetupProbe=true` 的 Q4 实验包还需要 NDK `27.0.12077973`
+与 CMake `3.22.1`，可在同一个 SDK 中通过 SDK Manager 安装。该开关编译
+Oboe 1.11.0 的独立重采样模块，普通构建仍使用上面的工具链。
+
 只编译 APK：
 
 ```powershell

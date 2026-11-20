@@ -653,3 +653,65 @@ IdleGuard在长于10秒的观察间断后，仅给仍有连接意图的工作2�
 即时性约束：不新增输入积攒、预缓冲、定时等待或播放延迟目标。每次调用立即交出当前可计算的全部样本，仅保存一帧双声道历史及整数相位；块尾尚不可计算的分数位置不阻挡已完成样本。原352帧RTP组包及发送调度保持不变。
 
 业务提交d759dff。最终build-local.ps1默认三项任务通过（既有隔离输出）：1111项单测，0失败/错误/跳过，lint按既有baseline为0 errors/106 warnings，Debug APK通过。第一轮斜坡测试以Double计算半整数期望值产生1LSB误差，已改精确BigDecimal参照，未为通过测试修改业务算法。未安装、未路测。
+
+## 独立导航流输入实验（2026-11-19）
+
+实验分支 `codex/q4-dual-audio-setup` 基于 `136d7e5`，仅带 `-Pq4AltAudioSetupProbe=true` 的 Debug 构建启用。沿用现有媒体候选、记录、协商及发送。仅在 `DELPHI AUDI 3162` 的控制会话就绪、原有 `100/media/48 kHz PCM` 已启动且 `/info` 声明 `101/default/Opus 48 kHz mono` 时，在既有音频 RECORD 前发一次 101 SETUP，最多等待 3 秒。SETUP 和 RECORD 均成功后发布独立发送器，随原音频会话回收。
+
+上游 `b7506d3` 有基于 `speechRecognition` 的实验入口。历史 `2f4021c` 记录另一台 Delphi 奥迪选择 `100/alert` 后收到 400 并断开整条会话，`4e830f1` 将独立流超时缩到 3 秒并使用既有的后续 RECORD。本实验只试车机声明的 101。Q4 实验会话在 101 未激活或发送器退出时直接记录并丢弃 9241 PCM，9240 保持基线路径。catplay 对 MHI2 的修复按车机能力约束 AltAudio 的采样率，Q4 此处采用自己声明的 48 kHz。 [上游 alert 移除记录](https://github.com/jjuugk/CarPToCarL/commit/2f4021c412cb2e2fd0fc3b7798de0aa500ab1f6b) · [上游超时修改](https://github.com/jjuugk/CarPToCarL/commit/4e830f19475c4984b0ac96d9b02e8cb4ede5c3fe) · [catplay MHI2 修复](https://github.com/catplay-labs/catplay/commit/7f5847e)
+
+已激活的 101 只接收 9241 的 `0x40003`，以当前 9241 连接实际收到的 INIT 为准。输入支持 16 或 48 kHz 单声道 PCM16，16 kHz 用有状态带限插值到 48 kHz。每个有效输出包是 20 ms 裸 Opus，RTP 负载类型 101，样本时间每帧递增 960，独立连接 ID、加密密钥和计数器。实时队列的包龄上限沿用本次请求的 250 ms 量级。9241 队列空闲 60 ms 后，剩余不足一帧的样本丢弃并记日志，不补造音频。车机返回控制口时发送该路 RTP 时间锚。实验未引入 duckAudio 或 9240 样本处理。 [catplay 的 Opus 帧配置](https://github.com/catplay-labs/catplay/blob/master/carplay/catplay_audio/src/asbd.rs) · [RFC 7587](https://datatracker.ietf.org/doc/html/rfc7587#section-4)
+
+停车测试时将 CarLife 设为分离音频，分别覆盖 CarLife 先起和 CarPlay 先连。先播音乐，再触发一条导航；核对 `ALT-AUDIO-PROBE` 的 SETUP、RECORD、9241 首包、编码器、RTP 首包和播报汇总，以及 feedback 中是否出现 101。记录车内是否听见导航、原音乐是否连续、播报时方向盘是否调到导航及会话是否存活。若无 9241 PCM，重点核对源模式和播报触发。若车机拒绝 101，记录结果并回到普通构建。尚无本实验的安装或实车记录。
+
+最新版实验开关开启时，`build-local.ps1` 的单测和 Debug APK 构建通过，1118 项单测、0 失败。前一版的 lint 运行在 `SessionController.kt` 原有语句报告 11 处 `SuspiciousIndentation`，最新版未重跑 lint。
+
+同日 11:11–11:16，USB 导出的两轮均为 CarLife 控制连接早于 CarPlay TCP。第一轮的 CarLife 首帧稍晚于 CarPlay 初次 RECORD，未收到 9241 PCM。第二轮的 CarLife 首帧早于 CarPlay TCP。两轮 `100/media/PCM` 和 `101/Opus` 分别获 7070 和 7071，音频后的 RECORD 均通过。第二轮 9241 送出 3798 个本地 RTP 数据报，211 次发送前丢弃计数。车机 101 的 feedback 在首个 RTP 之前已开始递增。这次车内反馈为导航可听、音乐未发生以往的严重卡顿、导航偏小且方向盘在播报时仍显示 Entertainment。CarPlay 已连接后才启动 CarLife 的用例留待后续。 [Q4 脱敏事件](vehicle-tests/2026-11-19-q4-111258/events.redacted.log)
+
+本轮出站 459 条 `/command` 已解码，均无 `duckAudio` 或 `unduckAudio`。Apple 规范 §23.2.8.2.9 把 Alternate Audio 归入语音提示与通知类，§23.3.7.1/.2 定义压低及恢复为手机发往车机。旧无线速查表的命令方向应以此为准。下一轮先维持 `100 PCM + 101 Opus` 建流参数，只对照原生 iPhone 无线播报的压低与恢复，观察可听比和 MMI 音量类别。对源 PCM 峰值接近或达到满幅的样本，不从听感直接反推出需要手机增益，先区分车机混音、源响度与发送前丢弃。 [Apple 音量管理说明](https://developer.apple.com/videos/play/wwdc2016/723/?time=354) · [Apple 导航播报指南](https://developer.apple.com/download/files/CarPlay-Developer-Guide.pdf?trk=public_post_comment-text#page=52)
+
+用户补充，之前使用有线 ICCOA 盒子时主动把导航音量调得很低。车机可能沿用了当时的导航音量，留待后续实车顺手核对。导航偏小移出专项排查，下一轮聚焦播报时主音频的压低与恢复，以及方向盘调节对应的 MMI 音量类别。
+
+用户随后补充，上一版实车已经听到导航期间音乐压低，但车机依旧显示 Entertainment。该现象与桥接没有发送 `duckAudio` 同时成立，压低可能由手机源或车机混音策略完成。由于没有 iPhone 同车对照，新实验单独添加 Apple 规范定义的播报控制，使用上一版 APK 作为对照。
+
+`-Pq4AltAudioSetupProbe=true -Pq4NavigationDuckingProbe=true` 启用新实验。9241 凑齐首个有效编码帧时，独立控制工作线程尝试发送 `POST /command`的 `duckAudio`，参数用原生 iOS 在另一台奥迪 MHI2Q 上记录的 `durationMs=500`、`volume=-20.0 dB`。播报结束按最后一次 RTP 本地成功写入，加上该 101 SETUP 请求的缓冲值和一帧时长，估算发出 `unduckAudio` 的时点。该时间是实验估计，车机实际出声与恢复时间由实测判断。短间隔续播取消尚未发出的恢复。明确拒绝或超时后本会话不再反复尝试，若请求可能已写出但应答丢失，则仍发一次配对恢复。`NAV-PROMPT` 记录写入尝试与 RTSP 响应，视频、主音频和 RTP 不等待这些响应。 [Apple 播报生命周期](https://developer.apple.com/download/files/CarPlay-Developer-Guide.pdf?trk=public_post_comment-text#page=52) · [MHI2Q 原生 iOS 控制记录](https://github.com/luka-dev/mib2q-carplay-rgi/blob/main/TODO.md#L201)
+
+### 带播报控制的实车验证（2026-11-19 12:44）
+
+APK 基于 `136d7e5`，包含工作区中的 101 Opus、播报控制和 Wi-Fi 状态日志。本次 CarPlay TCP、101 SETUP 和 RECORD 均先于 CarLife 控制连接，补齐了独立导航流的 CarPlay 先连路径。同日 11:12 的 CarLife 先起路径使用未发送播报控制的版本。本次申请热点时 Wi-Fi 已启用，20.203 秒后绑定成功。 [脱敏事件](vehicle-tests/2026-11-19-q4-124430/events.redacted.log)
+
+车机对 9 对 `duckAudio` / `unduckAudio` 均返回 RTSP 200。用户实测播报时方向盘可调 `Navigation` 音量，上一版显示 `Entertainment`。用户同时报告导航更容易卡顿、破音、丢音，且语音音质明显弱于合并输出。音乐恢复命令有应答，用户反馈未记录实际恢复时点。
+
+手机从首块有效 9241 PCM 到首个本地 RTP 写入相隔 318 ms，首包前已有两次队列满。最终汇总为 3116 个 Opus 包均写入本地 UDP，非阻塞写入丢弃为 0，另有 153 次发送前的丢弃计数。该计数包含队列满、过期、无效输入和不满帧尾部等代码分支，后三类在这轮的数量未单独统计。同期主 PCM 也出现 569 ms 的最大本地发送间隔，但该统计窗口入口无丢弃。当前 9241 工作线程在持有编码输出缓冲期间等待 RTP 发包时点，同一线程承担输入消费和编码。下一轮先在 9241 路径解除这项耦合，按阶段记录耗时、队列音频时长及各类丢弃，沿用车机已验证的 100/101 设置和播报控制。
+
+音质对照须考虑 9241 输入为 16 kHz 单声道，合并路径可直通 CarLife 已混好的 48 kHz 双声道 PCM。按当前三相 24 抽头滤波器系数计算，稳态基波 5 kHz 为 −0.01 dB、6.5 kHz 为 −0.73 dB、7 kHz 为 −3.78 dB、7.2 kHz 为 −6.02 dB。后续可用同一段提示音的 9241 原 PCM、编码前重采样输出、Opus 解码回读以及合并 PCM 做离线对照，再根据带宽、耗时与听感结果决定是否更换滤波器。公开 CarLife 车机端参考实现用各自格式初始化音乐与 TTS 的 AudioTrack，其代码可用于对照分离模式下的轨道组织。OPPO CarLife 引擎 APK 有 `libswresample.so`，本次查阅的路径未把该库调用与发送端合并音频关联起来。 [CarLife 车机端参考实现](https://github.com/674809/carlife/blob/f9522db31a5244b89a2f3f555b2e0ad882b48674/CarLife-Android-Vehicle/src/com/baidu/carlifevehicle/audioplayer/audiotrackmanager/AudioTrackManagerDualNormal.java#L194) · [Android 重采样评估指标](https://source.android.com/docs/core/audio/src)
+
+后续从同一手机提取并核对 `com.baidu.carlife.oppo` 8.6.8 和 `com.oplus.ocar` 17.32.4 的实现。`com.oplus.ocar` 的 `SubmixRecordCreator` 按 AudioAttributes usage 和 UID 配置 AudioPolicy loopback，从 `createAudioRecordSink` 读取系统混音 PCM，再经 `CarlifeCastManagerService` 的系统音频回调交给百度组件。百度组件按回调的媒体或 TTS 类型封包走 9240 或 9241。独立 TTS 开关控制是否创建 16 kHz 单声道地图回采并将地图 UID 从媒体策略排除。12:44 这轮分离模式的 Android 录音历史在 CarLife 首个关键帧之后显示了 OPPO 运行组件的两个独立 `REMOTE_SUBMIX` 会话。11:12 CarLife 先起的分离模式也有两条对应会话。 [脱敏事件](vehicle-tests/2026-11-19-q4-124430/events.redacted.log) · [AOSP AudioPolicy 回采](https://android.googlesource.com/platform/frameworks/base/%2B/875e464e362c1e5527c5830c107c7ef84ecfbf0d/media/java/android/media/audiopolicy/AudioPolicy.java)
+
+用户随后报告这两轮的方向盘语音键均无响应。11:12 CarLife 先起且尚无 duck 命令的 Opus 实验，记录三次长按，均收到 `requestSiri` 并写出 CarLife `0x68008` 的 `0x21`／`0x22`。12:44 CarPlay 先连且启用 duck 的 Opus 实验，记录一次长按和一次 933 ms 短按，均写出 `0x21`，长按松开另写 `0x22`。该日志的“已送达”由本地控制 socket 的 write 和 flush 结果产生。手机保留的录音历史在这些按键时点没有新增语音助手录音，导出中也没有对应的引擎硬键处理日志。首个长按发生于最后一条 `unduckAudio` 的 RTSP 200 之后。新装的 101 PCM 实验包尚无车测日志。反编译显示，百度组件在 OPPO 集成模式把 `0x21` 转成 `8107`，经 `MixScreenManager` 的远程按键回调交给 OPPO；后续定位优先查 `CarlifeTouchManager` 的收包和 `CarlifeProjectionProxy` 的回调。 [CarLife 先起](vehicle-tests/2026-11-19-q4-111258/events.redacted.log) · [CarPlay 先连](vehicle-tests/2026-11-19-q4-124430/events.redacted.log)
+
+随后只读导出了百度 `carlife_20261119.xlog` 和 Car+ 的 `CarConnect`、`OCarLauncher` 滚动日志。百度 Xlog 覆盖两轮但只有 `F` 级记录，`CarlifeTouchManager` 的 `keycode=33`、`CommonMsgTransmit` 的 `8107` 则写在 `D` 级。Car+ 日志覆盖两轮并显示 `com.heytap.speechassist` 初始化成功，同期无 `CarlifeProjectionProxy` 的 `8107`、`handleFuncKeyEvent: VR_START` 或 `startVoiceAssistant`。静态路由核对发现桥接 `sendHardKeyCode()` 写的是 `7240/Cmd`。百度 `ConnectSocket` 在 `7240` 调用通用消息分发，硬键 `0x68008` 的处理位于 `9340/Touch` 的 `TouchThread → handleTouchMsg → CarlifeTouchManager.dispatchTouchEvent`。两个端口均使用 8 字节控制式头。现有证据支持优先验证将语音硬键单独发到 `9340`，以 Car+ 的 `8107` 和小布启动为分段验收点。本轮没有发送验证报文或修改应用代码。 [Tencent Mars Xlog 格式](https://github.com/Tencent/mars/blob/master/mars/xlog/crypt/decode_mars_nocrypt_log_file.py)
+
+### Q4 48 kHz PCM 导航、语音键与状态卡片（2026-11-19 15:25）
+
+实车包为本机 Debug `1.2.31-q4-debug`，源码基线 `136d7e5` 加工作区实验改动，15:11:39 经 USB 覆盖安装。两项 Q4 实验开关开启。本轮为 CarPlay 先连。15:25:58.433 CarPlay TCP 建立，15:26:01.242 101 SETUP 和后续 RECORD 均获接受。CarLife 于 15:26:25.974 建立控制连接，15:26:26.387 被接管，15:26:28.841 收到首个关键帧。当天 11:12 的 CarLife 先起材料来自 Opus 版本，本轮的 PCM 版本覆盖 CarPlay 先连。 [脱敏事件](vehicle-tests/2026-11-19-q4-152525/events.redacted.log)
+
+CarPlay 导航固定为 `101/default/0x4000`（48 kHz、单声道、16 位 PCM），每包 352 样本／704 字节载荷。车机返回 7071 数据端口和 controlPort=0。CarLife 9241 有 10 条 16 kHz 单声道 PCM16 INIT，手机将其升采样到 48 kHz。首块具有效格式的 9241 PCM 到首个本地 RTP 日志间隔约 6 ms。用户听到导航及时开始和结束，未察觉明显丢字，播报中仍有啪啪爆音，音乐正常压低。11 对 `duckAudio`／`unduckAudio` 均有 RTSP 200。用户在本轮正常启动和播报时未遇到车机主动断连，日志后的离线记录为热点断开。后续独立导航只匹配这个 101 PCM 档，保留 9241 16→48 kHz，沿用既有 100 媒体路径。
+
+15:29:32.118 的累计汇总为已组包 7750、写入 UDP 7253、RTP 队列满丢 116、超过 250 ms 包龄丢 381、非阻塞 UDP 返回零 0。另有 67 次 `rejected`，该计数独立于 497 个已组包后丢弃的 PCM 包，并涵盖 60 ms 空闲时不足一包的尾部等情况。多次 60 ms 空闲切分后的 RTP 首包包龄已达 140–204 ms，首轮 INIT 前还记录一次未知规格 0 Hz。优先检查 9241 块到达间隔、60 ms 边界是否把连续播报切开，以及 RTP 队列包龄和发包间隔。当前实现丢过期包仍推进 RTP 时间戳，队列满丢弃发生在 RTP 编号之前，后续相邻包可能直接拼接不连续的波形。两处都有产生可听断点的机制。用户报告没有逐次爆音时间，后续同段复现对照这些边界和原始 9241 波形。保持首帧就绪即发，先测量再决定是否调度修正，不先加预缓冲或改滤波、混音和媒体档位。
+
+用户反馈短按由 Q4 自带语音助手处理，长按唤起小布，松手时在识别或回答阶段均会退出。日志有两次独立 `Prewarm`，以及四组可配对的长按按下和松开，分别为 5495、7618、3555、12484 ms。每次按下 `0x21 VR_START` 入队 9340，松手 `0x22 VR_STOP` 入队 9340。当前 `VoiceKeyRouter` 对超过 1500 ms 的物理松手生成 PTT 收尾。下轮可单独取消 Q4 `requestSiri ButtonUp` 的主动 `VR_STOP`，保留按键状态清理和当前起识别路径，实车验证松手后可继续说话和播完回答。按用户要求只归档和分析本轮，未修改按键实现。
+
+用户确认 CarLife 卡片常驻且显示正常，希望去掉突兀的占位横杠并优化视觉。后续保留常驻与接管状态，有数据时显示对应的简洁规格行，沿用应用颜色及卡片样式。本轮没有新的播放／暂停／停止、方向盘 Navigation 音量类别或合并模式对照结果。
+
+复核 15:27:34 的快速短按，Q4 发出 `Prewarm`，192 ms 后以 `nativeVR` 借用主屏和主音频，本次没有成对的 CarPlay 按下与松开。紧接的一轮长按也先发 `Prewarm`，随后才发出可转交小布的按下。12:44 记录中的 933 ms 是 `ButtonDown` 到 `ButtonUp` 的协议事件间隔，短于本应用的 PTT 阈值，只说明这一组已被车机转交的事件没有发送 `VR_STOP`。它无法作为 Q4 快速短按交给应用的证据。Apple 的车机集成说明把配备原生语音识别时的 CarPlay 唤起分配给长按。保留 `Prewarm` 语义；已转交的按键可用 `0x21` 唤起小布并由小布收尾。 [脱敏事件](vehicle-tests/2026-11-19-q4-152525/events.redacted.log#L26) · [Apple 车机集成说明](https://devstreaming-cdn.apple.com/videos/wwdc/2016/722x2eefo3u2rp8k8qs/722/722_developing_carplay_systems_part_1.pdf?dl=1)
+
+从当前 32 抽头／相位 Hann 系数计算线性频响，7.0／7.2 kHz 增益分别为 −1.41／−3.18 dB。对照同样三相、32 抽头／相位、中心 15 个输入采样间隔的 Kaiser β=5、截止参数 7.9 kHz 候选，分别为 +0.01／−0.12 dB，0–7 kHz 内在 −0.02 至 +0.01 dB 之间，9–24 kHz 区间最大增益为 −55.55 dB（原版 −56.45 dB，10 Hz 网格）。两者同为每秒约 154 万次乘加，名义滤波延迟约 0.94 ms。结果来自系数计算，尚未对 9241 语音做听辨或手机耗时实测。用同一份短 9241 样本比较原声、现有输出与候选输出，同时观察缩放或量化前是否出现满幅。独立测量发送侧断点，避免把丢包引起的杂音归因于滤波器。 [Android Kaiser 窗与固定多相 FIR 指南](https://developer.android.google.cn/ndk/guides/audio/sampling-audio?hl=en)
+
+### Oboe Best 与长按语音复测（2026-11-19 傍晚、2026-11-20 早晨）
+
+USB 核对安装标识为 `1.2.31-q4-debug`，安装时间 11 月 19 日 16:27:07，源码基线 `136d7e5` 加当前实验改动，早晨日志记录 Oboe Best。昨晚应用日志保留段从 16:47 开始，早晨一轮的 CarLife 控制连接（06:48:34.675）早于 CarPlay TCP（06:48:37.741），首个 CarLife 关键帧随后到达，06:48:47.085 完成 101 PCM SETUP 和 RECORD。 [脱敏时间线](vehicle-tests/2026-11-20-q4-oboe-best/events.redacted.log)
+
+用户反馈导航爆音本轮已消失，语音仍发闷，已向 OPPO 反馈。两轮的 9241 INIT 仍声明 16 kHz 单声道 PCM16。傍晚 17:14:48 的长按在 9340 本地写出 `0x21 VR_START`，1.586 秒后松手只清理状态。用户确认小布唤起及自行结束均正常。
+
+用户反馈今早开启导航时首句话未听到，后续均正常。日志中的首播候选窗口为 06:49:11.907–06:49:15.167。101 在首个 9241 INIT 前约 25 秒已经完成协商。首个本地 RTP 的 PCM 包龄为 87 ms，发包前已记录两次 9241 输入队列满。首播窗口结束时已组包 449 个，本地 UDP 写入 354 个，组包后因队列满丢弃 25 个、因包龄超限丢弃 70 个，另有 5 次输入或尾块拒绝计数。下一段 06:49:23 的首 RTP 包龄记录为 0 ms，下一次汇总的两个组包后丢弃计数未增加。07:31:55 汇总的组包后累计丢弃为 127 个，其中 95 个发生在首个窗口。证据定位到首播本地送包前出现短时积压，缺少线程 CPU 时间和车机实际渲染记录，无法把用户漏听整句具体归因到某一环。仅归档，不改变重采样、调度或预缓冲。

@@ -1,0 +1,39 @@
+# Q4 navigation ducking experiment, local time UTC+08:00.
+# APK base 136d7e5 with uncommitted 101 Opus, navigation ducking, and Wi-Fi state logging changes.
+# Source: USB export of application debug logs. Events summarized, with identities and payloads omitted.
+
+[12:44:06.782] Wi-Fi state immediately before app hotspot request: enabled.
+[12:44:26.985] Android Wi-Fi specifier available and network bound.
+[12:44:27.335] CarPlay TCP connected.
+[12:44:30.034] Alternate Audio SETUP requested type=101, Opus 48 kHz mono, latencyMs=250.
+[12:44:30.067] SETUP RTSP 200, alternate data port 7071, control port 0.
+[12:44:30.087] Audio SETUP and RECORD accepted.
+[12:44:30.172] Opus encoder c2.android.opus.encoder opened, 48000 Hz, 960 samples per packet.
+[12:44:55.310] CarLife control channel connected.
+[12:44:58.236] First CarLife keyframe received.
+[12:44:59.273] Android audio recording history: OPPO car-link runtime, unsilenced REMOTE_SUBMIX capture.
+[12:44:59.482] Android audio recording history: OPPO car-link runtime, second unsilenced REMOTE_SUBMIX capture session.
+[12:45:26.636] CarLife 9241 declared 16000 Hz mono PCM16.
+[12:45:26.717] First 9241 PCM accepted, 1024 bytes.
+[12:45:26.882] First 9241 PCM block rejected because queue was full.
+[12:45:26.930] Second 9241 PCM block rejected because queue was full.
+[12:45:27.035] First navigation RTP datagram written locally, 318 ms after the first PCM was accepted.
+[12:45:27.036] duckAudio write attempted.
+[12:45:27.071] duckAudio RTSP 200.
+[12:45:27.080] Third 9241 PCM block rejected because queue was full. Further rejection reasons are suppressed by the current logger.
+[12:45:36.160] Cumulative navigation counters: 406 encoded, 406 sent, 41 sender rejections, 0 non-blocking UDP write drops.
+[12:45:36.347] unduckAudio write attempted.
+[12:45:36.356] unduckAudio RTSP 200.
+[12:45:56.635] TTS callback maximum wall time 421630 us in the prior measurement window.
+[12:46:00.453] Main PCM path reports 1408 admitted inputs, 0 rejected inputs, and maximum local RTP send gap of 569 ms in the prior 30 s window.
+[12:46:49.918] Cumulative navigation counters: 3116 encoded, 3116 sent, 153 sender rejections, 0 non-blocking UDP write drops.
+[12:46:50.105] Last unduckAudio write attempted.
+[12:46:50.116] Last unduckAudio RTSP 200. Across the session, 9 duckAudio and 9 unduckAudio requests received RTSP 200.
+[12:46:50.891] CarPlay requestSiri button down. Bridge wrote hard key 0x21 at 12:46:50.892.
+[12:46:52.507] CarPlay requestSiri button up after 1616 ms. Bridge wrote hard key 0x22 at 12:46:52.511.
+[12:47:29.258] CarPlay requestSiri button down. Bridge wrote hard key 0x21 at 12:47:29.259.
+[12:47:30.190] CarPlay requestSiri button up. Router treated the 933 ms press as short and left the voice session open for the engine to end.
+
+# Driver observation: the steering wheel can adjust Navigation volume during prompts. Navigation is more prone to stutter, distortion and missing audio than music. Navigation speech sounds worse than CarLife merged output.
+# Later driver observation: neither a short nor a long press of the steering-wheel voice button produced a visible response. Hard-key events above are successful local socket writes.
+# The sender rejection counter combines queue-full blocks, invalid blocks, stale blocks and incomplete Opus frame tails. It is not a lost RTP packet count.

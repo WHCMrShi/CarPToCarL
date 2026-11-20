@@ -706,7 +706,7 @@ JSON 体：`{ "type": "<命令名>", "params": { ... } }`。
 | `setNightMode`              | 车机→手机 | 昼夜                                   |
 | `setLimitedUI`              | 车机→手机 | 行车限制 UI                              |
 | `requestUI`                 | 车机→手机 | 请求某个 UI 上下文                          |
-| `duckAudio` / `unduckAudio` | 车机→手机 | 压低/恢复音量（导航播报时）                       |
+| `duckAudio` / `unduckAudio` | 手机→车机 | 压低/恢复主音频（Apple Accessory Interface Specification §23.3.7.1/.2） |
 | `disableBluetooth`          | 手机→车机 | 指定本机蓝牙 `deviceID`，车机断开 HFP/A2DP/AVRCP 并在会话期间不重连 |
 | `iAPSendMessage`            | 双向    | **WiFi 上的第二条 iAP2 隧道**（见 6.4）        |
 | `changeMapZoomLevel`        | 车机→手机 | 地图缩放                                 |

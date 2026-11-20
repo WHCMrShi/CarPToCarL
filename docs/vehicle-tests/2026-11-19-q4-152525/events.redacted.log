@@ -1,0 +1,51 @@
+# Q4 | 2026-11-19 15:25–15:30 CST | 精选应用日志，保留时间顺序
+[15:25:25.658] CONNECT-DIAG: start requested; default media=48k PCM
+[15:25:37.814] CONNECT-DIAG: requesting system WiFi selection; wifiState=enabled
+[15:25:58.433] AIRPLAY: TCP 已连通；portSource=MDNS
+[15:26:00.999] AIRPLAY: 音频协商 → type=100/media format=0x8000 48000Hz PCM samplesPerPacket=352
+[15:26:01.139] ALT-AUDIO-PROBE: SETUP type=101 format=0x4000 PCM48 mono s16 latencyMs=250
+[15:26:01.220] ALT-AUDIO-PROBE: RTSP/1.0 200 OK, alternateDataPort=7071 controlPort=0 accepted=true
+[15:26:01.242] ALT-AUDIO-PROBE: SETUP accepted=true, RECORD accepted=true
+[15:26:01.245] ALT-AUDIO-PROBE: PCM rate=48000 channels=1 bits=16 samplesPerPacket=352
+[15:26:21.037] STAGE: 等 CarLife 首帧超时；本地写入=0 帧
+[15:26:25.974] CARLIFE: 控制端口已连接
+[15:26:26.387] CARLIFE: 已接管本机 CarLife 码流
+[15:26:28.841] CARLIFE: 收到 CarLife 首帧（3934B，keyFrame=true）
+[15:26:28.851] CARLIFE: 已开始向车机送帧
+[15:26:50.436] ALT-AUDIO-PROBE: unsupported TTS input 0Hz 0ch 0bit
+[15:26:50.436] ALT-AUDIO-PROBE: 9241 INIT rate=16000 channels=1 bits=16 error=null
+[15:26:50.437] ALT-AUDIO-PROBE: first 9241 PCM 16000Hz mono s16, bytes=1024
+[15:26:50.443] ALT-AUDIO-PROBE: first RTP of prompt bytes=704 sent=1 pcmAgeMs=4
+[15:26:50.451] NAV-PROMPT: write-attempt duckAudio durationMs=500 volumeDb=-20
+[15:26:50.468] NAV-PROMPT: RX duckAudio [RTSP/1.0 200 OK]
+[15:26:51.083] ALT-AUDIO-PROBE: discarded incomplete PCM packet at 9241 idle, samples=320, discarded=1
+[15:26:51.164] ALT-AUDIO-PROBE: 9241 idle; totals packetized=82 sent=82 udpDrops=0 rejected=1 rtpQueueDrops=0 rtpAgeDrops=0
+[15:26:51.177] ALT-AUDIO-PROBE: first RTP of prompt bytes=704 sent=83 pcmAgeMs=140
+[15:26:51.767] ALT-AUDIO-PROBE: dropped PCM before RTP: PCM age at send deadline exceeds 250ms
+[15:27:21.691] ALT-AUDIO-PROBE: dropped PCM before RTP: output queue full
+[15:27:34.092] EVENT: requestSiri Prewarm
+[15:27:34.284] EVENT-DIAG: changeModes SPEECH；nativeVR 借用主屏和主音频
+[15:27:37.980] EVENT-DIAG: changeModes SPEECH_END；nativeVR 归还主屏和主音频
+[15:27:40.270] EVENT: requestSiri Prewarm
+[15:27:40.784] EVENT: requestSiri 按下 → VR_START 0x21
+[15:27:40.787] CARLIFE: 0x21 → 9340 / 0x68008 已入队
+[15:27:46.277] EVENT: requestSiri 松开，按住 5495ms → VR_STOP 0x22
+[15:27:46.278] CARLIFE: 0x22 → 9340 / 0x68008 已入队
+[15:27:56.319] EVENT: requestSiri 按下 → VR_START 0x21
+[15:27:56.327] CARLIFE: 0x21 → 9340 / 0x68008 已入队
+[15:28:03.937] EVENT: requestSiri 松开，按住 7618ms → VR_STOP 0x22
+[15:28:03.939] CARLIFE: 0x22 → 9340 / 0x68008 已入队
+[15:28:06.757] EVENT: requestSiri 按下 → VR_START 0x21
+[15:28:06.760] CARLIFE: 0x21 → 9340 / 0x68008 已入队
+[15:28:10.312] EVENT: requestSiri 松开，按住 3555ms → VR_STOP 0x22
+[15:28:10.314] CARLIFE: 0x22 → 9340 / 0x68008 已入队
+[15:28:13.363] EVENT: requestSiri 按下 → VR_START 0x21
+[15:28:13.366] CARLIFE: 0x21 → 9340 / 0x68008 已入队
+[15:28:25.846] EVENT: requestSiri 松开，按住 12484ms → VR_STOP 0x22
+[15:28:25.859] CARLIFE: 0x22 → 9340 / 0x68008 已入队
+[15:29:21.513] ALT-AUDIO-PROBE: 9241 idle; totals packetized=6413 sent=5949 udpDrops=0 rejected=55 rtpQueueDrops=108 rtpAgeDrops=356
+[15:29:32.118] ALT-AUDIO-PROBE: 9241 idle; totals packetized=7750 sent=7253 udpDrops=0 rejected=67 syncFailures=0 rtpQueueDrops=116 rtpAgeDrops=381
+[15:29:32.369] NAV-PROMPT: write-attempt unduckAudio durationMs=500
+[15:29:32.391] NAV-PROMPT: RX unduckAudio [RTSP/1.0 200 OK]
+[15:30:02.090] 车机热点断开
+[15:30:09.788] CONNECT-DIAG: final-disconnect requested
