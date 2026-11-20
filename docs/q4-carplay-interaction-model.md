@@ -1,5 +1,7 @@
 # 奥迪 Q4 e-tron CarPlay 交互链反推与实验记录
 
+继续 EA 实验请先看 [Q4 Wi-Fi EA Ping 交接](q4-ea-ping-handover.md)。
+
 ## 2026-11-20 Q4 EA 会话申请复测（待实车验证）
 
 后续实验在「使用车机 GPS」下增设独立的 `EA Ping` 开关（默认关闭）。仅在当前 Wi-Fi 链路上的 `de.audi.mmiconnectdatatransfer` 获匹配的 `0xEA03 SessionStatusOK` 后，以五秒间隔在协商的 EA 数据会话发送应用正文 `00`；iAP2 数据报另带两字节大端 EA 会话 ID。开关关闭、会话关闭或断链即停止；链路不可写时记跳过，不排队补发。入站正文沿用专用文件，尚无车机回包样例，不预设车机会回复 Pong。
