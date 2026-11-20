@@ -1425,7 +1425,10 @@ class Iap2SenderSession(
         if (frames.isEmpty()) return null
         // 完整会话录制：原始报文（含 0x1D01 能力清单这类大包）进 session_trace.log，
         // 与 main_debug.log 的摘要行按时间戳对齐，用于事后离线分析拆链/超时。
-        frames.forEach { SessionTrace.csm(SessionTrace.Dir.RX, "bt", it.messageId, it.body) }
+        frames.forEach {
+            it.eaReceiveLog("BT")?.let(log)
+            SessionTrace.csm(SessionTrace.Dir.RX, "bt", it.messageId, it.body)
+        }
         frames.forEach { evidence.message("RX_PARSED", it.messageId) }
         frames.forEach { recordNowPlayingSubscription(it) }
         frames.forEachIndexed { index, frame -> if (index > 0) receivedFrames += frame }

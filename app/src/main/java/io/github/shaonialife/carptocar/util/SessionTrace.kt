@@ -290,7 +290,7 @@ object SessionTrace {
      * 头尾都留的理由——iAP2 的大报文（0x1D01 能力清单、0xEA03 数据）开头是结构、结尾常有
      * 校验/终止项，只留头会看不出结尾是否完整。
      */
-    private fun ByteArray.toHexBody(): String {
+    internal fun ByteArray.toHexBody(): String {
         if (size <= MAX_BODY_BYTES) return toHex()
         val half = MAX_BODY_BYTES / 2
         val omitted = size - MAX_BODY_BYTES

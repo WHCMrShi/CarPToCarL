@@ -14,6 +14,7 @@ import io.github.shaonialife.carptocar.iap2.Iap2SubscriptionReplies
 import io.github.shaonialife.carptocar.iap2.MfiLengthMemory
 import io.github.shaonialife.carptocar.iap2.NmeaLocation
 import io.github.shaonialife.carptocar.iap2.NowPlayingUpdates
+import io.github.shaonialife.carptocar.iap2.eaReceiveLog
 import io.github.shaonialife.carptocar.input.ConsumerKeys
 import io.github.shaonialife.carptocar.util.SessionTrace
 import java.security.SecureRandom
@@ -184,6 +185,7 @@ class VirtualIap2Link(
 
     init {
         engine.onFileDiagnostic = { log("ARTWORK: WiFi $it") }
+        engine.onEaDiagnostic = { log("EA: WiFi $it") }
         engine.onHandshakeObservation = { log("CONNECT-DIAG: WiFi handshake $it") }
         engine.onPeerSynchronizationAdopted = { sync ->
             artworkSender.newLink()
@@ -988,8 +990,11 @@ class VirtualIap2Link(
         frameCount++
         val frames = parser.offer(bytes)
         for (frame in frames) {
-            val hex = frame.body.joinToString(" ") { "%02x".format(it) }
-            if (frameCount <= 30 || frameCount % 100 == 0) {
+            val eaLog = frame.eaReceiveLog("WiFi")
+            if (eaLog != null) {
+                log(eaLog)
+            } else if (frameCount <= 30 || frameCount % 100 == 0) {
+                val hex = frame.body.joinToString(" ") { "%02x".format(it) }
                 log(
                     "IAPLINK: rx 0x${frame.messageId.toString(16)} " +
                         "(${Iap2MessageIds.nameOf(frame.messageId)}) ${frame.body.size}B hex=${hex.take(160)}",
