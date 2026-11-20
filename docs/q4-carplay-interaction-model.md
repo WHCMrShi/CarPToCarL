@@ -2,6 +2,12 @@
 
 继续 EA 实验请先看 [Q4 Wi-Fi EA Ping 交接](q4-ea-ping-handover.md)：包含独立分支、手机包修订号和下轮取证步骤。
 
+## 2026-11-20 Q4 Wi-Fi EA Ping 实测：MMI 数据会话双向通路已验证
+
+手机日志修订号 `4bf11b18dd8a`（实验分支 `codex/q4-ea00-retest`）。CarLife 首帧先到的一轮，专用文件在 16:34:34.133–16:41:38.691 保存 85 条周期性入站，间隔约 5 秒；已保留的普通日志缺该轮申请、回执和发送明细。CarPlay 先连的一轮，Wi-Fi 认证后申请三个协议，仅 MMI 会话 257 在 133 ms 后收到 `0xEA03 SessionStatusOK`；CarLife 首帧在首个 EA 回包约 39 秒后到达。
+
+第二轮的 407 条 Ping 提交均可与同一连接的入站帧逐次配对，首尾跨度约 34 分钟，提交至原始采集时间差为 32–265 ms，中位数 98 ms。两轮合计 492 条同格式的一字节入站记录，均来自 Wi-Fi EA 链路会话 3、业务会话 257。该结果支持将其视为本测试里的 Ping 应答，业务语义及 `eadata0`、`eadata1` 的可用性仍待验证。详见[脱敏时间线与取证边界](vehicle-tests/2026-11-20-q4-wifi-ea-ping/analysis.md)。
+
 ## 2026-11-20 Q4 Wi-Fi EA 复测：MMI 会话收到正常状态
 
 手机日志修订号 `e79f865f70ac`。本轮 CarPlay 先连，Wi-Fi iAP2 认证后提交三条 `0xEA00`；只有 `de.audi.mmiconnectdatatransfer`（协议 ID 1、EA 会话 ID 257）在约 161 ms 后收到 `0xEA03 SessionStatusOK`。`eadata0` 和 `eadata1` 未见状态。专用正文文件只有启动标记，普通日志也未记录 EA 入站数据帧；会话正常状态不是车辆数据到达的证据。
