@@ -1,5 +1,7 @@
 # 奥迪 Q4 e-tron CarPlay 交互链反推与实验记录
 
+继续 EA 实验请先看 [Q4 Wi-Fi EA Ping 交接](q4-ea-ping-handover.md)：包含独立分支、手机包修订号和下轮取证步骤。
+
 ## 2026-11-20 Q4 Wi-Fi EA 复测：MMI 会话收到正常状态
 
 手机日志修订号 `e79f865f70ac`。本轮 CarPlay 先连，Wi-Fi iAP2 认证后提交三条 `0xEA00`；只有 `de.audi.mmiconnectdatatransfer`（协议 ID 1、EA 会话 ID 257）在约 161 ms 后收到 `0xEA03 SessionStatusOK`。`eadata0` 和 `eadata1` 未见状态。专用正文文件只有启动标记，普通日志也未记录 EA 入站数据帧；会话正常状态不是车辆数据到达的证据。
