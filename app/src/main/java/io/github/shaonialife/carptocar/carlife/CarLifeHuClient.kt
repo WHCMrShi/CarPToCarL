@@ -1,5 +1,7 @@
 package io.github.shaonialife.carptocar.carlife
 
+import io.github.shaonialife.carptocar.BuildConfig
+
 import io.github.shaonialife.carptocar.iap2.PascdMotion
 import io.github.shaonialife.carptocar.iap2.PascdGear
 
@@ -69,7 +71,8 @@ class CarLifeHuClient(
      * 「暂不处理」直接丢掉，于是「放音乐有声、开导航没声」。TTS 与媒体是两条独立流，
      * 采样率也可能不同（TTS 常见 16k 单声道），所以必须各自带格式送进发送端重采样。
      */
-    private val onTtsPcm: (pcm: ByteArray, size: Int) -> Unit = { _, _ -> },
+    private val onTtsPcm: (pcm: ByteArray, size: Int, rate: Int, channels: Int, bits: Int, generation: Int, type: Int) -> Unit =
+        { _, _, _, _, _, _, _ -> },
     /**
      * 引擎音频**开停信号**（0x30002 开始 / 0x30003 停止，长度 0 的裸类型包）。
      *
@@ -284,6 +287,9 @@ class CarLifeHuClient(
         @Volatile
         var announced = false
 
+        @Volatile
+        var declaredFormat: OutputAudioFormat? = null
+
         /** TTS 通道已宣告的采样率 / 声道（0 = 未宣告）。 */
         @Volatile
         var rate = 0
@@ -309,6 +315,29 @@ class CarLifeHuClient(
 
     private val mediaChan = AudioChannel(CarLifeProtocol.PORT_MEDIA, "媒体", isTts = false)
     private val ttsChan = AudioChannel(CarLifeProtocol.PORT_TTS, "TTS", isTts = true)
+
+    internal data class OutputAudioFormat(val rate: Int, val channels: Int, val bits: Int)
+
+    internal data class OutputStatus(
+        val videoSize: Pair<Int, Int>?,
+        val fps: Double?,
+        val media: OutputAudioFormat?,
+        val navigation: OutputAudioFormat?,
+    )
+
+    @Volatile private var receivedVideoSize: Pair<Int, Int>? = null
+    @Volatile private var measuredVideoFps: Double? = null
+
+    internal fun outputStatus(): OutputStatus {
+        val hasRecentFrames = !videoDead && lastFrameAt > 0 &&
+            android.os.SystemClock.uptimeMillis() - lastFrameAt < VIDEO_FPS_WINDOW_MS
+        return OutputStatus(
+            receivedVideoSize,
+            measuredVideoFps.takeIf { hasRecentFrames },
+            mediaChan.declaredFormat,
+            ttsChan.declaredFormat,
+        )
+    }
 
     /**
      * 引擎音频是否处于「活跃」态（0x30002 开 / 0x30003 停）。
@@ -1080,6 +1109,10 @@ class CarLifeHuClient(
         // 实测帧率窗口：每 5 秒统计一次，回答「98311 声明 60 到底有没有让引擎真的吐 60 帧」。
         var windowStart = android.os.SystemClock.uptimeMillis()
         var windowFrames = 0L
+        if (owner == null || sockets[CarLifeProtocol.PORT_VIDEO] === owner) {
+            receivedVideoSize = null
+            measuredVideoFps = null
+        }
         val metrics = PipelineWindow("CarLife-video-callback")
         fun phase(name: String) {
             if (owner == null || sockets[CarLifeProtocol.PORT_VIDEO] === owner) {
@@ -1109,10 +1142,11 @@ class CarLifeHuClient(
                 // 关键帧里带 SPS：解析出码流真实分辨率，触摸坐标以它为准。
                 // 只在 I 帧上做（20fps 下很稀疏），开销可忽略。
                 if (length > 32 && (isSpsCandidate(payload) || (streamWidth == 0 && videoFrameCount < 300))) {
-                    val sps = H264Sps.parseAnnexB(payload)
-                    if (sps != null && isPlausibleSize(sps.first, sps.second) &&
-                        (sps.first != streamWidth || sps.second != streamHeight)
-                    ) {
+                    val sps = H264Sps.parseAnnexB(payload)?.takeIf { isPlausibleSize(it.first, it.second) }
+                    if (sps != null && (owner == null || sockets[CarLifeProtocol.PORT_VIDEO] === owner)) {
+                        receivedVideoSize = sps
+                    }
+                    if (sps != null && (sps.first != streamWidth || sps.second != streamHeight)) {
                         val previous = "$streamWidth x $streamHeight"
                         streamWidth = sps.first
                         streamHeight = sps.second
@@ -1124,8 +1158,9 @@ class CarLifeHuClient(
                     }
                 }
                 val now = android.os.SystemClock.uptimeMillis()
-                if (now - windowStart >= 5_000) {
+                if (now - windowStart >= VIDEO_FPS_WINDOW_MS) {
                     val fps = windowFrames * 1000.0 / (now - windowStart)
+                    if (owner == null || sockets[CarLifeProtocol.PORT_VIDEO] === owner) measuredVideoFps = fps
                     log(
                         "CARLIFE: 实测帧率 %.1ffps（5s 内 %d 帧，声明 $requestedFps）"
                             .format(fps, windowFrames),
@@ -1358,24 +1393,10 @@ class CarLifeHuClient(
         return true
     }
 
-    /**
-     * 下发车机硬键（0x68008），用于媒体播放/暂停及语音键。
-     * `HardKey.VR_START` 让 CarLife+ 用手机自己的麦克风起语音识别。
-     */
-    fun sendHardKeyCode(keycode: Int): Boolean {
-        if (!running.get()) return false
-        val ok = send(CarLifeProtocol.TOUCH_CAR_HARD_KEY_CODE, CarLifeProtocol.carHardKeyCode(keycode))
-        log(
-            "CARLIFE: 车机硬键 0x%02X %s".format(
-                keycode,
-                when (keycode) {
-                    CarLifeProtocol.HardKey.VR_START -> "（语音识别开始）→ CarLife+ 应起小度"
-                    CarLifeProtocol.HardKey.VR_STOP -> "（语音识别结束）"
-                    else -> ""
-                },
-            ) + if (ok) "" else " —— 命令通道不可用，未送达",
-        )
-        return ok
+    /** 0x68008 由 9340 的触摸线程和手势串行写出。返回值表示是否入队。 */
+    fun enqueueHardKey(keycode: Int): Boolean {
+        if (!running.get() || !sockets.containsKey(CarLifeProtocol.PORT_TOUCH)) return false
+        return touchForwarder?.enqueueHardKey(keycode) == true
     }
 
     fun sendPauseMedia(): Boolean = running.get() && send(CarLifeProtocol.HU_PAUSE_MEDIA, ByteArray(0))
@@ -1622,6 +1643,7 @@ class CarLifeHuClient(
         // 格式宣告状态挂在 channel 上（不是局部变量）：重连后必须沿用已宣告过的值，
         // 否则新读线程会以为引擎没宣告过，给上层报 48kHz 兜底值把真实的 44.1kHz 覆盖掉。
         var ttsPackets = 0L
+        var ttsInit: CarLifeProtobuf.Fields? = null
         val metrics = PipelineWindow("CarLife-$label-callback")
         try {
             while (running.get()) {
@@ -1641,6 +1663,12 @@ class CarLifeHuClient(
                         // **不对应**（媒体数据在 0x30006，TTS 数据却在 0x40003）。只认两条铁律：
                         // 有负载 = 裸 PCM（导航播报），长度 0 = 开停信号（仅记录）。
                         if (type == CarLifeProtocol.TTS_PKG_INIT) {
+                            val parsed = CarLifeProtobuf.parse(payload)
+                            if (channel.generation == generation) channel.declaredFormat = declaredAudioFormat(parsed)
+                            if (BuildConfig.Q4_ALT_AUDIO_SETUP_PROBE) {
+                                ttsInit = parsed.takeIf { it.error == null }
+                                log("ALT-AUDIO-PROBE: 9241 INIT rate=${parsed.int(1)} channels=${parsed.int(2)} bits=${parsed.int(3)} error=${parsed.error}")
+                            }
                             val format = parseAudioInit(payload)
                             if (format != null) {
                                 channel.expectation.format(android.os.SystemClock.uptimeMillis())
@@ -1665,7 +1693,9 @@ class CarLifeHuClient(
                                 )
                             }
                             noteAudioPcm(channel)
-                            onTtsPcm(payload, length)
+                            if (channel.generation == generation) {
+                                onTtsPcm(payload, length, ttsInit?.int(1) ?: 0, ttsInit?.int(2) ?: 0, ttsInit?.int(3) ?: 0, generation, type)
+                            }
                         } else if (channel.controlLogged.add(type)) {
                             log("CARLIFE: TTS 开停信号 0x${type.toString(16)}（长度 0，仅记录）")
                         }
@@ -1673,6 +1703,9 @@ class CarLifeHuClient(
                     }
                     when (type) {
                         CarLifeProtocol.MUSIC_PKG_INIT -> {
+                            if (channel.generation == generation) {
+                                channel.declaredFormat = declaredAudioFormat(CarLifeProtobuf.parse(payload))
+                            }
                             val format = parseAudioInit(payload)
                             if (format != null) {
                                 channel.expectation.format(android.os.SystemClock.uptimeMillis())
@@ -1927,6 +1960,18 @@ class CarLifeHuClient(
     /** CarLife 的 channelConfig → 声道数（1=单声道，2/3/4/12 均按立体声处理）。 */
     private fun channelsOf(channelConfig: Int): Int = if (channelConfig == 1) 1 else 2
 
+    private fun declaredAudioFormat(fields: CarLifeProtobuf.Fields): OutputAudioFormat? {
+        if (fields.error != null) return null
+        val rate = fields.int(1)?.takeIf { it > 4_000 } ?: return null
+        val channels = when (fields.int(2)) {
+            1 -> 1
+            2, 3, 4, 12 -> 2
+            else -> return null
+        }
+        val bits = fields.int(3)?.takeIf { it == 8 || it == 16 } ?: return null
+        return OutputAudioFormat(rate, channels, bits)
+    }
+
     // ---- 心跳 ----
 
     private fun heartbeatLoop() {
@@ -2090,6 +2135,7 @@ class CarLifeHuClient(
 
         /** 单个视频帧上限（1080p 高码率 I 帧实测 < 400KB，留足余量）。 */
         private const val MAX_VIDEO_FRAME = 4 * 1024 * 1024
+        private const val VIDEO_FPS_WINDOW_MS = 5_000L
 
         private const val DEFAULT_AUDIO_RATE = 48_000
 

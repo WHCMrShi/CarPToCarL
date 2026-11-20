@@ -8,6 +8,15 @@
     <string name="connection_status_idle">未连接</string>
     <string name="connection_status_connecting">连接中</string>
     <string name="connection_status_connected">已连接</string>
+    <string name="carlife_status_title">CarLife</string>
+    <string name="carlife_not_attached">未接管</string>
+    <string name="carlife_attached">已接管</string>
+    <string name="carlife_video_output">视频　%1$s</string>
+    <string name="carlife_resolution">%1$d × %2$d</string>
+    <string name="carlife_fps">%1$.1f fps</string>
+    <string name="carlife_media_output">媒体　%1$s</string>
+    <string name="carlife_navigation_output">导航　%1$s</string>
+    <string name="carlife_audio_format">%1$d Hz · %2$d 声道 · %3$d 位 PCM</string>
     <string name="accessibility_description">镜像模式：把车机触摸手势注入手机屏幕，不读取屏幕内容</string>
     <string name="instrument_navigation">仪表导航信息</string>
     <string name="clear_car_wifi_memory">清除记忆</string>

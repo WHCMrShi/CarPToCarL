@@ -61,6 +61,17 @@ class VoiceKeyRouterTest {
     }
 
     @Test
+    fun q4ReleaseLeavesConversationOpenAndAllowsTheNextPress() {
+        repeat(2) {
+            router.onSiriAction(VoiceKeyRouter.SIRI_ACTION_BUTTON_DOWN)
+            advance(3_870L)
+            router.onSiriAction(VoiceKeyRouter.SIRI_ACTION_BUTTON_UP, sendStopOnRelease = false)
+        }
+        assertEquals(listOf(CarLifeProtocol.HardKey.VR_START, CarLifeProtocol.HardKey.VR_START), sent)
+        assertTrue(logs.last().contains("Q4 对话由小布结束"))
+    }
+
+    @Test
     fun thresholdIsInclusive() {
         router.onSiriAction(VoiceKeyRouter.SIRI_ACTION_BUTTON_DOWN)
         advance(VoiceKeyRouter.PTT_HOLD_MILLIS)

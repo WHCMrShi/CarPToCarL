@@ -33,6 +33,7 @@ import io.github.shaonialife.carptocar.bt.CarApproachReceiver
 import io.github.shaonialife.carptocar.bt.TargetDevicePrefs
 import io.github.shaonialife.carptocar.carlife.CarGpsOption
 import io.github.shaonialife.carptocar.carlife.CarLifeHijack
+import io.github.shaonialife.carptocar.carlife.CarLifeHuClient
 import io.github.shaonialife.carptocar.input.CarInputClient
 import io.github.shaonialife.carptocar.input.TouchRouter
 import io.github.shaonialife.carptocar.launcher.VirtualLauncher
@@ -83,6 +84,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var heroStateText: TextView
     private lateinit var btnResidualCleanup: TextView
     private lateinit var heroSubline: TextView
+    private lateinit var carLifeStatus: TextView
+    private lateinit var carLifeOutput: View
+    private lateinit var carLifeVideo: TextView
+    private lateinit var carLifeMedia: TextView
+    private lateinit var carLifeNavigation: TextView
     /** 「显示」卡片里的分辨率行（车机通告值 + 本次码流尺寸）。 */
     private lateinit var ctaButton: LinearLayout
     private lateinit var ctaTexture: ConnectionButtonTexture
@@ -446,6 +452,11 @@ class MainActivity : AppCompatActivity() {
             pendingResidualDisplays?.let { promptResidualDisplays(it) }
         }
         heroSubline = findViewById(R.id.heroSubline)
+        carLifeStatus = findViewById(R.id.carLifeStatus)
+        carLifeOutput = findViewById(R.id.carLifeOutput)
+        carLifeVideo = findViewById(R.id.carLifeVideo)
+        carLifeMedia = findViewById(R.id.carLifeMedia)
+        carLifeNavigation = findViewById(R.id.carLifeNavigation)
         ctaButton = findViewById(R.id.ctaButton)
         ctaTexture = ConnectionButtonTexture(ctaButton)
         ctaIcon = findViewById(R.id.ctaIcon)
@@ -828,19 +839,43 @@ class MainActivity : AppCompatActivity() {
             heroState = s
             applyHeroState(s)
         }
-        if (s == HeroState.CONNECTING) {
-            heroSubline.text = SessionController.connectingSubtitle()
+        if (s != HeroState.IDLE) {
+            heroSubline.text = SessionController.connectionCardSubtitle()
         }
         // 启动残留屏检查进行中：状态与副标题临时切换为检查提示
         if (s == HeroState.IDLE && startupCheckRunning) {
             heroStateText.text = "检查中"
             heroSubline.text = "正在检查残留屏"
         }
+        updateCarLifeCard()
         updateReadyRow()
     }
 
+    private fun updateCarLifeCard() {
+        val output = CarLifeHijack.outputStatus()
+        carLifeStatus.setText(if (output == null) R.string.carlife_not_attached else R.string.carlife_attached)
+        val resolution = output?.videoSize?.let { (width, height) ->
+            getString(R.string.carlife_resolution, width, height)
+        }
+        val fps = output?.fps?.let { getString(R.string.carlife_fps, it) }
+        val video = listOfNotNull(resolution, fps).joinToString(" · ").takeIf { it.isNotEmpty() }
+        val media = output?.media?.let(::formatCarLifeAudio)
+        val navigation = output?.navigation?.let(::formatCarLifeAudio)
+        updateCarLifeRow(carLifeVideo, R.string.carlife_video_output, video)
+        updateCarLifeRow(carLifeMedia, R.string.carlife_media_output, media)
+        updateCarLifeRow(carLifeNavigation, R.string.carlife_navigation_output, navigation)
+        carLifeOutput.visibility = if (video != null || media != null || navigation != null) View.VISIBLE else View.GONE
+    }
+
+    private fun updateCarLifeRow(row: TextView, label: Int, value: String?) {
+        row.text = value?.let { getString(label, it) }
+        row.visibility = if (value == null) View.GONE else View.VISIBLE
+    }
+
+    private fun formatCarLifeAudio(format: CarLifeHuClient.OutputAudioFormat): String =
+        getString(R.string.carlife_audio_format, format.rate, format.channels, format.bits)
+
     private fun applyHeroState(s: HeroState) {
-        heroSubline.visibility = if (s == HeroState.CONNECTED) View.GONE else View.VISIBLE
         heroStateText.text =
             when (s) {
                 HeroState.IDLE -> getString(R.string.connection_status_idle)
@@ -1932,6 +1967,7 @@ class MainActivity : AppCompatActivity() {
     private fun applyContentLayout() {
         val scroll = findViewById<android.widget.ScrollView>(R.id.mainScroll)
         val row = findViewById<android.widget.LinearLayout>(R.id.contentRow)
+        val statusColumn = findViewById<android.widget.LinearLayout>(R.id.statusColumn)
         val hero = findViewById<android.widget.LinearLayout>(R.id.heroCard)
         val detail = findViewById<android.widget.LinearLayout>(R.id.detailColumn)
         val density = resources.displayMetrics.density
@@ -1950,9 +1986,9 @@ class MainActivity : AppCompatActivity() {
         val padBottom = (20 * density).toInt()
         hero.setPadding(hero.paddingStart, padTop, hero.paddingEnd, padBottom)
         if (landscape) {
-            if (hero.parent === row) {
-                row.removeView(hero)
-                heroPane.addView(hero)
+            if (statusColumn.parent === row) {
+                row.removeView(statusColumn)
+                heroPane.addView(statusColumn)
             }
             // 宽度用**屏幕宽减页面内边距**推算，不读 contentArea.width：
             // 旋转瞬间后者还是旧方向的测量值（竖屏 1168 → 英雄卡只有 537px，
@@ -1972,7 +2008,7 @@ class MainActivity : AppCompatActivity() {
                         android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
                     ).apply { gravity = android.view.Gravity.START or android.view.Gravity.TOP }
             // 右侧内容让出英雄卡宽度（含间距）：滚动条仍在屏幕右缘
-            hero.layoutParams = android.widget.FrameLayout.LayoutParams(
+            statusColumn.layoutParams = android.widget.FrameLayout.LayoutParams(
                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                 android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = gap }
@@ -1984,10 +2020,10 @@ class MainActivity : AppCompatActivity() {
             }
         } else {
             heroPane.visibility = View.GONE
-            if (hero.parent === heroPane) {
-                heroPane.removeView(hero)
+            if (statusColumn.parent === heroPane) {
+                heroPane.removeView(statusColumn)
                 row.addView(
-                    hero,
+                    statusColumn,
                     0,
                     android.widget.LinearLayout.LayoutParams(
                         android.view.ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1995,7 +2031,7 @@ class MainActivity : AppCompatActivity() {
                     ),
                 )
             }
-            (hero.layoutParams as android.widget.LinearLayout.LayoutParams).apply {
+            (statusColumn.layoutParams as android.widget.LinearLayout.LayoutParams).apply {
                 width = android.view.ViewGroup.LayoutParams.MATCH_PARENT
                 weight = 0f
                 topMargin = gap

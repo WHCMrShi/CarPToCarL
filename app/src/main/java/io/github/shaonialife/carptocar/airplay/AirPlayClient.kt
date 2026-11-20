@@ -3,6 +3,7 @@ package io.github.shaonialife.carptocar.airplay
 import android.content.Context
 import android.os.SystemClock
 import io.github.shaonialife.carptocar.audio.AudioCodec
+import io.github.shaonialife.carptocar.audio.NavigationPromptDucking
 import io.github.shaonialife.carptocar.audio.AudioProfile
 import io.github.shaonialife.carptocar.audio.AudioSender
 import io.github.shaonialife.carptocar.audio.AudioTuning
@@ -2134,6 +2135,7 @@ class AirPlayClient(
         val streamKey: ByteArray,
         /** 协商出的采样率（Hz）：按车机声明选择，AudioSender 必须用同一值采集。 */
         val sampleRate: Int = 48_000,
+        val latencyMs: Long = 0L,
     )
 
     /**
@@ -2846,6 +2848,102 @@ class AirPlayClient(
         } finally {
             runCatching { dataSocket.close() }
             runCatching { controlSocket?.close() }
+        }
+    }
+
+    /** Negotiate the Q4 experiment's independently advertised Alternate Audio stream. */
+    internal fun setupQ4AlternateAudio(sharedSecret: ByteArray): AudioStreamInfo? {
+        val streamType = 101L
+        val pcm48kMono = 1L shl 14
+        val info = negotiatedInfo ?: return null
+        val declared = (info["audioFormats"] as? List<*>)
+            .orEmpty()
+            .filterIsInstance<Map<*, *>>()
+            .any { entry ->
+                (entry["type"] as? Number)?.toLong() == streamType &&
+                    entry["audioType"] == "default" &&
+                    (((entry["audioOutputFormats"] as? Number)?.toLong() ?: 0L) and pcm48kMono) != 0L
+            }
+        if (!declared) {
+            log("ALT-AUDIO-PROBE: skipped (101/default/PCM48 mono absent from /info)")
+            return null
+        }
+
+        val connectionId = (SecureRandom().nextLong() and Long.MAX_VALUE).coerceAtLeast(1L)
+        val latencyMs = latencyFor(info, "default", streamType)
+        val description = linkedMapOf(
+            "type" to streamType,
+            "streamConnectionID" to connectionId,
+            "audioFormat" to pcm48kMono,
+            "audioLatencyMs" to latencyMs,
+        )
+        val body = BinaryPlist.encode(linkedMapOf("streams" to listOf(description)))
+        val host = endpoint.ipAddresses.firstOrNull() ?: return null
+        log("ALT-AUDIO-PROBE: SETUP type=101 format=0x${pcm48kMono.toString(16)} PCM48 mono s16 latencyMs=$latencyMs")
+        return try {
+            val (status, response) = request(
+                "SETUP",
+                "rtsp://$host:${endpoint.airPlayPort}/",
+                body,
+                timeoutMillis = 3_000,
+                contentType = "application/x-apple-binary-plist",
+            )
+            val stream = if (status.split(' ').getOrNull(1) == "200") {
+                val reply = BinaryPlist.parse(response) as? Map<*, *>
+                (reply?.get("streams") as? List<*>)
+                    ?.filterIsInstance<Map<*, *>>()
+                    ?.singleOrNull { entry ->
+                        (entry["type"] as? Number)?.toLong() == streamType &&
+                            (!entry.containsKey("streamConnectionID") ||
+                                (entry["streamConnectionID"] as? Number)?.toLong() == connectionId)
+                    }
+            } else {
+                null
+            }
+            val dataPort = portOf(stream?.get("dataPort"))
+            val controlPort = portOf(stream?.get("controlPort"))
+            log("ALT-AUDIO-PROBE: $status, alternateDataPort=$dataPort controlPort=$controlPort accepted=${dataPort > 0}")
+            if (dataPort == 0) return null
+            val streamKey = AirPlayCrypto.hkdfSha512(
+                sharedSecret,
+                "DataStream-Salt$connectionId".toByteArray(Charsets.US_ASCII),
+                "DataStream-Output-Encryption-Key".toByteArray(Charsets.US_ASCII),
+            )
+            AudioStreamInfo(connectionId, dataPort, controlPort, streamKey, latencyMs = latencyMs)
+        } catch (error: IOException) {
+            log("ALT-AUDIO-PROBE: SETUP failed (${error.message})")
+            null
+        } catch (error: IllegalArgumentException) {
+            log("ALT-AUDIO-PROBE: invalid SETUP response (${error.message})")
+            null
+        }
+    }
+
+    internal fun navigationPromptDucking(latencyMs: Long): NavigationPromptDucking {
+        val scope = resources
+        return NavigationPromptDucking(latencyMs) { duck ->
+            val type = if (duck) "duckAudio" else "unduckAudio"
+            val params = linkedMapOf<String, Any?>("durationMs" to 500L)
+            if (duck) params["volume"] = -20.0
+            val body = BinaryPlist.encode(linkedMapOf("type" to type, "params" to params))
+            var attempted = false
+            try {
+                val (status, _) = request(
+                    "POST", "/command", body,
+                    timeoutMillis = 1_000,
+                    contentType = "application/x-apple-binary-plist",
+                    expectedScope = scope,
+                    beforeWrite = {
+                        attempted = true
+                        log("NAV-PROMPT: write-attempt $type durationMs=500${if (duck) " volumeDb=-20" else ""}")
+                    },
+                )
+                log("NAV-PROMPT: RX $type [$status]")
+                status.split(' ').getOrNull(1) == "200"
+            } catch (error: IOException) {
+                log("NAV-PROMPT: $type result=${if (attempted) "unknown" else "not-written"}: ${error.message}")
+                if (attempted) null else false
+            }
         }
     }
 

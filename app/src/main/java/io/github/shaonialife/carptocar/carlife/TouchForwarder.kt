@@ -56,6 +56,12 @@ internal class TouchForwarder(
             ready.signal()
         }
 
+    fun enqueueHardKey(keycode: Int): Boolean = lock.withLock {
+        if (stopped || size == CAPACITY) return false
+        append(CarLifeProtocol.TOUCH_CAR_HARD_KEY_CODE, keycode, 0, -1)
+        true
+    }
+
     fun enqueue(
         service: Int,
         x: Int,
@@ -118,19 +124,23 @@ internal class TouchForwarder(
                 }
             }
             if (!overflow) {
-                val at = index(size++)
-                entries[at] = service
-                entries[at + 1] = px
-                entries[at + 2] = py
-                entries[at + 3] = action
-                queuedAt[at / 4] = System.nanoTime()
-                ready.signal()
+                append(service, px, py, action)
             }
         }
         if (overflow) onOverflow()
     }
 
     private fun index(offset: Int) = ((head + offset) % CAPACITY) * 4
+
+    private fun append(service: Int, x: Int, y: Int, action: Int) {
+        val at = index(size++)
+        entries[at] = service
+        entries[at + 1] = x
+        entries[at + 2] = y
+        entries[at + 3] = action
+        queuedAt[at / 4] = System.nanoTime()
+        ready.signal()
+    }
 
     private fun run() {
         val event = IntArray(4)
@@ -202,6 +212,19 @@ internal class TouchForwarder(
                     continue
                 }
                 val service = event[0]
+                if (service == CarLifeProtocol.TOUCH_CAR_HARD_KEY_CODE) {
+                    val keycode = event[1]
+                    val frame = CarLifeProtocol.packCommand(service, CarLifeProtocol.carHardKeyCode(keycode))
+                    try {
+                        output.write(frame)
+                        output.flush()
+                    } catch (error: java.io.IOException) {
+                        onStats("CARLIFE: 硬键 0x${keycode.toString(16)} 9340 本地写入失败 ${error.javaClass.simpleName}")
+                        throw error
+                    }
+                    onStats("CARLIFE: 硬键 0x${keycode.toString(16)} 9340 本地写入完成")
+                    continue
+                }
                 val action = event[3]
                 write(service, event[1], event[2], action, System.nanoTime() - eventQueuedAt)
                 if (service == CarLifeProtocol.TOUCH_ACTION) {

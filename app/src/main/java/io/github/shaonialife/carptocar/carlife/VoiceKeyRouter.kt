@@ -36,6 +36,7 @@ package io.github.shaonialife.carptocar.carlife
  * - **短按/按住不到 [PTT_HOLD_MILLIS]**：只发 `VR_START`，收尾交给 CarLife+ 自己
  *   （静音 / 超时 / 用户点取消），不发 `VR_STOP`；
  * - **长按达到阈值**：松手时补发 `VR_STOP`，按 PTT 语义收尾。
+ * - **Q4 的 requestSiri**：松手只清理按键状态，对话由小布结束。
  *
  * 实测日志里的按住时长 0.89s / 2.15s / 3.69s / 3.87s，阈值取 1.5s 正好把
  * 「等提示音就松手」和「按住说一句话」分开。这个值只影响收尾，不影响起识别。
@@ -76,12 +77,12 @@ class VoiceKeyRouter(
 
     /** AirPlay 事件通道 `requestSiri` 入口。 */
     @Synchronized
-    fun onSiriAction(action: Int?) {
+    fun onSiriAction(action: Int?, sendStopOnRelease: Boolean = true) {
         when (action) {
             SIRI_ACTION_PREWARM ->
                 log("EVENT: 车机语音键 requestSiri Prewarm（仅预热，不触发 CarLife）")
             SIRI_ACTION_BUTTON_DOWN -> down("requestSiri")
-            SIRI_ACTION_BUTTON_UP -> up("requestSiri")
+            SIRI_ACTION_BUTTON_UP -> up("requestSiri", sendStopOnRelease)
             else -> log("EVENT: 车机语音键 requestSiri siriAction=$action（未定义，忽略）")
         }
     }
@@ -120,7 +121,7 @@ class VoiceKeyRouter(
         log("EVENT: 车机语音键（$source 按下）→ CarLife 0x68008 keycode=0x21 VR_START")
     }
 
-    private fun up(source: String) {
+    private fun up(source: String, sendStopOnRelease: Boolean = true) {
         if (!startSent) return
         val held = nowMillis() - downAt
         val pressSource = downSource
@@ -131,7 +132,9 @@ class VoiceKeyRouter(
             log("EVENT: 车机语音键（$pressSource 释放超时 ${held}ms）→ 作废，不补 VR_STOP")
             return
         }
-        if (held >= PTT_HOLD_MILLIS) {
+        if (!sendStopOnRelease) {
+            log("EVENT: 车机语音键（$source 松开，按住 ${held}ms）→ Q4 对话由小布结束")
+        } else if (held >= PTT_HOLD_MILLIS) {
             send(CarLifeProtocol.HardKey.VR_STOP)
             log(
                 "EVENT: 车机语音键（$pressSource 按下→$source 松开，按住 ${held}ms）" +

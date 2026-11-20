@@ -14,6 +14,7 @@ import io.github.shaonialife.carptocar.airplay.VirtualIap2Link
 import io.github.shaonialife.carptocar.audio.AudioProfile
 import io.github.shaonialife.carptocar.audio.AudioProfileMemory
 import io.github.shaonialife.carptocar.audio.AudioSender
+import io.github.shaonialife.carptocar.audio.NavigationAudioSender
 import io.github.shaonialife.carptocar.audio.AudioTuning
 import io.github.shaonialife.carptocar.bt.BtCompatPrefs
 import io.github.shaonialife.carptocar.bt.BtProfiles
@@ -449,17 +450,17 @@ object SessionController {
      *
      * 实测这台车的语音键走 AirPlay 事件通道 `requestSiri`（siriAction=2 按下 / 3 松开），
      * 不是 iAP2 `0x6802` 的 HID `0xCF`；两条通路都收进同一个 [VoiceKeyRouter]，
-     * 由它做边沿触发和「长按才补 VR_STOP」的收尾判定。这里只负责把动作搬去
+     * 由它做边沿触发和收尾判定。Q4 的 requestSiri 松手将收尾交给小布。这里只负责把动作搬去
      * [carLifeCommandSender]，不占 iAP2 收帧线程。
      */
     private val voiceKey =
         VoiceKeyRouter(
             send = { keycode ->
                 carLifeCommandSender.execute {
-                    val ok = CarLifeHijack.sendVoiceKey(keycode)
+                    val queued = CarLifeHijack.sendVoiceKey(keycode)
                     appendLog(
-                        "CARLIFE: 车机语音键 0x%02X → 0x68008 ".format(keycode) +
-                            if (ok) "已送达" else "未送达（CarLife 未接管）",
+                        "CARLIFE: 车机语音键 0x%02X → 9340 / 0x68008 ".format(keycode) +
+                            if (queued) "已入队" else "未入队（触摸通道不可用或队列已满）",
                     )
                 }
             },
@@ -642,12 +643,17 @@ object SessionController {
 
     @Volatile
     var audioSender: AudioSender? = null
+    @Volatile private var navigationAudioSender: NavigationAudioSender? = null
+    private val loggedNavigationUnavailable = AtomicBoolean()
     private val audioEpoch = SessionEpoch()
 
     @Volatile
     var currentClient: AirPlayClient? = null
         set(value) {
-            if (field !== value) audioEpoch.begin(value)
+            if (field !== value) {
+                audioEpoch.begin(value)
+                loggedNavigationUnavailable.set(false)
+            }
             field = value
         }
 
@@ -1758,6 +1764,13 @@ object SessionController {
 
     /** 连接状态卡片和通知共用的阶段文案。 */
     internal fun connectingSubtitle(): String = (phaseHint ?: "正在准备连接").trimEnd('…', '.', ' ')
+
+    /** 仅供应用顶部连接状态卡片显示推流时长。 */
+    internal fun connectionCardSubtitle(): String {
+        val elapsedMs = videoSender?.runningDurationMs ?: return connectingSubtitle()
+        val seconds = elapsedMs.coerceAtLeast(0L) / 1_000
+        return String.format(Locale.US, "%02d:%02d", seconds / 60, seconds % 60)
+    }
 
     internal fun notificationSummary(): String =
         if (connectionRequested || sessionStarting.get() || isSessionRunning()) {
@@ -3148,15 +3161,32 @@ object SessionController {
 
     private fun retireAudioOwner(owner: AirPlayClient? = null) {
         var previous: AudioSender? = null
+        var previousNavigation: NavigationAudioSender? = null
         var watcher: Thread? = null
         val detach = {
             activeAudioHadInput = activeAudioHadInput || audioSender?.hasRealInput == true
             previous = audioSender; audioSender = null
+            previousNavigation = navigationAudioSender; navigationAudioSender = null
             watcher = callWatcher; callWatcher = null; callWatcherLease = null
         }
         if (owner == null) audioEpoch.clear(detach) else audioEpoch.end(owner, detach)
         watcher?.interrupt()
         previous?.stop()
+        previousNavigation?.close()
+    }
+
+    internal fun routeQ4NavigationAudio(
+        pcm: ByteArray, size: Int, rate: Int, channels: Int, bits: Int, source: Any, generation: Int, type: Int,
+    ): Boolean {
+        if (currentClient?.receiverIdentity() != "DELPHI AUDI 3162") return false
+        if (type != 0x40003) return true
+        val sender = navigationAudioSender
+        if (sender != null) {
+            sender.offer(pcm, size, rate, channels, bits, source, generation)
+        } else if (loggedNavigationUnavailable.compareAndSet(false, true)) {
+            appendLog("ALT-AUDIO-PROBE: dropped 9241 PCM because 101 is not active, bytes=$size")
+        }
+        return true
     }
 
     /** 根据 Android 音频模式应答车机的 iAP2 通话状态查询。 */
@@ -4509,7 +4539,10 @@ object SessionController {
                                                 is Number -> raw.toInt()
                                                 else -> raw?.toString()?.trim()?.toIntOrNull()
                                             }
-                                        voiceKey.onSiriAction(action)
+                                        voiceKey.onSiriAction(
+                                            action,
+                                            sendStopOnRelease = client.receiverIdentity() != "DELPHI AUDI 3162",
+                                        )
                                     }
 
                                     "forceKeyFrame" -> {
@@ -4975,10 +5008,10 @@ object SessionController {
                                 // 连续静默，控制会话晚 6 秒才起来，6011 同步包还被 ICMP 拒。
                                 // 同源项目在 CL39 上就是「控制会话就绪——允许音频 SETUP」之后
                                 // 才发，往返只有 172ms。等不到也不拆链：照常发，超时兜底。
+                                val controlReady = sessionKey != null && client.awaitControlSession(AUDIO_CONTROL_SESSION_WAIT_MS)
                                 if (sessionKey != null) {
-                                    val ready = client.awaitControlSession(AUDIO_CONTROL_SESSION_WAIT_MS)
                                     appendLog(
-                                        if (ready) {
+                                        if (controlReady) {
                                             "AUDIO: 控制会话已就绪——开始音频 SETUP（不再抢在 MFi 前）"
                                         } else {
                                             "AUDIO: 等控制会话就绪超时（${AUDIO_CONTROL_SESSION_WAIT_MS}ms）" +
@@ -4988,12 +5021,38 @@ object SessionController {
                                 }
                                 val audioStarted = startAudioChannel(context, client, sessionKey, host)
                                 if (audioStarted) {
+                                    val q4NavigationExperiment = BuildConfig.Q4_ALT_AUDIO_SETUP_PROBE &&
+                                        currentClient === client && client.receiverIdentity() == "DELPHI AUDI 3162"
+                                    val probeAlternate = q4NavigationExperiment && controlReady &&
+                                        activeAudioProfile?.key == "100|media|32768|PCM"
+                                    if (q4NavigationExperiment && !probeAlternate) {
+                                        appendLog("ALT-AUDIO-PROBE: 101 skipped, controlReady=$controlReady media=${activeAudioProfile?.key}")
+                                    }
+                                    val navigationLease = if (probeAlternate) audioEpoch.capture(client) else null
+                                    val alternate = if (navigationLease != null && sessionKey != null) {
+                                        client.setupQ4AlternateAudio(sessionKey)
+                                    } else {
+                                        null
+                                    }
                                     // 流在 RECORD 之后加入：AirPlay 语义要求再发一次 RECORD
                                     // 把新流纳入已激活的会话。缺这一步时车机对 SETUP 回 200
                                     // 并给 dataPort，但不会真正播放（2026-10-17 奥迪实测：
                                     // 音频包持续发送、采集内容非零，车机无声）。
                                     appendLog("AUDIO: 音频流已加入——补发 RECORD 激活（流后加入会话）")
-                                    connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.RECORD) { client.record() }
+                                    val recorded = connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.RECORD) { client.record() }
+                                    if (probeAlternate) {
+                                        appendLog("ALT-AUDIO-PROBE: SETUP accepted=${alternate != null}, RECORD accepted=$recorded")
+                                    }
+                                    if (recorded && alternate != null && navigationLease != null && host != null) {
+                                        audioEpoch.commit(navigationLease) {
+                                            val ducking = if (BuildConfig.Q4_NAVIGATION_DUCKING_PROBE) {
+                                                client.navigationPromptDucking(alternate.latencyMs)
+                                            } else {
+                                                null
+                                            }
+                                            navigationAudioSender = NavigationAudioSender(host, alternate, ::appendLog, ducking).also { it.start() }
+                                        }
+                                    }
                                 }
                             } else {
                                 // 屏幕流 SETUP 失败：会话已经死了，但旧实现到这里什么都不说，

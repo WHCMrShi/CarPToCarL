@@ -4,13 +4,13 @@ import org.bouncycastle.crypto.modes.ChaCha20Poly1305
 import org.bouncycastle.crypto.params.AEADParameters
 import org.bouncycastle.crypto.params.KeyParameter
 
-/** 每条音频流独占；由 AudioSender 发送锁保护。返回值借用工作区，必须在下次调用前发送。 */
-internal class PcmPacketSealer(key: ByteArray, private val streamType: Long) {
+/** 每条音频流独占。返回值借用工作区，必须在下次调用前发送。 */
+internal class PcmPacketSealer(key: ByteArray, private val streamType: Long, packetBytes: Int = AudioSender.PACKET_BYTES) {
     private val keyParameter = KeyParameter(key)
     private val cipher = ChaCha20Poly1305()
     private val nonce = ByteArray(12)
-    private val swapped = ByteArray(AudioSender.PACKET_BYTES)
-    private val wire = ByteArray(12 + AudioSender.PACKET_BYTES + 16 + 8)
+    private val swapped = ByteArray(packetBytes)
+    private val wire = ByteArray(12 + packetBytes + 16 + 8)
     private var lastNonce = -1L
 
     fun seal(source: ByteArray, offset: Int, sequence: Int, timestamp: Long, counter: Long, marker: Boolean): ByteArray {

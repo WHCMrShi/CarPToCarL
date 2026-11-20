@@ -76,6 +76,29 @@ class TouchForwarderTest {
         }
     }
 
+    @Test fun writesMediaAndVoiceHardKeysBetweenTouchEvents() {
+        val out = RecordingOutput()
+        val sender = TouchForwarder(out)
+        try {
+            sender.enqueue(down, 12, 34)
+            assertTrue(sender.enqueueHardKey(CarLifeProtocol.HardKey.MEDIA_START))
+            assertTrue(sender.enqueueHardKey(CarLifeProtocol.HardKey.MEDIA_STOP))
+            assertTrue(sender.enqueueHardKey(CarLifeProtocol.HardKey.VR_START))
+            assertTrue(sender.enqueueHardKey(CarLifeProtocol.HardKey.VR_STOP))
+            sender.enqueue(up, 12, 34)
+            sender.start()
+
+            assertArrayEquals(expected(down, 12, 34), out.next())
+            assertArrayEquals(byteArrayOf(0, 2, 0, 0, 0, 6, 0x80.toByte(), 8, 8, 0x1f), out.next())
+            assertArrayEquals(byteArrayOf(0, 2, 0, 0, 0, 6, 0x80.toByte(), 8, 8, 0x20), out.next())
+            assertArrayEquals(byteArrayOf(0, 2, 0, 0, 0, 6, 0x80.toByte(), 8, 8, 0x21), out.next())
+            assertArrayEquals(byteArrayOf(0, 2, 0, 0, 0, 6, 0x80.toByte(), 8, 8, 0x22), out.next())
+            assertArrayEquals(expected(up, 12, 34), out.next())
+        } finally {
+            sender.stop()
+        }
+    }
+
     @Test fun doesNotMergeDifferentWireFormats() {
         val out = RecordingOutput()
         val sender = TouchForwarder(out)

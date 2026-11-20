@@ -33,9 +33,21 @@ val keystoreProps =
     }
 val hasReleaseKeystore = keystoreProps.getProperty("storeFile") != null
 
+val altAudioSetupProbe = providers.gradleProperty("q4AltAudioSetupProbe").orNull == "true"
+
 android {
     namespace = "io.github.shaonialife.carptocar"
     compileSdk = 34
+
+    if (altAudioSetupProbe) {
+        ndkVersion = "27.0.12077973"
+        externalNativeBuild {
+            cmake {
+                path = file("src/main/cpp/CMakeLists.txt")
+                version = "3.22.1"
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "io.github.shaonialife.carptocar"
@@ -47,6 +59,8 @@ android {
         val sourceRevision = providers.environmentVariable("CARP_BUILD_REVISION").orElse("unknown").get()
             .replace(Regex("[^a-zA-Z0-9_-]"), "_").take(80)
         buildConfigField("String", "SOURCE_REVISION", "\"$sourceRevision\"")
+        buildConfigField("boolean", "Q4_ALT_AUDIO_SETUP_PROBE", "false")
+        buildConfigField("boolean", "Q4_NAVIGATION_DUCKING_PROBE", "false")
     }
 
     signingConfigs {
@@ -69,6 +83,9 @@ android {
             signingConfig = signingConfigs.getByName(if (hasReleaseKeystore) "release" else "debug")
         }
         debug {
+            buildConfigField("boolean", "Q4_ALT_AUDIO_SETUP_PROBE", altAudioSetupProbe.toString())
+            val navDuckingProbe = altAudioSetupProbe && providers.gradleProperty("q4NavigationDuckingProbe").orNull == "true"
+            buildConfigField("boolean", "Q4_NAVIGATION_DUCKING_PROBE", navDuckingProbe.toString())
             // **不要加 applicationIdSuffix**：本项目 debug 包就是日常使用的包——
             // Shizuku 授权是按包名授予的，改包名会要求重新授权。
             versionNameSuffix = "-q4-debug"

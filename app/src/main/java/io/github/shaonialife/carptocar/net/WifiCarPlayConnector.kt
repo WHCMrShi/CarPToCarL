@@ -269,7 +269,14 @@ class WifiCarPlayConnector(
         val accepted =
             try {
                 networks.startRequest(newCallback, { !isCancelled() }) {
-                    log("CONNECT-DIAG: requesting system WiFi selection request=${System.identityHashCode(newCallback)}")
+                    val wifiState = when (runCatching { wifiManager?.wifiState }.getOrNull()) {
+                        WifiManager.WIFI_STATE_ENABLED -> "enabled"
+                        WifiManager.WIFI_STATE_DISABLED -> "disabled"
+                        WifiManager.WIFI_STATE_ENABLING -> "enabling"
+                        WifiManager.WIFI_STATE_DISABLING -> "disabling"
+                        else -> "unknown"
+                    }
+                    log("CONNECT-DIAG: requesting system WiFi selection request=${System.identityHashCode(newCallback)} wifiState=$wifiState")
                     connectivityManager.requestNetwork(request, newCallback)
                 }
             } catch (error: Exception) {

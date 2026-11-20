@@ -30,15 +30,15 @@ internal object CarLifeMediaCommands {
         keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE || keyCode == KeyEvent.KEYCODE_MEDIA_STOP ||
         keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
 
-    data class Result(val play: Boolean, val sessionSent: Boolean, val hardKeySent: Boolean, val pauseSent: Boolean) {
-        val delivered: Boolean get() = sessionSent || hardKeySent || pauseSent
+    data class Result(val play: Boolean, val sessionSent: Boolean, val hardKeyQueued: Boolean, val pauseSent: Boolean) {
+        val submitted: Boolean get() = sessionSent || hardKeyQueued || pauseSent
     }
 
     fun dispatch(
         keyCode: Int,
         playing: Boolean,
         session: (Int) -> Boolean,
-        hardKey: (Int) -> Boolean,
+        enqueueHardKey: (Int) -> Boolean,
         pauseMedia: () -> Boolean,
     ): Result? {
         val play = when (keyCode) {
@@ -48,8 +48,9 @@ internal object CarLifeMediaCommands {
             else -> return null
         }
         val sessionSent = runCatching { session(if (play) KeyEvent.KEYCODE_MEDIA_PLAY else KeyEvent.KEYCODE_MEDIA_PAUSE) }.getOrDefault(false)
-        val hardKeySent = runCatching { hardKey(if (play) CarLifeProtocol.HardKey.MEDIA_START else CarLifeProtocol.HardKey.MEDIA_STOP) }.getOrDefault(false)
+        val hardKey = if (play) CarLifeProtocol.HardKey.MEDIA_START else CarLifeProtocol.HardKey.MEDIA_STOP
+        val hardKeyQueued = runCatching { enqueueHardKey(hardKey) }.getOrDefault(false)
         val pauseSent = !play && runCatching { pauseMedia() }.getOrDefault(false)
-        return Result(play, sessionSent, hardKeySent, pauseSent)
+        return Result(play, sessionSent, hardKeyQueued, pauseSent)
     }
 }

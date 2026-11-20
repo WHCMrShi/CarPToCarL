@@ -37,8 +37,8 @@ class CarLifeMediaCommandsTest {
         val hardKeys = mutableListOf<Int>()
         val result = CarLifeMediaCommands.dispatch(KeyEvent.KEYCODE_MEDIA_STOP, true,
             { throw IllegalStateException("no media permission") }, { hardKeys.add(it); true }, { true })!!
-        assertFalse(result.sessionSent); assertTrue(result.hardKeySent); assertTrue(result.pauseSent)
-        assertTrue(result.delivered)
+        assertFalse(result.sessionSent); assertTrue(result.hardKeyQueued); assertTrue(result.pauseSent)
+        assertTrue(result.submitted)
         assertEquals(listOf(0x20), hardKeys)
     }
 
@@ -53,8 +53,8 @@ class CarLifeMediaCommandsTest {
         val result = CarLifeMediaCommands.dispatch(KeyEvent.KEYCODE_MEDIA_PLAY, false,
             { false }, { false }, { error("play must not send pause") })!!
         assertTrue(result.play)
-        assertFalse(result.sessionSent); assertFalse(result.hardKeySent); assertFalse(result.pauseSent)
-        assertFalse("all failed must preserve the original system-key fallback", result.delivered)
+        assertFalse(result.sessionSent); assertFalse(result.hardKeyQueued); assertFalse(result.pauseSent)
+        assertFalse("all failed must preserve the original system-key fallback", result.submitted)
     }
 
     @Test(timeout = 10000) fun blockedSocketWorkDoesNotBlockCallerOrRunRetiredCommands() {

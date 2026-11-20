@@ -1,5 +1,7 @@
 package io.github.shaonialife.carptocar.carlife
 
+import io.github.shaonialife.carptocar.BuildConfig
+
 import io.github.shaonialife.carptocar.iap2.PascdMotion
 
 import io.github.shaonialife.carptocar.util.ConnectionResources
@@ -221,13 +223,13 @@ object CarLifeHijack {
                     val action = MediaSessionsState.transportActionFor(key)
                     client === hu && hu.isRunning && action >= 0 && MediaSessionsState.dispatchTransport(action)
                 },
-                hardKey = { key -> client === hu && hu.isRunning && hu.sendHardKeyCode(key) },
+                enqueueHardKey = { key -> client === hu && hu.enqueueHardKey(key) },
                 pauseMedia = { client === hu && hu.isRunning && hu.sendPauseMedia() },
             ) ?: return@enqueue
             logSink?.invoke("MEDIA-CONTROL: command=${if (result.play) "play" else "pause"} session=${result.sessionSent} " +
-                "hardKey=${result.hardKeySent} pauseCommand=${result.pauseSent} mergedPcm=unchanged; delivery-not-playback-confirmation")
-            if (!result.delivered && client === hu) {
-                logSink?.invoke("MEDIA-CONTROL: key=$keyCode delivery=failed fallback=system")
+                "hardKeyQueued=${result.hardKeyQueued} pauseCommandWritten=${result.pauseSent}")
+            if (!result.submitted && client === hu) {
+                logSink?.invoke("MEDIA-CONTROL: key=$keyCode submission=failed fallback=system")
                 fallback()
             }
         }
@@ -371,6 +373,12 @@ object CarLifeHijack {
     /** 已劫持并收到流（车机连接前就该为 true）。 */
     val isStreaming: Boolean get() = running.get() && client?.isRunning == true && hasVideo
 
+    /** 当前接管会话的源端数据，冷启动预热接管同样可见。 */
+    internal fun outputStatus(): CarLifeHuClient.OutputStatus? {
+        val source = client?.takeIf { running.get() && it.isRunning } ?: return null
+        return source.outputStatus().takeIf { client === source && source.isRunning && running.get() }
+    }
+
     /** Current, live CarLife input only; cached/notice frames and retired source callbacks cannot qualify. */
     internal fun bluetoothHandoffSource(owner: VideoSender): (() -> Boolean)? {
         val hu = client ?: return null
@@ -448,12 +456,10 @@ object CarLifeHijack {
      * 车机语音键 → CarLife 硬键（0x68008）。
      *
      * [keycode] 取 [CarLifeProtocol.HardKey.VR_START]（起识别）或
-     * [CarLifeProtocol.HardKey.VR_STOP]（长按松手时收尾）。CarLife+ 收到后用它
-     * **自己的麦克风**起语音识别，不需要我们回传车机麦克风，所以这里只是一条控制命令，
-     * 不牵扯音频通道。
+     * [CarLifeProtocol.HardKey.VR_STOP]（长按松手时收尾），由触摸通道写出。
      */
     fun sendVoiceKey(keycode: Int = CarLifeProtocol.HardKey.VR_START): Boolean =
-        client?.sendHardKeyCode(keycode) ?: false
+        client?.enqueueHardKey(keycode) ?: false
 
     /** Negotiated encoder size; decoder config prefers each access unit's SPS. */
     val videoSize: Pair<Int, Int>
@@ -836,9 +842,17 @@ object CarLifeHijack {
                 onStreamSize = { w, h -> if (!scope.isClosed) onActualStreamSize?.invoke(w, h) },
                 onAudioFormat = { rate, channels -> if (!scope.isClosed) sink.configure(rate, channels) },
                 onAudioPcm = { pcm, size -> if (!scope.isClosed) routeAudio(sink, pcm, size) },
-                // 导航播报：TTS 通道独立格式、独立 sink，喂给同一个音频发送端
+                // The Q4 experiment takes 9241 directly. Ordinary sessions use the existing sink.
                 onTtsFormat = { rate, channels -> if (!scope.isClosed) naviSink.configure(rate, channels) },
-                onTtsPcm = { pcm, size -> if (!scope.isClosed) routeAudio(naviSink, pcm, size) },
+                onTtsPcm = { pcm, size, rate, channels, bits, generation, type ->
+                    if (!scope.isClosed) {
+                        val separate = BuildConfig.Q4_ALT_AUDIO_SETUP_PROBE &&
+                            io.github.shaonialife.carptocar.SessionController.routeQ4NavigationAudio(
+                                pcm, size, rate, channels, bits, sourceIdentity, generation, type,
+                            )
+                        if (!separate) routeAudio(naviSink, pcm, size)
+                    }
+                },
                 onAudioGate = { active -> if (!scope.isClosed && nowPlayingState === mediaState) {
                     mediaState.gate(active)
                     onEngineAudioGate(active)

@@ -159,19 +159,13 @@ internal object CarLifeProtocol {
     // 未知项必须显式补 0，不能省略（[carGps] 已按 proto 顺序全量写出）。
     const val HU_CAR_GPS = 98320 // 0x00018010
 
-    // ---- 车机硬键（0x68008，HU → MD，控制通道）----
-    //
-    // `CommonParams.MSG_TOUCH_CAR_HARD_KEY_CODE = 0x00068008`，
-    // 载荷 `CarlifeCarHardKeyCode{ keycode = 1 }`。
-    // 键值表同在 CommonParams：`KEYCODE_VR_START = 0x21`、`KEYCODE_VR_STOP = 0x22`。
-    // 车机按下方向盘语音键时发 0x21，手机端 CarLife+ 用它自己的麦克风起语音识别
-    // （所以**不需要**我们回传车机麦克风音频）。
+    // 车机硬键经 9340 触摸通道发送，载荷为 CarlifeCarHardKeyCode 的 field 1（keycode）。
     const val TOUCH_CAR_HARD_KEY_CODE = 425992 // 0x00068008
 
     object HardKey {
         const val MEDIA_START = 0x1F
         const val MEDIA_STOP = 0x20
-        /** 起语音识别（小度）。 */
+        /** 起语音识别。 */
         const val VR_START = 0x21
 
         /** 停语音识别。 */
@@ -219,7 +213,7 @@ internal object CarLifeProtocol {
 
     // ---- 帧格式 ----
 
-    /** 控制通道（Channel 1）：[u16 len][u16 reserved][u32 service_type] */
+    /** 控制与触摸通道（Channel 1 / 6）：[u16 len][u16 reserved][u32 service_type] */
     fun packCommand(serviceType: Int, payload: ByteArray): ByteArray {
         val out = ByteArray(8 + payload.size)
         writeU16(out, 0, payload.size)
