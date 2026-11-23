@@ -97,13 +97,14 @@ class ArtworkEncodingInstrumentation : Instrumentation() {
             source.eraseColor(android.graphics.Color.TRANSPARENT)
             val output = NavigationIcon.render(encoded(source, Bitmap.CompressFormat.PNG))
             check(output.contentEquals(NavigationIcon.render(null)))
-            // One visible source pixel must keep the full navigation canvas.
+            // One visible source pixel must keep the small navigation canvas.
             source.setPixel(47, 47, 0x8000ff00.toInt())
             val visible = NavigationIcon.render(encoded(source, Bitmap.CompressFormat.PNG))
             val image = checkNotNull(BitmapFactory.decodeByteArray(visible, 0, visible.size))
             try {
-                check(image.width == 256 && image.height == 256)
-                check(image.getPixel(151, 151) ushr 24 in 126..130)
+                check(image.width == 128 && image.height == 128)
+                check(image.getPixel(86, 87) ushr 24 == 0)
+                check(image.getPixel(87, 87) ushr 24 in 126..130)
             } finally { image.recycle() }
         } finally { source.recycle() }
     }

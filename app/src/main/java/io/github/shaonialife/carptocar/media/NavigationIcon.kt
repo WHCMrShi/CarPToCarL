@@ -9,15 +9,19 @@ import android.graphics.RectF
 import java.io.ByteArrayOutputStream
 
 internal object NavigationIconLayout {
-    const val SIZE = 256
+    private const val SIZE = 256
+    private const val SMALL_ICON_THRESHOLD = 64
     const val PLACEHOLDER_SIZE = 16
     data class Placement(val left: Float, val top: Float, val width: Float, val height: Float)
-    fun fit(width: Int, height: Int): Placement {
+    fun canvasSize(width: Int, height: Int): Int =
+        if (width < SMALL_ICON_THRESHOLD && height < SMALL_ICON_THRESHOLD) SIZE / 2 else SIZE
+
+    fun fit(width: Int, height: Int, size: Int = canvasSize(width, height)): Placement {
         require(width > 0 && height > 0)
-        val scale = minOf(1f, SIZE.toFloat() / width, SIZE.toFloat() / height)
+        val scale = minOf(1f, size.toFloat() / width, size.toFloat() / height)
         val w = width * scale
         val h = height * scale
-        return Placement((SIZE - w) / 2f, (SIZE - h) / 2f, w, h)
+        return Placement((size - w) / 2f, (size - h) / 2f, w, h)
     }
 }
 
@@ -40,12 +44,13 @@ internal object NavigationIcon {
         try {
             // Empty input and fully transparent PNGs both clear stale artwork with a small valid file.
             val image = source?.takeUnless { isFullyTransparent(it) }
-            val size = if (image == null) NavigationIconLayout.PLACEHOLDER_SIZE else NavigationIconLayout.SIZE
+            val size = image?.let { NavigationIconLayout.canvasSize(it.width, it.height) }
+                ?: NavigationIconLayout.PLACEHOLDER_SIZE
             val canvasImage = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
             return try {
                 canvasImage.eraseColor(Color.TRANSPARENT)
                 val placement = image?.let { image ->
-                    NavigationIconLayout.fit(image.width, image.height).also { p ->
+                    NavigationIconLayout.fit(image.width, image.height, size).also { p ->
                         Canvas(canvasImage).drawBitmap(image, null, RectF(p.left, p.top, p.left + p.width, p.top + p.height), Paint(Paint.FILTER_BITMAP_FLAG))
                     }
                 }
