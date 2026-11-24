@@ -19,6 +19,8 @@ internal class ConnectionNotificationFixture(private val instrumentation: Instru
             }
             val initial = awaitNotification(manager, "等待车机")
             check(!initial.requestsLiveUpdate())
+            val ordinaryTitle = "CarPToCarL · 车机连接"
+            check(initial.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == ordinaryTitle)
             check(initial.notification.actions.map { it.title.toString() } == listOf("断开", "打开界面"))
 
             SessionController.phaseHint = "等待车机邀请"
@@ -32,6 +34,8 @@ internal class ConnectionNotificationFixture(private val instrumentation: Instru
             }
             val live = awaitNotification(manager, "正在连接车机")
             check(live.requestsLiveUpdate())
+            val liveTitle = if (LiveUpdateNotification.canPost(manager)) "连接中" else ordinaryTitle
+            check(live.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == liveTitle)
             checkStable(manager, live)
         } finally {
             instrumentation.runOnMainSync {

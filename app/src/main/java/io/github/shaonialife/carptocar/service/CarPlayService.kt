@@ -276,10 +276,17 @@ class CarPlayService : Service() {
                 Intent(this, NotificationActionReceiver::class.java).setAction(ACTION_DISCONNECT),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
+        val connectedText = if (state.streaming) getString(R.string.connection_status_connected) else null
+        val liveText = if (state.promote) connectedText ?: getString(R.string.connection_status_connecting) else null
+        val title = when {
+            liveText != null && LiveUpdateNotification.canPost(manager) -> liveText
+            connectedText != null -> "CarPToCarL · $connectedText"
+            else -> "CarPToCarL · 车机连接"
+        }
         val notification = NotificationCompat
             .Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_flow_c)
-            .setContentTitle(if (state.streaming) "CarPToCarL · ${getString(R.string.connection_status_connected)}" else "CarPToCarL · 车机连接")
+            .setContentTitle(title)
             .setContentText(state.text)
             .setStyle(state.text?.let { NotificationCompat.BigTextStyle().bigText(it) })
             .setContentIntent(contentIntent)
@@ -294,9 +301,8 @@ class CarPlayService : Service() {
             .build()
 
         // 空闲监听仍用普通通知；只为正在进行的连接会话申请 Live Updates。
-        return if (state.promote) {
-            val shortText = getString(if (state.streaming) R.string.connection_status_connected else R.string.connection_status_connecting)
-            LiveUpdateNotification.requestPromotion(this, notification, shortText)
+        return if (liveText != null) {
+            LiveUpdateNotification.requestPromotion(this, notification, liveText)
         } else {
             notification
         }
