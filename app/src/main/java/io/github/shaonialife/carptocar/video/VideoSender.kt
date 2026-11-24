@@ -72,6 +72,7 @@ class VideoSender(
     /** Actual local notice encoding dimensions; never override a source SPS or its config. */
     private val noticeSize: Pair<Int, Int>? = null,
     private val uptimeMillis: () -> Long = { android.os.SystemClock.uptimeMillis() },
+    private val onRunningChanged: () -> Unit = {},
 ) {
     private val width: Int = (width / 2) * 2
     private val height: Int = (height / 2) * 2
@@ -447,7 +448,7 @@ class VideoSender(
             inputSurface = surface
             ended.set(false)
             runningSinceMs = uptimeMillis()
-            running.set(true)
+            if (!running.getAndSet(true)) onRunningChanged()
             lastKeepAliveAt = runningSinceMs
 
             onSurfaceReady(surface)
@@ -538,7 +539,7 @@ class VideoSender(
         }
 
     fun stop() {
-        running.set(false)
+        if (running.getAndSet(false)) onRunningChanged()
         sourceKeyFrames.reset()
         q4Handover.retire()
         sourceQueue?.close()
@@ -575,7 +576,7 @@ class VideoSender(
         q4Handover.retire()
         ended.set(false)
         runningSinceMs = uptimeMillis()
-        running.set(true)
+        if (!running.getAndSet(true)) onRunningChanged()
         lastKeepAliveAt = runningSinceMs
         // 新一轮会话：上一轮的「最后一帧」不能拿来重发（车机解码器已重建，
         // 旧 IDR 的 SPS/PPS 与本轮 avcC 可能不一致）。

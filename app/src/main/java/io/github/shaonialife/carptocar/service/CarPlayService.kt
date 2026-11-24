@@ -17,6 +17,7 @@ import io.github.shaonialife.carptocar.R
 import io.github.shaonialife.carptocar.SessionController
 import io.github.shaonialife.carptocar.bt.CarIdleGuard
 import io.github.shaonialife.carptocar.util.DebugFileLog
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 前台保活服务：连接建立期间以 connectedDevice 类型常驻，
@@ -29,7 +30,7 @@ import io.github.shaonialife.carptocar.util.DebugFileLog
  * 用户面前没有任何窗口，最近任务里也找不到——连接在跑，人却看不见，更没法停。
  * 所以常驻通知不能只是一行「运行中」：它必须能回答两个问题——
  *
- * 1. **在做什么**（每 3 秒检查 [SessionController.notificationSummary]，有变化时更新）；
+ * 1. **在做什么**（连接状态变化时更新 [SessionController.notificationSummary]）；
  * 2. **怎么关**（通知上的「断开」按钮，走 [NotificationActionReceiver]，不依赖界面存活）。
  *
  * 通道用 IMPORTANCE_DEFAULT + 静音：LOW 在 MagicOS 上会被折叠进「静默通知」，
@@ -42,14 +43,23 @@ class CarPlayService : Service() {
 
     private data class NotificationState(val streaming: Boolean, val text: String?, val promote: Boolean)
 
-    /** 状态文案刷新：通知栏要跟着阶段走，否则「已连接」和「等车机」长得一样。 */
     private val uiHandler = Handler(Looper.getMainLooper())
-    private val stateTick =
+    private val notificationUpdateQueued = AtomicBoolean(false)
+    private val notificationUpdate = Runnable {
+        notificationUpdateQueued.set(false)
+        refreshNotification()
+    }
+
+    private fun queueNotificationUpdate() {
+        // 同一轮的连接字段可能从不同线程连续变化，在主线程发布最新状态。
+        if (notificationUpdateQueued.compareAndSet(false, true)) uiHandler.post(notificationUpdate)
+    }
+
+    private val idleTick =
         object : Runnable {
             override fun run() {
                 if (CarIdleGuard.check(this@CarPlayService)) return
-                refreshNotification()
-                uiHandler.postDelayed(this, STATE_TICK_MS)
+                uiHandler.postDelayed(this, IDLE_CHECK_MS)
             }
         }
 
@@ -126,6 +136,7 @@ class CarPlayService : Service() {
         flags: Int,
         startId: Int,
     ): Int {
+        SessionController.onNotificationStateChanged = ::queueNotificationUpdate
         val state = notificationState()
         androidx.core.app.ServiceCompat.startForeground(
             this,
@@ -135,9 +146,8 @@ class CarPlayService : Service() {
         )
         publishedNotificationState = state
         acquireLocks()
-        // 通知栏文案跟着会话阶段走：服务一活就开始刷新，销毁时停。
-        uiHandler.removeCallbacks(stateTick)
-        uiHandler.post(stateTick)
+        uiHandler.removeCallbacks(idleTick)
+        uiHandler.post(idleTick)
         // 冻结监视：重置起算点后再开始心跳（服务重启时不能拿上一轮的 lastTick 算差值）
         uiHandler.removeCallbacks(freezeTick)
         freezeWatch.reset()
@@ -165,7 +175,10 @@ class CarPlayService : Service() {
     }
 
     override fun onDestroy() {
-        uiHandler.removeCallbacks(stateTick)
+        SessionController.onNotificationStateChanged = null
+        publishedNotificationState = null
+        uiHandler.removeCallbacks(notificationUpdate)
+        uiHandler.removeCallbacks(idleTick)
         uiHandler.removeCallbacks(freezeTick)
         freezeWatch.reset()
         releaseLocks()
@@ -191,8 +204,7 @@ class CarPlayService : Service() {
         /** 常驻通知 id：收摊时由 [io.github.shaonialife.carptocar.bt.CarIdleGuard] 兜底撤掉。 */
         const val NOTIFICATION_ID = 1
 
-        /** 通知状态检查间隔：够跟上阶段变化，又不至于频繁唤醒。 */
-        private const val STATE_TICK_MS = 3_000L
+        private const val IDLE_CHECK_MS = 3_000L
 
         /** 通知上的「断开」——直接断开并停服务，不依赖界面是否存活。 */
         const val ACTION_DISCONNECT = "io.github.shaonialife.carptocar.action.NOTIFICATION_DISCONNECT"
@@ -208,8 +220,9 @@ class CarPlayService : Service() {
 
     /** 文案随会话阶段刷新（通知栏是后台连接时唯一的可见界面）。 */
     private fun refreshNotification() {
+        val published = publishedNotificationState ?: return
         val state = notificationState()
-        if (state == publishedNotificationState) return
+        if (state == published) return
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         runCatching {
             manager.notify(NOTIFICATION_ID, buildNotification(state))

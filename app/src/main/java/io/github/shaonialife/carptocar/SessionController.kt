@@ -584,6 +584,11 @@ object SessionController {
      */
     @Volatile
     private var idleListening = false
+        set(value) {
+            if (field == value) return
+            field = value
+            notifyConnectionStatusChanged()
+        }
 
     /**
      * 用户在本轮里**手动断过**（或关掉了开关）：常开监听不再自动复活。
@@ -603,6 +608,11 @@ object SessionController {
 
     @Volatile
     var videoSender: VideoSender? = null
+        set(value) {
+            if (field === value) return
+            field = value
+            notifyConnectionStatusChanged()
+        }
 
     // ---- 「显示」运行时生效值（会话建立时快照；英雄卡展示运行时值而非偏好值）----
 
@@ -776,6 +786,10 @@ object SessionController {
     /** 会话建立互斥（端点交接 → 配对 → 推流全程只允许一条）。 */
     val sessionStarting = AtomicBoolean(false)
 
+    private fun clearSessionStarting() {
+        if (sessionStarting.getAndSet(false)) notifyConnectionStatusChanged()
+    }
+
     /**
      * 交接流程已在跑、但 AirPlayClient 尚未创建时收到的晚到端点（0x4301）。
      * 配对线程起步时取用一次后清空——此刻没有 client 可更新，丢了就白等到下一轮。
@@ -830,7 +844,19 @@ object SessionController {
     /** 用户当前是否希望保持连接（「启动连接」置 true、「断开」置 false）——解冻恢复的前置条件。 */
     @Volatile
     private var sessionWanted: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            notifyConnectionStatusChanged()
+        }
     internal val connectionRequested: Boolean get() = sessionWanted
+
+    @Volatile
+    internal var onNotificationStateChanged: (() -> Unit)? = null
+
+    private fun notifyConnectionStatusChanged() {
+        onNotificationStateChanged?.invoke()
+    }
 
     /**
      * 当前连接阶段的一句话提示（英雄卡副标题用，详细过程看日志）。
@@ -838,6 +864,11 @@ object SessionController {
      */
     @Volatile
     var phaseHint: String? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            notifyConnectionStatusChanged()
+        }
 
     /** 取消「连接中」：停链路 + 置取消标志，卡在错误网络/等待回连时用户可主动脱身。 */
     fun cancelConnecting(context: Context) {
@@ -847,7 +878,7 @@ object SessionController {
         // 强制释放互斥：配对流程线程可能阻塞在不可中断的连接/mDNS 等待上（如手机
         // 不在热点网段时连热点 IP），finally 遥遥无期——用户显式取消即强制解锁，
         // 否则英雄卡永久「正在连接」（旧流程产出已被 retireSession 清理，无冲突）
-        sessionStarting.set(false)
+        clearSessionStarting()
         phaseHint = "已取消连接"
     }
 
@@ -955,7 +986,7 @@ object SessionController {
                 appendLog("CONNECT-DIAG: setup cancelled reason=$reason btDirection=${link.direction} btOwner=${link.id}; connection intent retained")
                 SessionTrace.sessionEnd(reason)
                 setupWork.end()
-                sessionStarting.set(false)
+                clearSessionStarting()
                 cancelled = true
             }
         } }
@@ -1054,7 +1085,7 @@ object SessionController {
             // 不清的话 onCarPlayEndpoint 会直接以「已有会话在处理中」把恢复请求丢掉。
             if (sessionStarting.get()) {
                 appendLog("PROC: 上一轮仍占着「会话处理中」——强制释放后重走交接")
-                work.runIfCurrent { setupWork.end(); sessionStarting.set(false) }
+                work.runIfCurrent { setupWork.end(); clearSessionStarting() }
             }
             work.runIfCurrent { restartBluetoothForRecovery() }
             onCarPlayEndpoint(endpoint, "解冻后自动恢复 #${index + 1}", work)
@@ -1469,7 +1500,7 @@ object SessionController {
                 setupWork.end()
                 withdrawNetwork()
                 synchronized(connectRetryLock) { connectRetryGeneration++; connectRetryScheduled = false }
-                sessionStarting.set(false)
+                clearSessionStarting()
             } else withdrawNetwork()
             rememberedSetup = null
             rememberedEndpoint = null
@@ -1693,6 +1724,7 @@ object SessionController {
                     callbackFactory = { captureBtCallbacks("车机回连") },
                     targetProvider = targetProvider,
                     nowPlayingProvider = nowPlayingProvider,
+                    onRunningChanged = ::notifyConnectionStatusChanged,
                 )
             bluetoothClient =
                 Iap2BluetoothClient(
@@ -1701,6 +1733,7 @@ object SessionController {
                     callbackFactory = { captureBtCallbacks("主动连车机") },
                     targetProvider = targetProvider,
                     nowPlayingProvider = nowPlayingProvider,
+                    onRunningChanged = ::notifyConnectionStatusChanged,
                 )
             ctrlAdvertiser =
                 CarPlayCtrlAdvertiser(context) { line -> appendLog(line) }.also { advertiser ->
@@ -1918,7 +1951,7 @@ object SessionController {
         wifiConnector?.stopIdentityObservation()
         wifiWatchdog?.stop()
         boundCarSsid = null
-        sessionStarting.set(false)
+        clearSessionStarting()
         appendLog("已断开并停止保活服务（常亮已恢复）")
     }
 
@@ -2105,7 +2138,7 @@ object SessionController {
                 lostSetup.runIfCurrent {
                     if (valid() && !carWifiReady(target.ssid) && !connectCancelled && sessionWanted) {
                         setupWork.end()
-                        sessionStarting.set(false)
+                        clearSessionStarting()
                         retireSession()
                         retired = true
                     }
@@ -3855,12 +3888,13 @@ object SessionController {
             appendLog(">>> [$source] 已有会话在处理中，忽略本次端点（等待上一轮结束）")
             return
         }
+        notifyConnectionStatusChanged()
         val flowScope = "connection=${work.diagnosticId} setup=${setup.diagnosticId} inviteGeneration=$inviteGeneration"
         appendLog("FLOW-DIAG: $flowScope event=SETUP_ACCEPTED source=$source port=${endpoint.airPlayPort} portSource=${endpoint.airPlayPortSource} " +
             "addressCount=${endpoint.ipAddresses.size} credentialsPresent=${endpoint.ssid.isNotEmpty()} memoryCredentialsMatch=${rememberedSetup === setup} " +
             "carLifeStreaming=${CarLifeHijack.isStreaming} videoRunning=${videoSender?.isRunning == true}")
         val attemptCancelled = { connectCancelled || !work.isCurrent || !setup.isCurrent }
-        val finishAttempt = { work.runIfCurrent { setup.runIfCurrent { sessionStarting.set(false) } }; Unit }
+        val finishAttempt = { work.runIfCurrent { setup.runIfCurrent { clearSessionStarting() } }; Unit }
         val mutate = { action: () -> Unit ->
             var applied = false
             work.runIfCurrent { applied = setup.runIfCurrent(action) }
@@ -4800,6 +4834,7 @@ object SessionController {
                                             noticeSize = if (hijackMode) io.github.shaonialife.carptocar.carlife.CarCanvasMemory.DEFAULT else null,
                                             targetFps = sessionTargetFps,
                                             log = { line -> appendLog(line) },
+                                            onRunningChanged = ::notifyConnectionStatusChanged,
                                             keepAliveWithStats = setup.keepAliveSendStatsAsBody,
                                             // VideoConfig 头声明的画布 = 车机 /info 通告的画布。
                                             // 真车按它建解码器与 surface，与画布不符就黑屏

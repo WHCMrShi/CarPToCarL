@@ -47,6 +47,7 @@ class Iap2BluetoothServer(
      */
     private val onPeerConnected: () -> Unit = {},
     private val callbackFactory: (() -> BtSessionCallbacks)? = null,
+    private val onRunningChanged: () -> Unit = {},
 ) {
     companion object {
         /**
@@ -91,6 +92,11 @@ class Iap2BluetoothServer(
 
     @Volatile
     private var running = false
+        set(value) {
+            if (field == value) return
+            field = value
+            onRunningChanged()
+        }
     private val lifecycle = Any()
     @Volatile private var listenerEpoch = 0L
     private var activeSocket: BluetoothSocket? = null

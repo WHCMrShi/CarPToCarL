@@ -42,6 +42,7 @@ class Iap2BluetoothClient(
     /** 保活泵退出（BT 链路断开）时回调：主控据此释放「会话处理中」（僵尸轮次堵门修复）。 */
     private val onLinkClosed: (BtLinkOwnership.Token) -> Unit = {},
     private val callbackFactory: (() -> BtSessionCallbacks)? = null,
+    private val onRunningChanged: () -> Unit = {},
 ) {
     companion object {
         /**
@@ -140,6 +141,11 @@ class Iap2BluetoothClient(
 
     @Volatile
     private var running = false
+        set(value) {
+            if (field == value) return
+            field = value
+            onRunningChanged()
+        }
 
     /** 歌名变化时主动补推 0x5001（转发给当前保活会话）。 */
     fun pushNowPlaying() {

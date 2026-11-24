@@ -5,15 +5,28 @@ import android.app.Instrumentation
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
+import io.github.shaonialife.carptocar.service.ConnectionNotificationFixture
 import java.io.ByteArrayOutputStream
 
 /** 直接测试 Android Bitmap 编解码，不用其他 JVM 编码器冒充设备结果。 */
 class ArtworkEncodingInstrumentation : Instrumentation() {
-    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
+    private var runConnectionNotificationFixture = false
+
+    override fun onCreate(arguments: Bundle?) {
+        super.onCreate(arguments)
+        runConnectionNotificationFixture = arguments?.getString("fixture") == "connection-notification"
+        start()
+    }
 
     override fun onStart() {
         val results = Bundle()
         try {
+            if (runConnectionNotificationFixture) {
+                ConnectionNotificationFixture(this).run()
+                results.putString("result", "Ordinary and Live notification fixtures passed")
+                finish(Activity.RESULT_OK, results)
+                return
+            }
             opaqueThumbnail()
             transparentThumbnail()
             smallNativeJpeg()
