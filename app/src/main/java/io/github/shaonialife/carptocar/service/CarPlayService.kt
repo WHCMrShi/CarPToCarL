@@ -29,7 +29,7 @@ import io.github.shaonialife.carptocar.util.DebugFileLog
  * 用户面前没有任何窗口，最近任务里也找不到——连接在跑，人却看不见，更没法停。
  * 所以常驻通知不能只是一行「运行中」：它必须能回答两个问题——
  *
- * 1. **在做什么**（[SessionController.notificationSummary]，每 3 秒刷新一次阶段文案）；
+ * 1. **在做什么**（每 3 秒检查 [SessionController.notificationSummary]，有变化时更新）；
  * 2. **怎么关**（通知上的「断开」按钮，走 [NotificationActionReceiver]，不依赖界面存活）。
  *
  * 通道用 IMPORTANCE_DEFAULT + 静音：LOW 在 MagicOS 上会被折叠进「静默通知」，
@@ -38,6 +38,9 @@ import io.github.shaonialife.carptocar.util.DebugFileLog
 class CarPlayService : Service() {
     private var wakeLock: android.os.PowerManager.WakeLock? = null
     private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
+    private var publishedNotificationState: NotificationState? = null
+
+    private data class NotificationState(val streaming: Boolean, val text: String?, val promote: Boolean)
 
     /** 状态文案刷新：通知栏要跟着阶段走，否则「已连接」和「等车机」长得一样。 */
     private val uiHandler = Handler(Looper.getMainLooper())
@@ -123,12 +126,14 @@ class CarPlayService : Service() {
         flags: Int,
         startId: Int,
     ): Int {
+        val state = notificationState()
         androidx.core.app.ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
-            buildNotification(),
+            buildNotification(state),
             android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
         )
+        publishedNotificationState = state
         acquireLocks()
         // 通知栏文案跟着会话阶段走：服务一活就开始刷新，销毁时停。
         uiHandler.removeCallbacks(stateTick)
@@ -186,7 +191,7 @@ class CarPlayService : Service() {
         /** 常驻通知 id：收摊时由 [io.github.shaonialife.carptocar.bt.CarIdleGuard] 兜底撤掉。 */
         const val NOTIFICATION_ID = 1
 
-        /** 通知栏文案刷新间隔：够跟上阶段变化，又不至于频繁唤醒。 */
+        /** 通知状态检查间隔：够跟上阶段变化，又不至于频繁唤醒。 */
         private const val STATE_TICK_MS = 3_000L
 
         /** 通知上的「断开」——直接断开并停服务，不依赖界面是否存活。 */
@@ -203,16 +208,23 @@ class CarPlayService : Service() {
 
     /** 文案随会话阶段刷新（通知栏是后台连接时唯一的可见界面）。 */
     private fun refreshNotification() {
+        val state = notificationState()
+        if (state == publishedNotificationState) return
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         runCatching {
-            manager.notify(NOTIFICATION_ID, buildNotification())
+            manager.notify(NOTIFICATION_ID, buildNotification(state))
+            publishedNotificationState = state
         }
     }
 
-    private fun buildNotification(): Notification {
+    private fun notificationState(): NotificationState {
         val streaming = SessionController.isStreaming()
-        val connecting = SessionController.connectionRequested || SessionController.sessionStarting.get()
         val text = if (streaming) null else SessionController.notificationSummary()
+        val promote = streaming || SessionController.connectionRequested || SessionController.sessionStarting.get()
+        return NotificationState(streaming, text, promote)
+    }
+
+    private fun buildNotification(state: NotificationState): Notification {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             manager.createNotificationChannel(
@@ -254,9 +266,9 @@ class CarPlayService : Service() {
         val notification = NotificationCompat
             .Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_flow_c)
-            .setContentTitle(if (streaming) "CarPToCarL · ${getString(R.string.connection_status_connected)}" else "CarPToCarL · 车机连接")
-            .setContentText(text)
-            .setStyle(text?.let { NotificationCompat.BigTextStyle().bigText(it) })
+            .setContentTitle(if (state.streaming) "CarPToCarL · ${getString(R.string.connection_status_connected)}" else "CarPToCarL · 车机连接")
+            .setContentText(state.text)
+            .setStyle(state.text?.let { NotificationCompat.BigTextStyle().bigText(it) })
             .setContentIntent(contentIntent)
             .addAction(0, "断开", disconnectIntent)
             .addAction(0, "打开界面", contentIntent)
@@ -269,8 +281,8 @@ class CarPlayService : Service() {
             .build()
 
         // 空闲监听仍用普通通知；只为正在进行的连接会话申请 Live Updates。
-        return if (streaming || connecting) {
-            val shortText = getString(if (streaming) R.string.connection_status_connected else R.string.connection_status_connecting)
+        return if (state.promote) {
+            val shortText = getString(if (state.streaming) R.string.connection_status_connected else R.string.connection_status_connecting)
             LiveUpdateNotification.requestPromotion(this, notification, shortText)
         } else {
             notification
