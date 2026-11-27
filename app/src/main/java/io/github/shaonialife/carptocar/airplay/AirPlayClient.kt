@@ -1046,7 +1046,6 @@ class AirPlayClient(
     private val resourceModes = ResourceModes()
     private val modeWriteLock = Any()
     private val modeUpdateQueued = java.util.concurrent.atomic.AtomicBoolean(false)
-    private val mainAudioTakeInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
     @Volatile private var modeAttemptedVersion = -1L
     @Volatile internal var onResourceModesChanged: (() -> Unit)? = null
     internal fun markRealSourceStarted() = resourceModes.markSourceStarted()
@@ -1093,48 +1092,6 @@ class AirPlayClient(
     internal fun assertSourceScreenModes(): Boolean = synchronized(modeWriteLock) {
         if (!resourceModes.prepareScreenRecovery()) false else sendModes(resourceModes.snapshot())
     }
-    internal fun canTakeMainAudioForPlayback(): Boolean =
-        controlConnectionAlive && !mainAudioTakeInFlight.get() && resourceModes.mainAudioTakeVersion() != null
-
-    internal fun takeMainAudioForPlayback(isCurrentAudio: () -> Boolean) {
-        val version = resourceModes.mainAudioTakeVersion() ?: return
-        val scope = resources
-        if (!isCurrentAudio() || !mainAudioTakeInFlight.compareAndSet(false, true)) return
-        val thread = scope.start("airplay-main-audio-take") {
-            try {
-                synchronized(modeWriteLock) {
-                    val body = BinaryPlist.encode(
-                        mapOf("type" to "modesChanged", "params" to mapOf(
-                            "resources" to listOf(mapOf("resourceID" to 2L, "entity" to 1L, "permanentEntity" to 1L)),
-                        )),
-                    )
-                    val (status, response) = request(
-                        "POST", "/command", body,
-                        contentType = "application/x-apple-binary-plist", expectedScope = scope,
-                        beforeWrite = {
-                            if (!isCurrentAudio() || resourceModes.mainAudioTakeVersion() != version) {
-                                throw IOException("主音频申请所属会话或资源状态已变化")
-                            }
-                        },
-                    )
-                    val accepted = status.split(' ').getOrNull(1) == "200" &&
-                        (response.isEmpty() || runCatching {
-                            val reply = BinaryPlist.parse(response) as? Map<*, *> ?: return@runCatching false
-                            !reply.containsKey("status") || (reply["status"] as? Number)?.toLong() == 0L
-                        }.getOrDefault(false))
-                    val committed = accepted && resources === scope && !scope.isClosed && isCurrentAudio() &&
-                        resourceModes.commitMainAudioTake(version)
-                    log("AUDIO-RESOURCE: take-media version=$version rtsp=$status accepted=$accepted committed=$committed")
-                }
-            } catch (error: IOException) {
-                log("AUDIO-RESOURCE: take-media version=$version result=not-confirmed error=${error.message}")
-            } finally {
-                mainAudioTakeInFlight.set(false)
-            }
-        }
-        if (thread == null) mainAudioTakeInFlight.set(false)
-    }
-
     private fun sendModes(snapshot: ResourceModes.Snapshot): Boolean {
         val body = BinaryPlist.encode(linkedMapOf("type" to "modesChanged", "params" to snapshot.params))
         return try {

@@ -15,7 +15,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import io.github.shaonialife.carptocar.R
-import io.github.shaonialife.carptocar.SessionController
 import io.github.shaonialife.carptocar.media.MediaSessionsState
 import io.github.shaonialife.carptocar.render.CARD_MARGIN_PX
 import io.github.shaonialife.carptocar.render.DASH_GAP_PX
@@ -231,8 +230,6 @@ class GridActivity : AppCompatActivity() {
         panel.findViewById<ImageView>(R.id.dashPlayPause).setImageResource(
             if (now?.playing == true) R.drawable.ic_media_pause else R.drawable.ic_media_play,
         )
-        panel.findViewById<View>(R.id.dashRestoreCarAudio).visibility =
-            if (now?.playing == true && SessionController.canRestoreCarAudio()) View.VISIBLE else View.GONE
         panel.findViewById<TextView>(R.id.dashMediaTime)?.let { time ->
             if (now != null && now.durationMs > 0) {
                 time.visibility = View.VISIBLE
@@ -616,15 +613,11 @@ class GridActivity : AppCompatActivity() {
             panel.findViewById<ImageView>(R.id.dashNext).setOnClickListener {
                 dispatchMediaKey(android.view.KeyEvent.KEYCODE_MEDIA_NEXT)
             }
-            panel.findViewById<View>(R.id.dashRestoreCarAudio).setOnClickListener {
-                SessionController.restoreCarAudioForPlayback()
-            }
             panel.findViewById<ImageView>(R.id.dashPlayPause).setOnClickListener {
                 // 按当前状态显式发播放/暂停；乐观翻转图标（状态回调可能滞后），
                 // 400ms 后请求监听服务重新同步真实状态
                 val state = MediaSessionsState.nowPlaying
                 val playing = state?.playing == true
-                if (!playing) SessionController.restoreCarAudioForPlayback()
                 dispatchMediaKey(
                     if (playing) {
                         android.view.KeyEvent.KEYCODE_MEDIA_PAUSE
