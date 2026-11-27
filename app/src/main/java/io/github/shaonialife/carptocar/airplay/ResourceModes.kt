@@ -14,6 +14,7 @@ internal class ResourceModes {
     private var version = 0L
     private var sourceStarted = false
     private var startupNativeTake = false
+    private var mainAudioTakeConstraint: Long? = null
     data class Snapshot(val version: Long, val params: Map<String, Any>)
     @Synchronized fun snapshot(): Snapshot = Snapshot(version, mapOf(
         "appStates" to apps.values.toList(),
@@ -36,6 +37,19 @@ internal class ResourceModes {
         if (screen.permanent != 1L) { screen.permanent = 1; version++ }
         startupNativeTake = false // explicit request returns screen after any temporary borrowers finish
     }
+    @Synchronized fun mainAudioTakeVersion(): Long? {
+        val audio = resources.getValue(2)
+        // 100 = anytime, 500 = user-initiated. This path is only called for explicit user actions.
+        if (mainAudioTakeConstraint != 100L && mainAudioTakeConstraint != 500L) return null
+        return version.takeIf { audio.permanent == 2L && audio.borrowers.isEmpty() && !audio.overflow }
+    }
+    @Synchronized fun commitMainAudioTake(expectedVersion: Long): Boolean {
+        if (mainAudioTakeVersion() != expectedVersion) return false
+        resources.getValue(2).permanent = 1
+        mainAudioTakeConstraint = null
+        version++
+        return true
+    }
     @Synchronized fun change(params: Map<*, *>) {
         for (raw in (params["resources"] as? List<*>)?.take(16).orEmpty()) {
             val item = raw as? Map<*, *> ?: continue
@@ -44,11 +58,14 @@ internal class ResourceModes {
             when ((item["transferType"] as? Number)?.toInt()) {
                 1 -> {
                     if (id == 1) startupNativeTake = !sourceStarted && params["reasonStr"] == "screen native"
-                    if (resource.permanent != 2L) { resource.permanent = 2; version++ }
+                    if (id == 2) mainAudioTakeConstraint = (item["takeConstraint"] as? Number)?.toLong()
+                    // A repeated audio take also supersedes a controller request in flight.
+                    if (resource.permanent != 2L || id == 2) { resource.permanent = 2; version++ }
                 }
                 2 -> {
                     if (resource.permanent == 2L) { resource.permanent = 1; version++ }
                     if (id == 1) startupNativeTake = false
+                    if (id == 2) mainAudioTakeConstraint = null
                 }
                 3, 4 -> {
                     val borrow = (item["borrowID"] as? String)?.takeIf { it.isNotBlank() && it.length <= 128 } ?: continue

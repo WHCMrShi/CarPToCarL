@@ -114,6 +114,15 @@
                 android:src="@drawable/ic_media_next" />
         </LinearLayout>
 
+        <Button
+            android:id="@+id/dashRestoreCarAudio"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/restore_car_audio"
+            android:textColor="#FFF5F5F7"
+            android:visibility="gone" />
+
         <ProgressBar
             android:id="@+id/dashMediaProgress"
             style="?android:attr/progressBarStyleHorizontal"

@@ -4,9 +4,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ResourceModesTest {
-    private fun change(m: ResourceModes, id: Int, type: Int, borrow: String? = null, reason: String = "test") {
+    private fun change(
+        m: ResourceModes, id: Int, type: Int, borrow: String? = null,
+        reason: String = "test", takeConstraint: Int? = null,
+    ) {
         val resource = mutableMapOf<String, Any>("resourceID" to id, "transferType" to type)
         borrow?.let { resource["borrowID"] = it }
+        takeConstraint?.let { resource["takeConstraint"] = it }
         m.change(mapOf("reasonStr" to reason, "resources" to listOf(resource)))
     }
     private fun resource(m: ResourceModes, id: Long) =
@@ -81,6 +85,52 @@ class ResourceModesTest {
         change(m, 1, 4, "backupCamera")
         assertTrue(m.prepareScreenRecovery())
         assertEquals(2L, resource(m, 2)["entity"])
+    }
+
+    @Test fun audioTakeRequiresExplicitCommitAfterTemporaryAudioBorrowEnds() {
+        val m = ResourceModes()
+        change(m, 2, 3, "standby")
+        assertNull(m.mainAudioTakeVersion())
+        change(m, 2, 4, "standby")
+        assertNull(m.mainAudioTakeVersion())
+
+        change(m, 2, 1, reason = "audio native", takeConstraint = 500)
+        change(m, 2, 3, "standby")
+        assertNull(m.mainAudioTakeVersion())
+        m.requestUi()
+        change(m, 2, 4, "standby")
+        change(m, 1, 3, "backupCamera")
+        assertEquals(2L, resource(m, 2)["permanentEntity"])
+        assertTrue(m.commitMainAudioTake(requireNotNull(m.mainAudioTakeVersion())))
+        assertEquals(1L, resource(m, 2)["entity"])
+        assertEquals(1L, resource(m, 2)["permanentEntity"])
+        assertEquals(2L, resource(m, 1)["entity"])
+        assertNull(m.mainAudioTakeVersion())
+    }
+
+    @Test fun unsupportedOrMissingTakeConstraintsDoNotPermitRecovery() {
+        val m = ResourceModes()
+        change(m, 2, 1)
+        assertNull(m.mainAudioTakeVersion())
+        change(m, 2, 1, takeConstraint = 1000)
+        assertNull(m.mainAudioTakeVersion())
+        change(m, 2, 1, takeConstraint = 100)
+        assertNotNull(m.mainAudioTakeVersion())
+        change(m, 2, 2)
+        assertNull(m.mainAudioTakeVersion())
+    }
+
+    @Test fun repeatedCarTakeAndNewAudioBorrowInvalidateAnInFlightTake() {
+        val m = ResourceModes()
+        change(m, 2, 1, takeConstraint = 500)
+        val first = requireNotNull(m.mainAudioTakeVersion())
+        change(m, 2, 1, takeConstraint = 500)
+        assertFalse(m.commitMainAudioTake(first))
+        val second = requireNotNull(m.mainAudioTakeVersion())
+        change(m, 2, 3, "standby")
+        change(m, 2, 4, "standby")
+        assertFalse(m.commitMainAudioTake(second))
+        assertEquals(2L, resource(m, 2)["permanentEntity"])
     }
     @Test fun malformedAndUnknownEntriesDoNotChangeKnownState() {
         val m = ResourceModes(); val before = m.snapshot()

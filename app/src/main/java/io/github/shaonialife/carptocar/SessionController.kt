@@ -408,6 +408,20 @@ object SessionController {
         dispatchSystemMediaKey(keyCode)
     }
 
+    internal fun canRestoreCarAudio(): Boolean =
+        audioSender?.let { it === recordedAudioSender && it.isRunning } == true &&
+            currentClient?.canTakeMainAudioForPlayback() == true
+
+    internal fun restoreCarAudioForPlayback() {
+        val client = currentClient ?: return
+        val sender = audioSender ?: return
+        val lease = audioEpoch.capture(client) ?: return
+        client.takeMainAudioForPlayback {
+            audioEpoch.isCurrent(lease) && currentClient === client && audioSender === sender &&
+                recordedAudioSender === sender && sender.isRunning && client.controlConnectionAlive
+        }
+    }
+
     private fun dispatchSystemMediaKey(keyCode: Int) {
         val action = MediaSessionsState.transportActionFor(keyCode)
         if (action >= 0 && MediaSessionsState.dispatchTransport(action)) {
@@ -653,6 +667,7 @@ object SessionController {
 
     @Volatile
     var audioSender: AudioSender? = null
+    @Volatile private var recordedAudioSender: AudioSender? = null
     @Volatile private var navigationAudioSender: NavigationAudioSender? = null
     private val loggedNavigationUnavailable = AtomicBoolean()
     private val audioEpoch = SessionEpoch()
@@ -3186,6 +3201,7 @@ object SessionController {
         var previous: AudioSender? = null
         val installed = audioEpoch.commit(lease) {
             previous = audioSender
+            recordedAudioSender = null
             audioSender = candidate
             state()
         }
@@ -3200,6 +3216,7 @@ object SessionController {
         val detach = {
             activeAudioHadInput = activeAudioHadInput || audioSender?.hasRealInput == true
             previous = audioSender; audioSender = null
+            recordedAudioSender = null
             previousNavigation = navigationAudioSender; navigationAudioSender = null
             watcher = callWatcher; callWatcher = null; callWatcherLease = null
         }
@@ -5075,7 +5092,12 @@ object SessionController {
                                     // 并给 dataPort，但不会真正播放（2026-10-17 奥迪实测：
                                     // 音频包持续发送、采集内容非零，车机无声）。
                                     appendLog("AUDIO: 音频流已加入——补发 RECORD 激活（流后加入会话）")
+                                    val senderToRecord = audioSender
+                                    val recordLease = audioEpoch.capture(client)
                                     val recorded = connectionTimeline.measure(io.github.shaonialife.carptocar.util.ConnectionTimeline.Stage.RECORD) { client.record() }
+                                    if (recorded && recordLease != null) audioEpoch.commit(recordLease) {
+                                        if (audioSender === senderToRecord) recordedAudioSender = senderToRecord
+                                    }
                                     if (probeAlternate) {
                                         appendLog("ALT-AUDIO-PROBE: SETUP accepted=${alternate != null}, RECORD accepted=$recorded")
                                     }
