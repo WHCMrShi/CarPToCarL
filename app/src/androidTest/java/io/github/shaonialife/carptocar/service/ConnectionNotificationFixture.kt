@@ -14,10 +14,10 @@ internal class ConnectionNotificationFixture(private val instrumentation: Instru
         val manager = checkNotNull(targetContext.getSystemService(NotificationManager::class.java))
         try {
             instrumentation.runOnMainSync {
-                SessionController.phaseHint = "等待车机"
+                SessionController.phaseHint = null
                 CarPlayService.start(targetContext)
             }
-            val initial = awaitNotification(manager, "等待车机")
+            val initial = awaitNotification(manager, "空闲——等待车机靠近，或点此打开应用")
             check(!initial.requestsLiveUpdate())
             val ordinaryTitle = "CarPToCarL · 车机连接"
             check(initial.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == ordinaryTitle)
@@ -34,8 +34,7 @@ internal class ConnectionNotificationFixture(private val instrumentation: Instru
             }
             val live = awaitNotification(manager, "正在连接车机")
             check(live.requestsLiveUpdate())
-            val liveTitle = if (LiveUpdateNotification.canPost(manager)) "连接中" else ordinaryTitle
-            check(live.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == liveTitle)
+            check(live.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == "连接中")
             checkStable(manager, live)
         } finally {
             instrumentation.runOnMainSync {

@@ -1805,11 +1805,11 @@ object SessionController {
         return String.format(Locale.US, "%02d:%02d", seconds / 60, seconds % 60)
     }
 
-    internal fun notificationSummary(): String =
-        if (connectionRequested || sessionStarting.get() || isSessionRunning()) {
+    internal fun notificationSummary(connecting: Boolean): String =
+        if (connecting || isSessionRunning()) {
             connectingSubtitle()
         } else {
-            phaseHint ?: "空闲——等待车机靠近，或点「打开界面」查看"
+            phaseHint ?: "空闲——等待车机靠近，或点此打开应用"
         }
 
     private val connectionTimeline = io.github.shaonialife.carptocar.util.ConnectionTimeline(

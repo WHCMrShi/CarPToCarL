@@ -41,7 +41,7 @@ class CarPlayService : Service() {
     private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
     private var publishedNotificationState: NotificationState? = null
 
-    private data class NotificationState(val streaming: Boolean, val text: String?, val promote: Boolean)
+    private data class NotificationState(val liveText: String?, val text: String?)
 
     private val uiHandler = Handler(Looper.getMainLooper())
     private val notificationUpdateQueued = AtomicBoolean(false)
@@ -232,9 +232,14 @@ class CarPlayService : Service() {
 
     private fun notificationState(): NotificationState {
         val streaming = SessionController.isStreaming()
-        val text = if (streaming) null else SessionController.notificationSummary()
-        val promote = streaming || SessionController.connectionRequested || SessionController.sessionStarting.get()
-        return NotificationState(streaming, text, promote)
+        val connecting = !streaming && (SessionController.connectionRequested || SessionController.sessionStarting.get())
+        val liveText = when {
+            streaming -> getString(R.string.connection_status_connected)
+            connecting -> getString(R.string.connection_status_connecting)
+            else -> null
+        }
+        val text = if (streaming) null else SessionController.notificationSummary(connecting)
+        return NotificationState(liveText, text)
     }
 
     private fun buildNotification(state: NotificationState): Notification {
@@ -276,17 +281,10 @@ class CarPlayService : Service() {
                 Intent(this, NotificationActionReceiver::class.java).setAction(ACTION_DISCONNECT),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-        val connectedText = if (state.streaming) getString(R.string.connection_status_connected) else null
-        val liveText = if (state.promote) connectedText ?: getString(R.string.connection_status_connecting) else null
-        val title = when {
-            liveText != null && LiveUpdateNotification.canPost(manager) -> liveText
-            connectedText != null -> "CarPToCarL · $connectedText"
-            else -> "CarPToCarL · 车机连接"
-        }
         val notification = NotificationCompat
             .Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_flow_c)
-            .setContentTitle(title)
+            .setContentTitle(state.liveText ?: "CarPToCarL · 车机连接")
             .setContentText(state.text)
             .setStyle(state.text?.let { NotificationCompat.BigTextStyle().bigText(it) })
             .setContentIntent(contentIntent)
@@ -300,8 +298,8 @@ class CarPlayService : Service() {
             .build()
 
         // 空闲监听仍用普通通知；只为正在进行的连接会话申请 Live Updates。
-        return if (liveText != null) {
-            LiveUpdateNotification.requestPromotion(this, notification, liveText)
+        return if (state.liveText != null) {
+            LiveUpdateNotification.requestPromotion(this, notification, state.liveText)
         } else {
             notification
         }

@@ -1,7 +1,6 @@
 package io.github.shaonialife.carptocar.service
 
 import android.app.Notification
-import android.app.NotificationManager
 import android.content.Context
 
 /** Native Live Updates compatibility without raising the project's compileSdk. */
@@ -9,15 +8,6 @@ internal object LiveUpdateNotification {
     // Public Notification.EXTRA_REQUEST_PROMOTED_ONGOING contract. Older systems ignore it;
     // supported systems decide eligibility and respect the user's notification settings.
     private const val EXTRA_REQUEST_PROMOTED_ONGOING = "android.requestPromotedOngoing"
-
-    private val canPostPromotedNotifications by lazy {
-        runCatching {
-            NotificationManager::class.java.getMethod("canPostPromotedNotifications")
-        }.getOrNull()
-    }
-
-    fun canPost(manager: NotificationManager): Boolean =
-        runCatching { canPostPromotedNotifications?.invoke(manager) == true }.getOrDefault(false)
 
     // Public API on Android 16+. Probe the method itself to also support OEM backports.
     private val setShortCriticalText by lazy {
