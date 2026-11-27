@@ -1809,7 +1809,7 @@ object SessionController {
         if (connecting || isSessionRunning()) {
             connectingSubtitle()
         } else {
-            phaseHint ?: "空闲——等待车机靠近，或点此打开应用"
+            phaseHint ?: "等待车机靠近"
         }
 
     private val connectionTimeline = io.github.shaonialife.carptocar.util.ConnectionTimeline(

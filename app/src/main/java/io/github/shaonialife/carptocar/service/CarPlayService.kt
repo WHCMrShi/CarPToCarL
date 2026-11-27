@@ -41,7 +41,7 @@ class CarPlayService : Service() {
     private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
     private var publishedNotificationState: NotificationState? = null
 
-    private data class NotificationState(val liveText: String?, val text: String?)
+    private data class NotificationState(val title: String, val text: String?, val promote: Boolean)
 
     private val uiHandler = Handler(Looper.getMainLooper())
     private val notificationUpdateQueued = AtomicBoolean(false)
@@ -233,13 +233,13 @@ class CarPlayService : Service() {
     private fun notificationState(): NotificationState {
         val streaming = SessionController.isStreaming()
         val connecting = !streaming && (SessionController.connectionRequested || SessionController.sessionStarting.get())
-        val liveText = when {
-            streaming -> getString(R.string.connection_status_connected)
-            connecting -> getString(R.string.connection_status_connecting)
-            else -> null
+        val titleRes = when {
+            streaming -> R.string.connection_status_connected
+            connecting -> R.string.connection_status_connecting
+            else -> R.string.connection_status_idle
         }
         val text = if (streaming) null else SessionController.notificationSummary(connecting)
-        return NotificationState(liveText, text)
+        return NotificationState(getString(titleRes), text, promote = streaming || connecting)
     }
 
     private fun buildNotification(state: NotificationState): Notification {
@@ -284,7 +284,7 @@ class CarPlayService : Service() {
         val notification = NotificationCompat
             .Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_flow_c)
-            .setContentTitle(state.liveText ?: "CarPToCarL · 车机连接")
+            .setContentTitle(state.title)
             .setContentText(state.text)
             .setStyle(state.text?.let { NotificationCompat.BigTextStyle().bigText(it) })
             .setContentIntent(contentIntent)
@@ -298,8 +298,8 @@ class CarPlayService : Service() {
             .build()
 
         // 空闲监听仍用普通通知；只为正在进行的连接会话申请 Live Updates。
-        return if (state.liveText != null) {
-            LiveUpdateNotification.requestPromotion(this, notification, state.liveText)
+        return if (state.promote) {
+            LiveUpdateNotification.requestPromotion(this, notification, state.title)
         } else {
             notification
         }

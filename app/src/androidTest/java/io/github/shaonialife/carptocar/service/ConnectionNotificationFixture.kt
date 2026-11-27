@@ -17,10 +17,9 @@ internal class ConnectionNotificationFixture(private val instrumentation: Instru
                 SessionController.phaseHint = null
                 CarPlayService.start(targetContext)
             }
-            val initial = awaitNotification(manager, "空闲——等待车机靠近，或点此打开应用")
+            val initial = awaitNotification(manager, "等待车机靠近")
             check(!initial.requestsLiveUpdate())
-            val ordinaryTitle = "CarPToCarL · 车机连接"
-            check(initial.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == ordinaryTitle)
+            check(initial.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == "未连接")
             check(initial.notification.actions.map { it.title.toString() } == listOf("断开"))
 
             SessionController.phaseHint = "等待车机邀请"
