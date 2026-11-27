@@ -21,7 +21,7 @@ internal class ConnectionNotificationFixture(private val instrumentation: Instru
             check(!initial.requestsLiveUpdate())
             val ordinaryTitle = "CarPToCarL · 车机连接"
             check(initial.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == ordinaryTitle)
-            check(initial.notification.actions.map { it.title.toString() } == listOf("断开", "打开界面"))
+            check(initial.notification.actions.map { it.title.toString() } == listOf("断开"))
 
             SessionController.phaseHint = "等待车机邀请"
             val ordinary = awaitNotification(manager, "等待车机邀请")

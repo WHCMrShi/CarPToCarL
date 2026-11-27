@@ -291,7 +291,6 @@ class CarPlayService : Service() {
             .setStyle(state.text?.let { NotificationCompat.BigTextStyle().bigText(it) })
             .setContentIntent(contentIntent)
             .addAction(0, "断开", disconnectIntent)
-            .addAction(0, "打开界面", contentIntent)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(false)
